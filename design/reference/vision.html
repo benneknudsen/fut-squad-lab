@@ -1,0 +1,1651 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FUT Squad Lab — designreference</title>
+<style>
+/* ===========================================================================
+   FUT Squad Lab — reference board.
+   The token block below is a verbatim mirror of tokens.css (where, in the
+   extension, it lives on .fsl-root instead of :root so it cannot collide with
+   the host app's variables). Vision only: this page shows the surfaces, it is
+   not an implementation of them.
+   ======================================================================== */
+:root {
+  --fsl-surface-0: oklch(0.165 0.013 250);
+  --fsl-surface-1: oklch(0.208 0.015 250);
+  --fsl-surface-2: oklch(0.255 0.017 250);
+  --fsl-surface-inset: oklch(0.135 0.012 250);
+  --fsl-border: oklch(0.30 0.016 250);
+  --fsl-border-strong: oklch(0.48 0.018 250);
+  --fsl-border-inverse: oklch(0.965 0.006 250);
+  --fsl-fg: oklch(0.965 0.006 250);
+  --fsl-fg-muted: oklch(0.745 0.014 250);
+  --fsl-fg-dim: oklch(0.635 0.014 250);
+  --fsl-accent: oklch(0.815 0.135 197);
+  --fsl-accent-fg: oklch(0.18 0.02 240);
+  --fsl-accent-deep: oklch(0.62 0.11 197);
+  --fsl-accent-soft: color-mix(in oklch, var(--fsl-accent) 16%, transparent);
+  --fsl-accent-line: color-mix(in oklch, var(--fsl-accent) 42%, transparent);
+  --fsl-success: oklch(0.835 0.16 142);
+  --fsl-warning: oklch(0.83 0.145 82);
+  --fsl-danger: oklch(0.715 0.185 25);
+  --fsl-success-soft: color-mix(in oklch, var(--fsl-success) 16%, transparent);
+  --fsl-warning-soft: color-mix(in oklch, var(--fsl-warning) 16%, transparent);
+  --fsl-danger-soft: color-mix(in oklch, var(--fsl-danger) 16%, transparent);
+  --fsl-state-tradeable: var(--fsl-fg-muted);
+  --fsl-state-untradeable: var(--fsl-success);
+  --fsl-state-duplicate: var(--fsl-warning);
+  --fsl-state-concept: var(--fsl-accent);
+  --fsl-state-tradeable-bg: color-mix(in oklch, var(--fsl-fg-muted) 12%, transparent);
+  --fsl-state-untradeable-bg: var(--fsl-success-soft);
+  --fsl-state-duplicate-bg: var(--fsl-warning-soft);
+  --fsl-state-concept-bg: var(--fsl-accent-soft);
+
+  --fsl-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "Helvetica Neue", Arial, sans-serif;
+  --fsl-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  --fsl-font-display: var(--fsl-font-ui);
+
+  --fsl-fs-10: 10px; --fsl-fs-11: 11px; --fsl-fs-12: 12px; --fsl-fs-13: 13px;
+  --fsl-fs-15: 15px; --fsl-fs-20: 20px; --fsl-fs-28: 28px;
+  --fsl-lh-tight: 1.15; --fsl-lh-snug: 1.3; --fsl-lh-base: 1.45;
+  --fsl-track-tight: -0.01em; --fsl-track-wide: 0.06em; --fsl-track-caps: 0.1em;
+  --fsl-w-regular: 400; --fsl-w-medium: 500; --fsl-w-semibold: 600;
+
+  --fsl-sp-1: 2px; --fsl-sp-2: 4px; --fsl-sp-3: 6px; --fsl-sp-4: 8px;
+  --fsl-sp-5: 12px; --fsl-sp-6: 16px; --fsl-sp-7: 20px; --fsl-sp-8: 28px;
+  --fsl-r-1: 3px; --fsl-r-2: 5px; --fsl-r-3: 8px; --fsl-r-pill: 999px;
+
+  --fsl-panel-min: 320px; --fsl-panel-default: 400px; --fsl-panel-max: 420px;
+  --fsl-row-min-h: 46px; --fsl-ctl: 32px; --fsl-hit: 44px;
+  --fsl-popup-w: 360px; --fsl-options-w: 620px;
+
+  --fsl-dur-1: 90ms; --fsl-dur-2: 140ms; --fsl-dur-3: 220ms;
+  --fsl-dur-4: 340ms; --fsl-dur-solve: 1400ms;
+  --fsl-ease-out: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --fsl-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --fsl-ease-settle: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --fsl-shadow-panel: 0 1px 0 color-mix(in oklch, var(--fsl-fg) 7%, transparent) inset,
+                      0 12px 32px color-mix(in oklch, black 55%, transparent);
+  --fsl-shadow-popover: 0 8px 24px color-mix(in oklch, black 62%, transparent);
+  --fsl-z-panel: 5; --fsl-z-popover: 20;
+
+  --rb-panel-w: var(--fsl-panel-default);
+}
+
+/* ─── reference board chrome ──────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--fsl-surface-inset);
+  color: var(--fsl-fg);
+  font-family: var(--fsl-font-ui);
+  font-size: var(--fsl-fs-13);
+  line-height: var(--fsl-lh-base);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; cursor: pointer; background: none; border: 0; }
+p { text-wrap: pretty; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+.rb-top {
+  position: sticky; top: 0; z-index: 30;
+  background: var(--fsl-surface-0);
+  border-bottom: 1px solid var(--fsl-border);
+}
+.rb-top-inner {
+  max-width: 1180px; margin-inline: auto; padding: 12px 24px;
+  display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+}
+.rb-brand { display: flex; align-items: center; gap: 10px; color: var(--fsl-fg); }
+.rb-brand svg { width: 26px; height: 26px; color: var(--fsl-accent); flex: none; }
+.rb-brand-name {
+  font-size: var(--fsl-fs-15); font-weight: var(--fsl-w-semibold);
+  text-transform: uppercase; letter-spacing: var(--fsl-track-wide);
+}
+.rb-brand-sub { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); letter-spacing: var(--fsl-track-caps); }
+.rb-topnav { display: flex; align-items: center; gap: 18px; font-size: var(--fsl-fs-12); }
+.rb-topnav a { color: var(--fsl-fg-muted); }
+.rb-topnav a:hover { color: var(--fsl-fg); }
+.rb-lang { display: flex; gap: 2px; background: var(--fsl-surface-2); border-radius: var(--fsl-r-2); padding: 2px; }
+.rb-lang button {
+  padding: 4px 10px; border-radius: var(--fsl-r-1);
+  font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11); color: var(--fsl-fg-muted);
+}
+.rb-lang button[aria-pressed="true"] { background: var(--fsl-surface-0); color: var(--fsl-fg); box-shadow: 0 0 0 1px var(--fsl-border-strong); }
+
+.rb-controls {
+  position: sticky; top: 51px; z-index: 25;
+  background: var(--fsl-surface-1); border-bottom: 1px solid var(--fsl-border);
+}
+.rb-controls-inner {
+  max-width: 1180px; margin-inline: auto; padding: 10px 24px;
+  display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+  font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11);
+}
+.rb-group { display: flex; align-items: center; gap: 8px; }
+.rb-group > span { color: var(--fsl-fg-dim); text-transform: uppercase; letter-spacing: var(--fsl-track-caps); }
+.rb-seg { display: flex; gap: 2px; background: var(--fsl-surface-inset); border-radius: var(--fsl-r-2); padding: 2px; }
+.rb-seg button {
+  padding: 5px 10px; border-radius: var(--fsl-r-1); color: var(--fsl-fg-muted);
+  font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11); white-space: nowrap;
+  transition: background var(--fsl-dur-1) var(--fsl-ease-out), color var(--fsl-dur-1) var(--fsl-ease-out);
+}
+.rb-seg button:hover { color: var(--fsl-fg); }
+.rb-seg button[aria-pressed="true"] { background: var(--fsl-surface-2); color: var(--fsl-fg); box-shadow: inset 0 0 0 1px var(--fsl-border-strong); }
+.rb-seg button:focus-visible { outline: 2px solid var(--fsl-accent); outline-offset: 2px; }
+
+main { max-width: 1180px; margin-inline: auto; padding: 40px 24px 96px; }
+.rb-section { padding-block: 44px; }
+.rb-section + .rb-section { border-top: 1px solid var(--fsl-border); }
+.rb-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 24px; }
+.rb-h2 {
+  font-size: var(--fsl-fs-15); font-weight: var(--fsl-w-semibold);
+  text-transform: uppercase; letter-spacing: var(--fsl-track-wide);
+}
+.rb-caption { color: var(--fsl-fg-muted); font-size: var(--fsl-fs-12); max-width: 68ch; margin: 6px 0 0; }
+.rb-mono { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11); color: var(--fsl-fg-dim); letter-spacing: 0.02em; }
+
+.rb-stage {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: start;
+  padding: 24px; border: 1px solid var(--fsl-border); border-radius: var(--fsl-r-3);
+  background: var(--fsl-surface-0);
+}
+@media (max-width: 900px) { .rb-stage { grid-template-columns: 1fr; } }
+.rb-host { display: flex; flex-direction: column; gap: 12px; }
+.rb-host-bar { height: 34px; border-radius: var(--fsl-r-2); background: var(--fsl-surface-1); border: 1px solid var(--fsl-border); display: flex; align-items: center; padding: 0 10px; }
+.rb-host-bar i { display: block; height: 6px; width: 90px; border-radius: var(--fsl-r-pill); background: var(--fsl-border-strong); }
+.rb-host-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+.rb-host-tile { aspect-ratio: 3 / 4; border-radius: var(--fsl-r-2); background: var(--fsl-surface-1); border: 1px solid var(--fsl-border); position: relative; overflow: hidden; }
+.rb-host-tile::after {
+  content: ""; position: absolute; inset: auto 8px 8px 8px; height: 4px;
+  border-radius: var(--fsl-r-pill); background: var(--fsl-border-strong);
+}
+.rb-host-tile:nth-child(3n)::after { inset-inline-end: 40%; }
+.rb-host-note { grid-column: 1 / -1; }
+
+.rb-frame {
+  border: 1px solid var(--fsl-border); border-radius: var(--fsl-r-3);
+  background: var(--fsl-surface-0); overflow: hidden;
+}
+.rb-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+@media (max-width: 900px) { .rb-grid-2 { grid-template-columns: 1fr; } }
+
+/* ─── panel ───────────────────────────────────────────────────────────── */
+.fsl-root { font-family: var(--fsl-font-ui); font-size: var(--fsl-fs-13); line-height: var(--fsl-lh-base); color: var(--fsl-fg); }
+.fsl-num { font-family: var(--fsl-font-mono); font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1, "zero" 1; }
+
+.fsl-panel {
+  container-type: inline-size;
+  width: var(--rb-panel-w);
+  background: var(--fsl-surface-0);
+  border: 1px solid var(--fsl-border);
+  border-radius: var(--fsl-r-3);
+  box-shadow: var(--fsl-shadow-panel);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.fsl-head { background: var(--fsl-surface-1); border-bottom: 1px solid var(--fsl-border); padding: var(--fsl-sp-6); }
+.fsl-head-top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--fsl-sp-5); }
+.fsl-head-title {
+  font-size: var(--fsl-fs-15); font-weight: var(--fsl-w-semibold); line-height: var(--fsl-lh-tight);
+  text-transform: uppercase; letter-spacing: var(--fsl-track-wide);
+}
+.fsl-badge {
+  flex: none; font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); line-height: 1;
+  letter-spacing: var(--fsl-track-caps); color: var(--fsl-fg-dim);
+  border: 1px solid var(--fsl-border); border-radius: var(--fsl-r-1); padding: 3px 5px;
+  text-transform: uppercase; white-space: nowrap;
+}
+.fsl-head-sub {
+  margin-top: var(--fsl-sp-3); font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11);
+  line-height: var(--fsl-lh-snug); color: var(--fsl-fg-muted); text-transform: uppercase; letter-spacing: 0.02em;
+}
+.fsl-costbar {
+  background: var(--fsl-surface-inset); border-top: 1px solid var(--fsl-border);
+  padding: var(--fsl-sp-4) var(--fsl-sp-5);
+  display: flex; flex-direction: column; gap: var(--fsl-sp-4);
+}
+.fsl-costbar-main { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--fsl-sp-5); }
+.fsl-costbar-sub { display: flex; flex-wrap: wrap; gap: 3px var(--fsl-sp-6); }
+.fsl-costbar-sub .fsl-cell { display: flex; align-items: baseline; gap: 5px; }
+.fsl-costbar-sub dd { margin: 0; font-size: var(--fsl-fs-12); }
+.fsl-cell dt {
+  font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); line-height: 1;
+  letter-spacing: var(--fsl-track-caps); text-transform: uppercase; color: var(--fsl-fg-dim);
+  white-space: nowrap;
+}
+.fsl-cell dd { margin: 5px 0 0; font-family: var(--fsl-font-mono); font-variant-numeric: tabular-nums; font-size: var(--fsl-fs-15); font-weight: var(--fsl-w-medium); }
+.fsl-cell[data-headline="true"] dd { font-size: var(--fsl-fs-20); letter-spacing: var(--fsl-track-tight); }
+.fsl-cell dd[data-delta="down"] { color: var(--fsl-success); }
+.fsl-cell dd[data-delta="up"] { color: var(--fsl-warning); }
+.fsl-cell[data-warn="true"] dd { color: var(--fsl-warning); }
+
+.fsl-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--fsl-sp-5);
+  padding: var(--fsl-sp-4) var(--fsl-sp-5); border-bottom: 1px solid var(--fsl-border);
+  background: var(--fsl-surface-0);
+}
+.fsl-toolbar-count { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11); color: var(--fsl-fg-muted); letter-spacing: 0.02em; }
+.fsl-toolbar-count b { color: var(--fsl-fg); font-weight: var(--fsl-w-medium); }
+
+.fsl-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--fsl-sp-3);
+  height: var(--fsl-ctl); padding: 0 var(--fsl-sp-5); border-radius: var(--fsl-r-2);
+  font-size: var(--fsl-fs-12); font-weight: var(--fsl-w-medium); white-space: nowrap;
+  transition: background var(--fsl-dur-1) var(--fsl-ease-out), border-color var(--fsl-dur-1) var(--fsl-ease-out), color var(--fsl-dur-1) var(--fsl-ease-out);
+}
+.fsl-btn-primary { background: var(--fsl-accent); color: var(--fsl-accent-fg); font-weight: var(--fsl-w-semibold); }
+.fsl-btn-primary:hover { background: color-mix(in oklch, var(--fsl-accent) 88%, black); }
+.fsl-btn-primary:active { transform: translateY(1px); }
+.fsl-btn-primary[disabled] { opacity: .55; cursor: default; }
+.fsl-btn-ghost { border: 1px solid var(--fsl-border-strong); color: var(--fsl-fg-muted); }
+.fsl-btn-ghost:hover { border-color: var(--fsl-fg); color: var(--fsl-fg); }
+.fsl-btn:focus-visible { outline: 2px solid var(--fsl-accent); outline-offset: 2px; }
+.fsl-btn-wide { width: 100%; }
+
+/* slot rows */
+.fsl-list { list-style: none; margin: 0; padding: 0; }
+.fsl-row {
+  position: relative;
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) auto 32px;
+  gap: var(--fsl-sp-3); align-items: center;
+  min-height: var(--fsl-row-min-h); padding: var(--fsl-sp-4) var(--fsl-sp-5);
+  background: var(--fsl-surface-1); border-bottom: 1px solid var(--fsl-border);
+  transition: background var(--fsl-dur-1) var(--fsl-ease-out), box-shadow var(--fsl-dur-1) var(--fsl-ease-out);
+}
+.fsl-row:hover { background: var(--fsl-surface-2); }
+.fsl-row[data-open="true"] { background: var(--fsl-surface-2); border-bottom-color: transparent; }
+.fsl-row[data-locked="true"] { background: var(--fsl-surface-2); box-shadow: inset 0 0 0 1px var(--fsl-border-inverse); }
+.fsl-row[data-swapped="true"] { animation: fsl-swap var(--fsl-dur-4) var(--fsl-ease-settle); }
+.fsl-row:last-child { border-bottom: 0; }
+
+.fsl-ident { min-width: 0; }
+.fsl-pos { display: flex; flex-direction: column; gap: 2px; }
+.fsl-pos-code {
+  font-family: var(--fsl-font-mono); font-weight: var(--fsl-w-semibold); font-size: var(--fsl-fs-11);
+  letter-spacing: var(--fsl-track-caps);
+}
+.fsl-fit { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); letter-spacing: 0.04em; }
+.fsl-row[data-fit="oop"] .fsl-pos-code { color: var(--fsl-warning); }
+.fsl-row[data-fit="oop"] .fsl-fit { color: var(--fsl-warning); }
+
+.fsl-row-toggle {
+  display: block; width: 100%; text-align: left; padding: 0; border-radius: var(--fsl-r-2);
+}
+.fsl-row-toggle::after { content: ""; position: absolute; inset: 0; }
+.fsl-row-toggle:focus-visible { outline: none; }
+.fsl-row-toggle:focus-visible::after { outline: 2px solid var(--fsl-accent); outline-offset: -2px; border-radius: var(--fsl-r-2); }
+.fsl-ident-top { display: flex; align-items: center; justify-content: space-between; gap: var(--fsl-sp-4); }
+.fsl-ident-name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fsl-fs-13); font-weight: var(--fsl-w-medium); line-height: var(--fsl-lh-snug);
+}
+.fsl-row[data-locked="true"] .fsl-ident-name { font-weight: var(--fsl-w-semibold); }
+.fsl-chip { pointer-events: none; }
+.fsl-row .fsl-meta { margin-top: 3px; }
+
+.fsl-meta {
+  display: flex; flex-wrap: wrap; gap: 0 4px;
+  font-family: var(--fsl-font-mono); font-variant-numeric: tabular-nums;
+  font-size: var(--fsl-fs-10); line-height: var(--fsl-lh-snug); color: var(--fsl-fg-dim); letter-spacing: 0.02em;
+}
+.fsl-meta span { white-space: nowrap; }
+
+.fsl-chip {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  padding: 4px 6px; border-radius: var(--fsl-r-1);
+  font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); line-height: 1;
+  letter-spacing: var(--fsl-track-wide); text-transform: uppercase;
+}
+.fsl-chip svg { width: 11px; height: 11px; flex: none; }
+.fsl-chip[data-state="tradeable"] { color: var(--fsl-state-tradeable); background: var(--fsl-state-tradeable-bg); box-shadow: inset 0 0 0 1px var(--fsl-border-strong); }
+.fsl-chip[data-state="untradeable"] { color: var(--fsl-state-untradeable); background: var(--fsl-state-untradeable-bg); }
+.fsl-chip[data-state="duplicate"] { color: var(--fsl-state-duplicate); background: var(--fsl-state-duplicate-bg); }
+.fsl-chip[data-state="concept"] { color: var(--fsl-state-concept); background: var(--fsl-state-concept-bg); box-shadow: inset 0 0 0 1px var(--fsl-accent-line); }
+.fsl-chip[data-locked="true"] { color: var(--fsl-fg); background: color-mix(in oklch, var(--fsl-fg) 10%, transparent); }
+
+.fsl-cost {
+  font-family: var(--fsl-font-mono); font-variant-numeric: tabular-nums; font-size: var(--fsl-fs-13);
+  text-align: right; min-width: 48px; padding-top: 1px;
+}
+.fsl-cost[data-zero="true"] { color: var(--fsl-fg-dim); }
+.fsl-cost span { display: block; font-family: var(--fsl-font-ui); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); letter-spacing: 0.04em; }
+
+.fsl-lock {
+  position: relative; z-index: 1;
+  width: 32px; height: 32px; border-radius: var(--fsl-r-1);
+  display: grid; place-items: center; color: var(--fsl-fg-dim);
+  transition: background var(--fsl-dur-1) var(--fsl-ease-out), color var(--fsl-dur-1) var(--fsl-ease-out);
+}
+.fsl-lock::after { content: ""; position: absolute; inset: -6px; }
+.fsl-lock:hover { background: var(--fsl-surface-2); color: var(--fsl-fg); }
+.fsl-lock:focus-visible { outline: 2px solid var(--fsl-accent); outline-offset: 2px; }
+.fsl-lock[aria-pressed="true"] { color: var(--fsl-fg); }
+.fsl-lock svg { width: 14px; height: 14px; }
+
+/* alternatives */
+.fsl-alts {
+  background: var(--fsl-surface-inset); border-bottom: 1px solid var(--fsl-border);
+  padding: var(--fsl-sp-4) var(--fsl-sp-5) var(--fsl-sp-5);
+  animation: fsl-open var(--fsl-dur-2) var(--fsl-ease-out);
+}
+.fsl-alts-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--fsl-sp-4); margin-bottom: 2px; }
+.fsl-alts-title {
+  font-family: var(--fsl-font-mono); font-weight: var(--fsl-w-semibold); font-size: var(--fsl-fs-10);
+  letter-spacing: var(--fsl-track-caps); text-transform: uppercase; color: var(--fsl-fg-dim);
+}
+.fsl-alts-sub { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); }
+.fsl-alt {
+  display: grid; grid-template-columns: 14px minmax(0, 1fr) 54px auto; gap: var(--fsl-sp-3);
+  align-items: center; min-height: 40px; padding: 4px 0; border-top: 1px solid var(--fsl-border);
+  text-align: left; width: 100%; border-radius: var(--fsl-r-1);
+  transition: background var(--fsl-dur-1) var(--fsl-ease-out);
+}
+.fsl-alt:first-of-type { border-top-color: var(--fsl-border-strong); }
+button.fsl-alt:hover { background: var(--fsl-surface-2); }
+.fsl-alt:focus-visible { outline: 2px solid var(--fsl-accent); outline-offset: -2px; }
+.fsl-alt-rank { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11); color: var(--fsl-fg-dim); }
+.fsl-alt-name { display: block; font-size: var(--fsl-fs-12); color: var(--fsl-fg); }
+.fsl-alt-name em { font-family: var(--fsl-font-mono); font-style: normal; font-variant-numeric: tabular-nums; color: var(--fsl-fg-muted); }
+.fsl-alt-reason { display: block; margin-top: 1px; font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg-muted); letter-spacing: 0.02em; }
+.fsl-alt-reason i { font-style: normal; }
+.fsl-alt-reason i[data-dir="down"] { color: var(--fsl-success); }
+.fsl-alt-reason i[data-dir="up"] { color: var(--fsl-warning); }
+.fsl-alt-cost { font-family: var(--fsl-font-mono); font-variant-numeric: tabular-nums; font-size: var(--fsl-fs-12); text-align: right; }
+.fsl-alt-swap {
+  height: 28px; padding: 0 var(--fsl-sp-4); border: 1px solid var(--fsl-border-strong);
+  border-radius: var(--fsl-r-1); color: var(--fsl-fg-muted); font-size: var(--fsl-fs-11); white-space: nowrap;
+  transition: border-color var(--fsl-dur-1) var(--fsl-ease-out), color var(--fsl-dur-1) var(--fsl-ease-out);
+}
+.fsl-alt:hover .fsl-alt-swap { border-color: var(--fsl-fg); color: var(--fsl-fg); }
+.fsl-alt-current { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); letter-spacing: var(--fsl-track-wide); text-transform: uppercase; color: var(--fsl-fg-dim); white-space: nowrap; }
+.fsl-alts-more { margin-top: var(--fsl-sp-3); font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11); color: var(--fsl-fg-muted); }
+.fsl-alts-more:hover { color: var(--fsl-fg); }
+
+/* buy section */
+.fsl-buy { background: var(--fsl-surface-inset); border-top: 1px solid var(--fsl-border-strong); padding: var(--fsl-sp-5); }
+.fsl-buy-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--fsl-sp-4); }
+.fsl-buy-title {
+  font-family: var(--fsl-font-mono); font-weight: var(--fsl-w-semibold); font-size: var(--fsl-fs-11);
+  letter-spacing: var(--fsl-track-caps); text-transform: uppercase; color: var(--fsl-warning);
+}
+.fsl-buy-count { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11); color: var(--fsl-fg-muted); }
+.fsl-buy-note { margin-top: 3px; font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); }
+.fsl-buy-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--fsl-sp-3); align-items: center;
+  min-height: 44px; padding: 6px 0; border-top: 1px solid var(--fsl-border);
+}
+.fsl-buy-row:first-of-type { margin-top: var(--fsl-sp-4); border-top-color: var(--fsl-border-strong); }
+.fsl-buy-name { font-size: var(--fsl-fs-12); }
+.fsl-buy-sub { display: block; margin-top: 1px; font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); }
+.fsl-buy-price { font-family: var(--fsl-font-mono); font-variant-numeric: tabular-nums; font-size: var(--fsl-fs-12); text-align: right; }
+.fsl-buy-price span { display: block; font-family: var(--fsl-font-ui); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); }
+.fsl-buy-link { font-size: var(--fsl-fs-11); color: var(--fsl-fg-muted); text-decoration: underline; text-underline-offset: 2px; }
+.fsl-buy-link:hover { color: var(--fsl-fg); }
+.fsl-buy-total {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--fsl-sp-4);
+  margin-top: var(--fsl-sp-4); padding-top: var(--fsl-sp-4); border-top: 1px solid var(--fsl-border-strong);
+  font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-15); font-variant-numeric: tabular-nums;
+}
+.fsl-buy-total span { font-family: var(--fsl-font-ui); font-size: var(--fsl-fs-11); color: var(--fsl-fg-muted); letter-spacing: 0; }
+.fsl-buy-honest { margin-top: var(--fsl-sp-4); font-size: var(--fsl-fs-11); color: var(--fsl-fg-muted); }
+
+/* empty / idle / solving / no-solution views */
+.fsl-view { padding: var(--fsl-sp-6); display: flex; flex-direction: column; gap: var(--fsl-sp-5); }
+.fsl-view-title { display: flex; align-items: center; gap: var(--fsl-sp-3); font-size: var(--fsl-fs-15); font-weight: var(--fsl-w-semibold); text-transform: uppercase; letter-spacing: var(--fsl-track-wide); }
+.fsl-view-title svg { width: 16px; height: 16px; flex: none; }
+.fsl-view[data-tone="warning"] .fsl-view-title { color: var(--fsl-warning); }
+.fsl-view-body { font-size: var(--fsl-fs-12); color: var(--fsl-fg-muted); max-width: 46ch; }
+.fsl-readout {
+  background: var(--fsl-surface-inset); border: 1px solid var(--fsl-border); border-radius: var(--fsl-r-2);
+  padding: var(--fsl-sp-5); display: flex; flex-direction: column; gap: var(--fsl-sp-3);
+}
+.fsl-readout-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--fsl-sp-5); font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11); }
+.fsl-readout-row b { font-variant-numeric: tabular-nums; font-weight: var(--fsl-w-medium); color: var(--fsl-fg); }
+.fsl-readout-row span { color: var(--fsl-fg-dim); letter-spacing: var(--fsl-track-caps); text-transform: uppercase; font-size: var(--fsl-fs-10); }
+.fsl-footnote { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); letter-spacing: 0.02em; }
+
+.fsl-rail { display: flex; flex-direction: column; gap: var(--fsl-sp-4); }
+.fsl-step { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: var(--fsl-sp-4); align-items: center; font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11); }
+.fsl-step-mark { width: 12px; height: 12px; border-radius: var(--fsl-r-1); background: var(--fsl-surface-2); box-shadow: inset 0 0 0 1px var(--fsl-border-strong); }
+.fsl-step[data-done="true"] .fsl-step-mark { background: var(--fsl-success); box-shadow: none; }
+.fsl-step[data-done="true"] { color: var(--fsl-fg-muted); }
+.fsl-step[data-active="true"] { color: var(--fsl-fg); }
+.fsl-step[data-active="true"] .fsl-step-mark { background: var(--fsl-accent); box-shadow: none; animation: fsl-pulse var(--fsl-dur-solve) var(--fsl-ease-in-out) infinite; }
+.fsl-step-track { height: 3px; margin-top: 6px; border-radius: var(--fsl-r-pill); background: var(--fsl-surface-2); overflow: hidden; }
+.fsl-step-track i { display: block; height: 100%; background: var(--fsl-accent); transition: width var(--fsl-dur-solve) var(--fsl-ease-in-out); }
+.fsl-skeleton { background: var(--fsl-surface-1); border-bottom: 1px solid var(--fsl-border); height: 46px; display: grid; grid-template-columns: 44px minmax(0, 1fr) 48px; gap: var(--fsl-sp-3); align-items: center; padding: 0 var(--fsl-sp-5); opacity: .34; }
+.fsl-skeleton i { display: block; height: 6px; border-radius: var(--fsl-r-pill); background: var(--fsl-border-strong); }
+
+.fsl-missing { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fsl-missing li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--fsl-sp-4); align-items: baseline;
+  padding: 9px 0; border-top: 1px solid var(--fsl-border); font-size: var(--fsl-fs-12);
+}
+.fsl-missing li:first-child { border-top: 0; }
+.fsl-missing b { font-family: var(--fsl-font-mono); font-variant-numeric: tabular-nums; font-weight: var(--fsl-w-semibold); color: var(--fsl-warning); }
+.fsl-fixes { display: flex; flex-direction: column; gap: var(--fsl-sp-3); }
+.fsl-fix {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--fsl-sp-4);
+  min-height: 44px; padding: 0 var(--fsl-sp-5); border: 1px solid var(--fsl-border-strong); border-radius: var(--fsl-r-2);
+  font-size: var(--fsl-fs-12); color: var(--fsl-fg-muted); text-align: left; width: 100%;
+  transition: border-color var(--fsl-dur-1) var(--fsl-ease-out), color var(--fsl-dur-1) var(--fsl-ease-out);
+}
+.fsl-fix:hover { border-color: var(--fsl-fg); color: var(--fsl-fg); }
+.fsl-fix:focus-visible { outline: 2px solid var(--fsl-accent); outline-offset: 2px; }
+.fsl-fix-cost { font-family: var(--fsl-font-mono); font-variant-numeric: tabular-nums; color: var(--fsl-fg); }
+
+/* popup */
+.fsl-popup { width: var(--fsl-popup-w); background: var(--fsl-surface-0); padding: var(--fsl-sp-5); font-size: var(--fsl-fs-12); }
+.fsl-popup-head { display: flex; align-items: center; justify-content: space-between; gap: var(--fsl-sp-5); padding-bottom: var(--fsl-sp-4); border-bottom: 1px solid var(--fsl-border); }
+.fsl-popup-brand { display: flex; align-items: center; gap: 8px; font-weight: var(--fsl-w-semibold); font-size: var(--fsl-fs-12); text-transform: uppercase; letter-spacing: var(--fsl-track-wide); }
+.fsl-popup-brand svg { width: 16px; height: 16px; color: var(--fsl-accent); }
+.fsl-status {
+  display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border-radius: var(--fsl-r-1);
+  font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); line-height: 1; letter-spacing: var(--fsl-track-wide); text-transform: uppercase;
+}
+.fsl-status svg { width: 10px; height: 10px; }
+.fsl-status[data-status="solved"] { color: var(--fsl-success); background: var(--fsl-success-soft); }
+.fsl-status[data-status="solving"] { color: var(--fsl-accent); background: var(--fsl-accent-soft); }
+.fsl-status[data-status="idle"] { color: var(--fsl-fg-muted); background: var(--fsl-surface-2); }
+.fsl-popup-sub { margin-top: var(--fsl-sp-4); display: flex; align-items: baseline; justify-content: space-between; gap: var(--fsl-sp-4); }
+.fsl-popup-name { font-size: var(--fsl-fs-12); font-weight: var(--fsl-w-medium); }
+.fsl-popup-ago { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); }
+.fsl-popup-costs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: var(--fsl-sp-4); background: var(--fsl-surface-inset); border: 1px solid var(--fsl-border); border-radius: var(--fsl-r-2); padding: var(--fsl-sp-4); }
+.fsl-popup-list { list-style: none; margin: var(--fsl-sp-4) 0 0; padding: 0; }
+.fsl-popup-list li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: var(--fsl-sp-4); align-items: center; height: 26px; font-size: var(--fsl-fs-11); border-top: 1px solid var(--fsl-border); }
+.fsl-popup-list li:first-child { border-top: 0; }
+.fsl-popup-pos { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); letter-spacing: var(--fsl-track-caps); }
+.fsl-popup-playername { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fsl-popup-list .fsl-num { font-size: var(--fsl-fs-11); text-align: right; }
+.fsl-popup-more { color: var(--fsl-fg-dim); font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); }
+.fsl-popup-foot { margin-top: var(--fsl-sp-5); display: flex; flex-direction: column; gap: var(--fsl-sp-3); }
+.fsl-popup-link { font-size: var(--fsl-fs-11); color: var(--fsl-fg-muted); text-align: center; }
+.fsl-popup-link:hover { color: var(--fsl-fg); }
+
+/* popup width override so it fits the reference column */
+.fsl-popup { width: 100%; max-width: var(--fsl-popup-w); }
+
+/* ─── options ─────────────────────────────────────────────────────────── */
+.fsl-options { width: 100%; max-width: var(--fsl-options-w); padding: var(--fsl-sp-8) var(--fsl-sp-7); }
+.fsl-options-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--fsl-sp-5); flex-wrap: wrap; }
+.fsl-options-title { font-size: var(--fsl-fs-28); font-weight: var(--fsl-w-semibold); letter-spacing: var(--fsl-track-tight); text-transform: none; }
+.fsl-options-sub { font-size: var(--fsl-fs-12); color: var(--fsl-fg-muted); }
+.fsl-group { border-top: 1px solid var(--fsl-border); padding-block: var(--fsl-sp-8); }
+.fsl-group-title { font-size: var(--fsl-fs-15); font-weight: var(--fsl-w-semibold); }
+.fsl-group-body { margin-top: 3px; font-size: var(--fsl-fs-12); color: var(--fsl-fg-muted); max-width: 62ch; }
+.fsl-settings { margin-top: var(--fsl-sp-6); display: flex; flex-direction: column; }
+.fsl-setting { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--fsl-sp-5); align-items: center; min-height: var(--fsl-hit); }
+.fsl-setting-label { font-size: var(--fsl-fs-12); color: var(--fsl-fg); }
+.fsl-setting-value { font-family: var(--fsl-font-mono); font-variant-numeric: tabular-nums; font-size: var(--fsl-fs-12); color: var(--fsl-fg); text-align: right; min-width: 48px; }
+.fsl-setting-wide { display: block; }
+.fsl-setting-wide .fsl-setting-label { display: flex; justify-content: space-between; gap: var(--fsl-sp-5); }
+.fsl-range { width: 100%; margin: var(--fsl-sp-4) 0 0; -webkit-appearance: none; appearance: none; background: none; height: 16px; }
+.fsl-range:focus-visible { outline: 2px solid var(--fsl-accent); outline-offset: 4px; border-radius: var(--fsl-r-1); }
+.fsl-range::-webkit-slider-runnable-track { height: 4px; border-radius: var(--fsl-r-pill); background: var(--fsl-surface-2); }
+.fsl-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 16px; height: 16px; margin-top: -6px;
+  border-radius: var(--fsl-r-pill); background: var(--fsl-fg); border: 2px solid var(--fsl-surface-0);
+}
+.fsl-range::-moz-range-track { height: 4px; border-radius: var(--fsl-r-pill); background: var(--fsl-surface-2); }
+.fsl-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: var(--fsl-r-pill); background: var(--fsl-fg); border: 2px solid var(--fsl-surface-0); }
+.fsl-switch {
+  width: 44px; height: 24px; border-radius: var(--fsl-r-pill); background: var(--fsl-surface-2);
+  box-shadow: inset 0 0 0 1px var(--fsl-border-strong); position: relative; flex: none;
+  transition: background var(--fsl-dur-2) var(--fsl-ease-in-out), box-shadow var(--fsl-dur-2) var(--fsl-ease-in-out);
+}
+.fsl-switch::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: var(--fsl-r-pill);
+  background: var(--fsl-fg); transition: transform var(--fsl-dur-2) var(--fsl-ease-in-out);
+}
+.fsl-switch[aria-checked="true"] { background: var(--fsl-accent-deep); box-shadow: none; }
+.fsl-switch[aria-checked="true"]::after { transform: translateX(20px); }
+.fsl-switch:focus-visible { outline: 2px solid var(--fsl-accent); outline-offset: 3px; }
+.fsl-seg-ctl { display: flex; gap: 2px; background: var(--fsl-surface-inset); border-radius: var(--fsl-r-2); padding: 2px; }
+.fsl-seg-ctl button {
+  height: 28px; padding: 0 10px; border-radius: var(--fsl-r-1); font-size: var(--fsl-fs-11);
+  color: var(--fsl-fg-muted); font-family: var(--fsl-font-mono); white-space: nowrap;
+  transition: background var(--fsl-dur-1) var(--fsl-ease-out), color var(--fsl-dur-1) var(--fsl-ease-out);
+}
+.fsl-seg-ctl button:hover { color: var(--fsl-fg); }
+.fsl-seg-ctl button[aria-pressed="true"] { background: var(--fsl-surface-2); color: var(--fsl-fg); box-shadow: inset 0 0 0 1px var(--fsl-border-strong); }
+.fsl-seg-ctl button:focus-visible { outline: 2px solid var(--fsl-accent); outline-offset: 2px; }
+.fsl-hint { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); letter-spacing: 0.02em; }
+.fsl-danger-row { margin-top: var(--fsl-sp-6); }
+.fsl-danger-btn {
+  height: var(--fsl-ctl); padding: 0 var(--fsl-sp-5); border-radius: var(--fsl-r-2);
+  color: var(--fsl-danger); border: 1px solid color-mix(in oklch, var(--fsl-danger) 45%, transparent); font-size: var(--fsl-fs-12);
+}
+.fsl-danger-btn:hover { background: var(--fsl-danger-soft); }
+.fsl-danger-btn:focus-visible { outline: 2px solid var(--fsl-accent); outline-offset: 2px; }
+
+/* ─── icon + spec sections ────────────────────────────────────────────── */
+.rb-icons { display: flex; align-items: flex-end; gap: 32px; flex-wrap: wrap; }
+.rb-icon-cell { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.rb-icon-box { display: grid; place-items: center; width: 128px; height: 128px; border: 1px solid var(--fsl-border); border-radius: var(--fsl-r-3); background: var(--fsl-surface-0); }
+.rb-icon-box[data-checker="true"] {
+  background-image: linear-gradient(45deg, var(--fsl-surface-2) 25%, transparent 25%, transparent 75%, var(--fsl-surface-2) 75%),
+                    linear-gradient(45deg, var(--fsl-surface-2) 25%, transparent 25%, transparent 75%, var(--fsl-surface-2) 75%);
+  background-size: 16px 16px; background-position: 0 0, 8px 8px;
+}
+.rb-icon-box svg { color: var(--fsl-accent); }
+.rb-icon-meta { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); letter-spacing: var(--fsl-track-caps); }
+.rb-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.rb-swatch { border: 1px solid var(--fsl-border); border-radius: var(--fsl-r-2); overflow: hidden; background: var(--fsl-surface-0); }
+.rb-swatch-chip { height: 46px; }
+.rb-swatch-meta { padding: 8px 10px; border-top: 1px solid var(--fsl-border); }
+.rb-swatch-name { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg); letter-spacing: 0.02em; }
+.rb-swatch-use { margin-top: 2px; font-size: var(--fsl-fs-10); color: var(--fsl-fg-dim); line-height: 1.35; }
+.rb-table { width: 100%; border-collapse: collapse; font-size: var(--fsl-fs-12); }
+.rb-table th, .rb-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--fsl-border); vertical-align: top; }
+.rb-table th { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); letter-spacing: var(--fsl-track-caps); text-transform: uppercase; color: var(--fsl-fg-dim); font-weight: var(--fsl-w-medium); }
+.rb-table td code { font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-11); color: var(--fsl-accent); }
+.rb-kbd {
+  display: inline-block; padding: 2px 6px; border: 1px solid var(--fsl-border-strong); border-radius: var(--fsl-r-1);
+  font-family: var(--fsl-font-mono); font-size: var(--fsl-fs-10); color: var(--fsl-fg);
+}
+.rb-foot { max-width: 1180px; margin-inline: auto; padding: 28px 24px 60px; color: var(--fsl-fg-dim); font-size: var(--fsl-fs-11); font-family: var(--fsl-font-mono); }
+
+@keyframes fsl-open { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes fsl-swap { 0% { background: color-mix(in oklch, var(--fsl-surface-2) 55%, var(--fsl-accent) 45%); } 100% { background: var(--fsl-surface-1); } }
+@keyframes fsl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* narrow container behaviours for the injected panel itself */
+@container (max-width: 348px) {
+  .fsl-row { grid-template-columns: 38px minmax(0, 1fr) auto 32px; gap: 5px; padding-inline: var(--fsl-sp-4); }
+  .fsl-cost { min-width: 42px; }
+  /* at 320 px the word cannot ride alongside the name without truncating it: the
+     glyph, the colour and the tooltip/accessible name carry the state instead */
+  .fsl-chip > span { display: none; }
+  .fsl-chip { padding: 5px; }
+  .fsl-alts, .fsl-buy { padding-inline: var(--fsl-sp-4); }
+  .fsl-alt { grid-template-columns: 14px minmax(0, 1fr) auto; }
+  .fsl-alt-cost { grid-column: 3; }
+  .fsl-alt-swap { grid-column: 2 / -1; justify-self: start; margin-top: 4px; }
+  .fsl-alt { row-gap: 2px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+</style>
+</head>
+<body>
+
+<header class="rb-top">
+  <div class="rb-top-inner">
+    <div class="rb-brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true" data-mark="mark 26 px"><path d="M 8.2 3.6 H 20 L 28.4 12 V 23.8 A 4.6 4.6 0 0 1 23.8 28.4 H 8.2 A 4.6 4.6 0 0 1 3.6 23.8 V 8.2 A 4.6 4.6 0 0 1 8.2 3.6 Z" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round"/><path d="M 13.6 11.2 a 2.4 2.4 0 1 0 4.8 0 a 2.4 2.4 0 1 0 -4.8 0 Z M 8.4 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 14 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 19.6 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 10.4 20.05 L 21.6 20.05 L 21.6 21.55 L 10.4 21.55 Z M 16.648 11.578 L 11.048 21.178 L 9.752 20.422 L 15.352 10.822 Z M 16.648 10.822 L 22.248 20.422 L 20.952 21.178 L 15.352 11.578 Z" fill="currentColor"/></svg>
+      <div>
+        <div class="rb-brand-name">FUT Squad Lab</div>
+        <div class="rb-brand-sub" data-i18n="reference.hostNote"></div>
+      </div>
+    </div>
+    <nav class="rb-topnav">
+      <a href="README.md">README.md</a>
+      <a href="tokens.css">tokens.css</a>
+      <a href="components.md">components.md</a>
+      <a href="copy.da.json">copy.da.json</a>
+      <div class="rb-lang" role="group" aria-label="Language">
+        <button type="button" data-lang="da" aria-pressed="true">DA</button>
+        <button type="button" data-lang="en" aria-pressed="false">EN</button>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<div class="rb-controls">
+  <div class="rb-controls-inner">
+    <div class="rb-group">
+      <span data-i18n="reference.state"></span>
+      <div class="rb-seg" id="stateSeg" role="group"></div>
+    </div>
+    <div class="rb-group">
+      <span data-i18n="reference.width"></span>
+      <div class="rb-seg" id="widthSeg" role="group"></div>
+    </div>
+    <div class="rb-group">
+      <span class="rb-mono" id="railNote"></span>
+    </div>
+  </div>
+</div>
+
+<main>
+
+  <!-- ── 1. the injected panel ─────────────────────────────────────────── -->
+  <section class="rb-section" data-od-id="panel-stage">
+    <div class="rb-section-head">
+      <div>
+        <h2 class="rb-h2">01 · Solution panel — injected</h2>
+        <p class="rb-caption">The primary surface, at 320 / 400 / 420 px inside a simulated host column. The panel carries its own tokens and never reads the host's CSS. Every number below is sample data from a fixture club.</p>
+      </div>
+      <span class="rb-mono">11 slots · 4-3-3</span>
+    </div>
+    <div class="rb-stage">
+      <div class="rb-host" aria-hidden="true">
+        <div class="rb-host-bar"><i></i></div>
+        <div class="rb-host-row">
+          <div class="rb-host-tile"></div><div class="rb-host-tile"></div><div class="rb-host-tile"></div>
+          <div class="rb-host-tile"></div><div class="rb-host-tile"></div><div class="rb-host-tile"></div>
+          <div class="rb-host-tile"></div><div class="rb-host-tile"></div>
+        </div>
+      </div>
+      <div id="panelMount"></div>
+    </div>
+    <p class="rb-mono rb-host-note" style="margin-top:14px">↳ <span data-i18n="reference.hostNote"></span></p>
+  </section>
+
+  <!-- ── 2. popup ──────────────────────────────────────────────────────── -->
+  <section class="rb-section" data-od-id="popup">
+    <div class="rb-section-head">
+      <div>
+        <h2 class="rb-h2">02 · Toolbar popup — 360 px</h2>
+        <p class="rb-caption">At-a-glance surface: status, the last solution's cost, five slots and the two shortcuts. Fixed height, no scrolling — the list is capped at five rows and reports the remainder.</p>
+      </div>
+    </div>
+    <div class="fsl-root rb-frame" style="width:360px;max-width:100%">
+      <div class="fsl-popup">
+        <div class="fsl-popup-head">
+          <div class="fsl-popup-brand">
+            <svg viewBox="0 0 32 32" aria-hidden="true" data-mark="mark 16 px cut"><path d="M 7.6 1.6 H 21.6 L 30.4 10.4 V 24.4 A 6 6 0 0 1 24.4 30.4 H 7.6 A 6 6 0 0 1 1.6 24.4 V 7.6 A 6 6 0 0 1 7.6 1.6 Z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/><path d="M 12.7 12.4 a 3.3 3.3 0 1 0 6.6 0 a 3.3 3.3 0 1 0 -6.6 0 Z M 6.4 21.8 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 Z M 19.6 21.8 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 Z M 16.982 13.09 L 10.382 22.49 L 8.418 21.11 L 15.018 11.71 Z M 16.982 11.71 L 23.582 21.11 L 21.618 22.49 L 15.018 13.09 Z M 9.4 20.6 L 22.6 20.6 L 22.6 23 L 9.4 23 Z" fill="currentColor"/></svg>
+            <span data-i18n="popup.title"></span>
+          </div>
+          <span class="fsl-status" data-status="solved">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" d="M3 8.5l3.2 3.2L13 5"/></svg>
+            <span data-i18n="popup.statusSolved"></span>
+          </span>
+        </div>
+        <div class="fsl-popup-sub">
+          <span class="fsl-popup-name">3 Leagues &amp; 2 Nations</span>
+          <span class="fsl-popup-ago" data-i18n="popup.solvedAgo" data-i18n-vars='{"minutes":"2"}'></span>
+        </div>
+        <p class="fsl-popup-ago" style="margin:4px 0 0" data-i18n="popup.clubRead" data-i18n-vars='{"cards":"1,842"}'></p>
+        <div class="fsl-popup-costs">
+          <div class="fsl-cell"><dt data-i18n="popup.cost"></dt><dd class="fsl-num" data-od-id="popup-cost">16,140</dd></div>
+          <div class="fsl-cell"><dt data-i18n="popup.buy"></dt><dd class="fsl-num" data-warn="true">3</dd></div>
+          <div class="fsl-cell"><dt data-i18n="popup.locked"></dt><dd class="fsl-num">2</dd></div>
+        </div>
+        <ul class="fsl-popup-list" id="popupList"></ul>
+        <div class="fsl-popup-foot">
+          <button class="fsl-btn fsl-btn-primary fsl-btn-wide" type="button" data-i18n="popup.openPanel"></button>
+          <a class="fsl-popup-link" href="README.md" data-i18n="popup.settings"></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 3. options ────────────────────────────────────────────────────── -->
+  <section class="rb-section" data-od-id="options">
+    <div class="rb-section-head">
+      <div>
+        <h2 class="rb-h2">03 · Options page</h2>
+        <p class="rb-caption">A preferences screen for a technical user: every control shows its real value in tabular figures. Sliders are live here so the ranges can be judged by feel.</p>
+      </div>
+    </div>
+    <div class="fsl-root rb-frame">
+      <div class="fsl-options">
+        <div class="fsl-options-head">
+          <h3 class="fsl-options-title" data-i18n="options.title"></h3>
+          <span class="fsl-options-sub" data-i18n="options.subtitle"></span>
+        </div>
+
+        <div class="fsl-group">
+          <h4 class="fsl-group-title" data-i18n="options.costModel.title"></h4>
+          <p class="fsl-group-body" data-i18n="options.costModel.body"></p>
+          <div class="fsl-settings">
+            <div class="fsl-setting fsl-setting-wide">
+              <label class="fsl-setting-label" for="w1"><span data-i18n="options.costModel.untradeableDuplicate"></span><output class="fsl-setting-value" data-out="w1">0.20</output></label>
+              <input class="fsl-range" id="w1" type="range" min="0" max="1" step="0.05" value="0.20" />
+            </div>
+            <div class="fsl-setting fsl-setting-wide">
+              <label class="fsl-setting-label" for="w2"><span data-i18n="options.costModel.untradeable"></span><output class="fsl-setting-value" data-out="w2">0.40</output></label>
+              <input class="fsl-range" id="w2" type="range" min="0" max="1" step="0.05" value="0.40" />
+            </div>
+            <div class="fsl-setting fsl-setting-wide">
+              <label class="fsl-setting-label" for="w3"><span data-i18n="options.costModel.tradeable"></span><output class="fsl-setting-value" data-out="w3">1.00</output></label>
+              <input class="fsl-range" id="w3" type="range" min="0" max="1" step="0.05" value="1.00" />
+            </div>
+            <div class="fsl-setting fsl-setting-wide">
+              <label class="fsl-setting-label" for="w4"><span data-i18n="options.costModel.concept"></span><output class="fsl-setting-value" data-out="w4">1.00</output></label>
+              <input class="fsl-range" id="w4" type="range" min="0" max="1" step="0.05" value="1.00" />
+            </div>
+          </div>
+        </div>
+
+        <div class="fsl-group">
+          <h4 class="fsl-group-title" data-i18n="options.concepts.title"></h4>
+          <p class="fsl-group-body" data-i18n="options.concepts.body"></p>
+          <div class="fsl-settings">
+            <div class="fsl-setting">
+              <span class="fsl-setting-label" id="conceptsLabel" data-i18n="options.concepts.allow"></span>
+              <button class="fsl-switch" type="button" role="switch" aria-checked="true" aria-labelledby="conceptsLabel"></button>
+            </div>
+            <div class="fsl-setting fsl-setting-wide">
+              <label class="fsl-setting-label" for="maxBuy"><span data-i18n="options.concepts.max"></span><output class="fsl-setting-value" data-out="maxBuy">3</output></label>
+              <input class="fsl-range" id="maxBuy" type="range" min="0" max="11" step="1" value="3" />
+            </div>
+          </div>
+        </div>
+
+        <div class="fsl-group">
+          <h4 class="fsl-group-title" data-i18n="options.effort.title"></h4>
+          <p class="fsl-group-body" data-i18n="options.effort.body"></p>
+          <div class="fsl-settings">
+            <div class="fsl-setting">
+              <span class="fsl-setting-label" data-i18n="options.effort.title"></span>
+              <div class="fsl-seg-ctl" id="effortSeg" role="group"></div>
+            </div>
+            <p class="fsl-hint" data-i18n="options.effort.hint" data-i18n-vars='{"value":"3","lineups":"2 400"}'></p>
+          </div>
+        </div>
+
+        <div class="fsl-group">
+          <h4 class="fsl-group-title" data-i18n="options.prices.title"></h4>
+          <p class="fsl-group-body" data-i18n="options.prices.body"></p>
+          <div class="fsl-settings">
+            <div class="fsl-setting">
+              <span class="fsl-setting-label" data-i18n="options.prices.title"></span>
+              <div class="fsl-seg-ctl" id="priceSeg" role="group"></div>
+            </div>
+            <p class="fsl-hint" id="priceHint"></p>
+          </div>
+        </div>
+
+        <div class="fsl-group">
+          <h4 class="fsl-group-title" data-i18n="options.gentle.title"></h4>
+          <p class="fsl-group-body" data-i18n="options.gentle.body"></p>
+          <div class="fsl-settings">
+            <div class="fsl-setting">
+              <span class="fsl-setting-label" id="gentleLabel" data-i18n="options.gentle.on"></span>
+              <button class="fsl-switch" type="button" role="switch" aria-checked="true" aria-labelledby="gentleLabel"></button>
+            </div>
+            <p class="fsl-hint" data-i18n="options.gentle.hint" data-i18n-vars='{"requests":"20"}'></p>
+          </div>
+        </div>
+
+        <div class="fsl-group">
+          <h4 class="fsl-group-title" data-i18n="options.interface.title"></h4>
+          <div class="fsl-settings">
+            <div class="fsl-setting">
+              <span class="fsl-setting-label" data-i18n="options.interface.language"></span>
+              <div class="fsl-seg-ctl" id="langSeg" role="group"></div>
+            </div>
+            <div class="fsl-setting fsl-setting-wide">
+              <label class="fsl-setting-label" for="panelW"><span data-i18n="options.interface.panelWidth"></span><output class="fsl-setting-value" data-out="panelW">400 px</output></label>
+              <input class="fsl-range" id="panelW" type="range" min="320" max="420" step="10" value="400" />
+            </div>
+            <div class="fsl-setting">
+              <span class="fsl-setting-label" id="avatarsLabel" data-i18n="options.interface.showAvatars"></span>
+              <button class="fsl-switch" type="button" role="switch" aria-checked="false" aria-labelledby="avatarsLabel"></button>
+            </div>
+          </div>
+          <div class="fsl-danger-row">
+            <button class="fsl-danger-btn" type="button" data-i18n="options.reset"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 4. mark, lockup and icon set ──────────────────────────────────── -->
+  <section class="rb-section" data-od-id="icons">
+    <div class="rb-section-head">
+      <div>
+        <h2 class="rb-h2">04 · Mark, lockup and icon set</h2>
+        <p class="rb-caption">A FUT card with its top-right corner chamfered, holding a four-node formation: the card is what the product manipulates, the formation is what it builds, the chamfer is the corner the solver did not spend. Drawn on a 32-unit grid — card 24.8 units, chamfer a true 45°, 3.6 units of clear space built into every file. Nothing EA-owned: no badge, crest, club mark, league mark or player likeness is used anywhere. Below 20 px the master is replaced by a re-cut 16 px variant — outline 2.6, three nodes, heavier connectors — because the scaled-down master fuses into a blob. The app icon puts the mark on its own tile so it survives a light and a dark toolbar alike.</p>
+      </div>
+    </div>
+    <div class="rb-icons">
+      <div class="rb-icon-cell">
+        <div class="rb-icon-box" style="width:128px;height:128px"><svg width="96" height="96" viewBox="0 0 32 32" aria-label="FUT Squad Lab mark, 128 px"><path d="M 8.2 3.6 H 20 L 28.4 12 V 23.8 A 4.6 4.6 0 0 1 23.8 28.4 H 8.2 A 4.6 4.6 0 0 1 3.6 23.8 V 8.2 A 4.6 4.6 0 0 1 8.2 3.6 Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M 13.6 11.2 a 2.4 2.4 0 1 0 4.8 0 a 2.4 2.4 0 1 0 -4.8 0 Z M 8.4 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 14 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 19.6 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 10.4 20.05 L 21.6 20.05 L 21.6 21.55 L 10.4 21.55 Z M 16.648 11.578 L 11.048 21.178 L 9.752 20.422 L 15.352 10.822 Z M 16.648 10.822 L 22.248 20.422 L 20.952 21.178 L 15.352 11.578 Z" fill="currentColor"/></svg></div>
+        <span class="rb-icon-meta">128 px</span>
+      </div>
+      <div class="rb-icon-cell">
+        <div class="rb-icon-box" style="width:96px;height:96px"><svg width="48" height="48" viewBox="0 0 32 32" aria-label="FUT Squad Lab mark, 48 px"><path d="M 8.2 3.6 H 20 L 28.4 12 V 23.8 A 4.6 4.6 0 0 1 23.8 28.4 H 8.2 A 4.6 4.6 0 0 1 3.6 23.8 V 8.2 A 4.6 4.6 0 0 1 8.2 3.6 Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M 13.6 11.2 a 2.4 2.4 0 1 0 4.8 0 a 2.4 2.4 0 1 0 -4.8 0 Z M 8.4 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 14 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 19.6 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 10.4 20.05 L 21.6 20.05 L 21.6 21.55 L 10.4 21.55 Z M 16.648 11.578 L 11.048 21.178 L 9.752 20.422 L 15.352 10.822 Z M 16.648 10.822 L 22.248 20.422 L 20.952 21.178 L 15.352 11.578 Z" fill="currentColor"/></svg></div>
+        <span class="rb-icon-meta">48 px</span>
+      </div>
+      <div class="rb-icon-cell">
+        <div class="rb-icon-box" style="width:72px;height:72px"><svg width="32" height="32" viewBox="0 0 32 32" aria-label="FUT Squad Lab mark, 32 px"><path d="M 8.2 3.6 H 20 L 28.4 12 V 23.8 A 4.6 4.6 0 0 1 23.8 28.4 H 8.2 A 4.6 4.6 0 0 1 3.6 23.8 V 8.2 A 4.6 4.6 0 0 1 8.2 3.6 Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M 13.6 11.2 a 2.4 2.4 0 1 0 4.8 0 a 2.4 2.4 0 1 0 -4.8 0 Z M 8.4 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 14 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 19.6 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 10.4 20.05 L 21.6 20.05 L 21.6 21.55 L 10.4 21.55 Z M 16.648 11.578 L 11.048 21.178 L 9.752 20.422 L 15.352 10.822 Z M 16.648 10.822 L 22.248 20.422 L 20.952 21.178 L 15.352 11.578 Z" fill="currentColor"/></svg></div>
+        <span class="rb-icon-meta">32 px</span>
+      </div>
+      <div class="rb-icon-cell">
+        <div class="rb-icon-box" style="width:64px;height:64px"><svg width="16" height="16" viewBox="0 0 32 32" aria-label="FUT Squad Lab mark, 16 px optical cut"><path d="M 7.6 1.6 H 21.6 L 30.4 10.4 V 24.4 A 6 6 0 0 1 24.4 30.4 H 7.6 A 6 6 0 0 1 1.6 24.4 V 7.6 A 6 6 0 0 1 7.6 1.6 Z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/><path d="M 12.7 12.4 a 3.3 3.3 0 1 0 6.6 0 a 3.3 3.3 0 1 0 -6.6 0 Z M 6.4 21.8 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 Z M 19.6 21.8 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 Z M 16.982 13.09 L 10.382 22.49 L 8.418 21.11 L 15.018 11.71 Z M 16.982 11.71 L 23.582 21.11 L 21.618 22.49 L 15.018 13.09 Z M 9.4 20.6 L 22.6 20.6 L 22.6 23 L 9.4 23 Z" fill="currentColor"/></svg></div>
+        <span class="rb-icon-meta">16 px · optical cut</span>
+      </div>
+      <div class="rb-icon-cell">
+        <div class="rb-icon-box" data-checker="true" style="width:64px;height:64px"><svg width="16" height="16" viewBox="0 0 32 32" aria-label="FUT Squad Lab mark, 16 px on a checkerboard"><path d="M 7.6 1.6 H 21.6 L 30.4 10.4 V 24.4 A 6 6 0 0 1 24.4 30.4 H 7.6 A 6 6 0 0 1 1.6 24.4 V 7.6 A 6 6 0 0 1 7.6 1.6 Z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/><path d="M 12.7 12.4 a 3.3 3.3 0 1 0 6.6 0 a 3.3 3.3 0 1 0 -6.6 0 Z M 6.4 21.8 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 Z M 19.6 21.8 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 Z M 16.982 13.09 L 10.382 22.49 L 8.418 21.11 L 15.018 11.71 Z M 16.982 11.71 L 23.582 21.11 L 21.618 22.49 L 15.018 13.09 Z M 9.4 20.6 L 22.6 20.6 L 22.6 23 L 9.4 23 Z" fill="currentColor"/></svg></div>
+        <span class="rb-icon-meta">16 px · silhouette test</span>
+      </div>
+      <div class="rb-icon-cell">
+        <div class="rb-icon-box" style="width:216px;height:64px;justify-items:start;padding:0 14px">
+          <svg width="200" height="36" viewBox="0 0 224 48" aria-label="FUT Squad Lab wordmark"><g transform="translate(4 9.5)"><path d="M 8.2 3.6 H 20 L 28.4 12 V 23.8 A 4.6 4.6 0 0 1 23.8 28.4 H 8.2 A 4.6 4.6 0 0 1 3.6 23.8 V 8.2 A 4.6 4.6 0 0 1 8.2 3.6 Z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/><path d="M 13.6 11.2 a 2.4 2.4 0 1 0 4.8 0 a 2.4 2.4 0 1 0 -4.8 0 Z M 8.4 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 14 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 19.6 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z M 10.4 20.05 L 21.6 20.05 L 21.6 21.55 L 10.4 21.55 Z M 16.648 11.578 L 11.048 21.178 L 9.752 20.422 L 15.352 10.822 Z M 16.648 10.822 L 22.248 20.422 L 20.952 21.178 L 15.352 11.578 Z" fill="currentColor"/></g><text x="44" y="25" fill="currentColor" font-family="-apple-system, BlinkMacSystemFont, system-ui, sans-serif" font-size="16" font-weight="600" letter-spacing="1.9">FUT SQUAD LAB</text><text x="44" y="38" fill="currentColor" opacity="0.6" font-family="ui-monospace, Menlo, monospace" font-size="8" letter-spacing="1.4">SBC SOLVER · LOCAL · MIT</text></svg>
+        </div>
+        <span class="rb-icon-meta">lockup · wordmark.svg</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 5. tokens ─────────────────────────────────────────────────────── -->
+  <section class="rb-section" data-od-id="tokens">
+    <div class="rb-section-head">
+      <div>
+        <h2 class="rb-h2">05 · Token swatches</h2>
+        <p class="rb-caption">tokens.css is the source of truth; this is its visual half. Three surface levels, one accent, three semantic colours and four card states. Contrast is measured against the surface each token is actually used on.</p>
+      </div>
+    </div>
+    <div class="rb-swatches" id="swatches"></div>
+  </section>
+
+  <!-- ── 6. behaviour ──────────────────────────────────────────────────── -->
+  <section class="rb-section" data-od-id="behaviour">
+    <div class="rb-section-head">
+      <div>
+        <h2 class="rb-h2">06 · Keyboard, motion and states</h2>
+        <p class="rb-caption">The panel is driven by a keyboard as well as a mouse: slot rows, lock toggles, alternatives and every control in the options page are reachable without a pointer, and focus never moves on a re-solve.</p>
+      </div>
+    </div>
+    <div class="rb-grid-2">
+      <table class="rb-table">
+        <thead><tr><th>Key</th><th>Action</th><th>Scope</th></tr></thead>
+        <tbody id="kbdTable"></tbody>
+      </table>
+      <table class="rb-table">
+        <thead><tr><th>Animation</th><th>Duration · easing</th></tr></thead>
+        <tbody id="motionTable"></tbody>
+      </table>
+    </div>
+    <table class="rb-table" style="margin-top:24px">
+      <thead><tr><th>State</th><th>What it shows</th><th>Action</th></tr></thead>
+      <tbody id="stateTable"></tbody>
+    </table>
+  </section>
+
+</main>
+
+<footer class="rb-foot">
+  FUT Squad Lab · unofficial companion project, MIT · no EA-owned asset, mark, badge or likeness is used · sample data shown from a fixture club
+</footer>
+
+<script>
+/* ── copy: inline mirror of copy.da.json / copy.en.json ─────────────────── */
+var COPY = {
+  da: {
+    "meta": { locale: "da-DK" },
+    "common": { coins: "coins" },
+    "units": { ovr: "OVR", chem: "CHEM" },
+    "panel": {
+      brand: "FUT Squad Lab", badgeUnofficial: "Uofficiel", challengeFallback: "Ingen udfordring fundet",
+      clubPool: "Klubpulje", formation: "Formation", solvingLabel: "Løser",
+      slotsFilled: "{filled}/{slots} pladser",
+      lockedCount: "{count} låst", resolve: "Løs igen", solve: "Løs denne udfordring",
+      copyList: "Kopiér liste", copied: "Kopieret",
+      footer: "Søgning: {formation} · {lineups} opstillinger · {seconds}s"
+    },
+    "summary": { totalCost: "Fyldpris", clubCards: "Fra klub", toBuy: "Skal købes", chemistry: "Kemi", avgRating: "Snit" },
+    "fit": { naturalShort: "NAT", outOfPositionShort: "OOP", outOfPosition: "Ude af position" },
+    "cardState": { tradeable: "Kan sælges", untradeable: "Kan ikke sælges", duplicate: "Dublet", concept: "Koncept" },
+    "cardStateHint": {
+      tradeable: "Kan sælges — taget fra klubben", untradeable: "Kan ikke sælges — bliver i klubben",
+      duplicate: "Dublet — du har et identisk kort i forvejen", concept: "Ikke ejet — skal købes"
+    },
+    "lock": { lock: "Lås pladsen", unlock: "Lås pladsen op", locked: "Låst", hint: "Låst — overlever en ny søgning" },
+    "alts": {
+      title: "Alternativer til {slot}", subtitle: "Rangeret efter fyldpris", current: "Valgt", swap: "Skift ind",
+      more: "{count} flere i puljen", deltaCheaper: "{amount} billigere", deltaPricier: "{amount} dyrere",
+      reason: {
+        sameLeague: "Samme liga", sameNation: "Samme nation", sameClub: "Samme klub",
+        keepsChemistry: "Beholder keminiveauet", oneRatingDown: "1 rating lavere", twoRatingDown: "2 ratings lavere",
+        breaksLink: "Bryder {count} link", keepsLinks: "Beholder alle links", fromClubPool: "Allerede i klubben",
+        positionMatch: "Naturlig plads i {formation}"
+      }
+    },
+    "buy": {
+      title: "Køb disse", count: "{count} kort", conceptPlayers: "Konceptspillere", buyTotal: "Køb i alt",
+      suggested: "Foreslået pris", openMarket: "Åbn marked", separator: "Disse kort er ikke i din klub",
+      honestNote: "Opgaven kan kun løses ved at købe {count} kort for ca. {cost} coins."
+    },
+    "states": {
+      idle: {
+        title: "Klar til at løse",
+        body: "Udfordringen er læst fra siden. Løseren bruger kun din klub og regner alt ud lokalt i denne fane.",
+        poolLine: "{cards} kort · {eligible} over {minRating}", privacy: "Ingen data forlader browseren."
+      },
+      solving: {
+        title: "Søger", step1: "Læser klub", step2: "Bygger pulje", step3: "Søger opstillinger",
+        step4: "Tjekker kemi", step5: "Priser kort", lineups: "Opstillinger", bestCost: "Bedste pris",
+        depth: "Dybde", elapsed: "Tid", hint: "Søger efter den billigste gyldige opstilling. Dybde {depth} af {max}."
+      },
+      noSolution: {
+        title: "Ingen gyldig løsning", body: "Klubben kan ikke opfylde kravene, som de står. Intet er ændret.",
+        missingTitle: "Det mangler", missingLeagues: "{count} ligaer mere", missingNations: "{count} nationer mere",
+        missingChemistry: "Kemi mangler {points}", missingPosition: "Ingen gyldig spiller til {slot}",
+        closestTitle: "Tætteste forsøg", closestBody: "{filled}/{slots} pladser · kemi {chemistry}/{required}",
+        fixTitle: "Sådan kommer du videre", fixBuy: "Køb {count} kort (ca. {cost} coins)",
+        fixFormation: "Prøv formationen {formation}", fixRelax: "Levn kravene i udfordringen", fixShow: "Vis tætteste forsøg"
+      },
+      notOnPage: {
+        title: "Ingen SBC fundet",
+        body: "Denne side er ikke en Squad Building Challenge. Åbn en udfordring i web-appen, så læser panelet den automatisk.",
+        hint: "Panelet bliver åbent og lytter efter en udfordring.", rescan: "Skan siden igen"
+      }
+    },
+    "a11y": {
+      openAlts: "Vis alternativer for {slot}", closeAlts: "Luk alternativer for {slot}", lockPlayer: "Lås {player}",
+      unlockPlayer: "Lås {player} op", swapIn: "Skift {player} ind i stedet for {current}", lockedRow: "{player}, låst",
+      costTotal: "Samlet fyldpris {cost} coins", squadList: "Løsning, {count} pladser",
+      panel: "FUT Squad Lab — løsningspanel", buyList: "Kort der skal købes, {count}",
+      swapped: "{player} skiftet ind. Ny pris {cost}."
+    },
+    "popup": {
+      title: "FUT Squad Lab", statusSolved: "Løst", statusSolving: "Løser", statusIdle: "Ingen udfordring",
+      statusError: "Ikke en SBC-side", lastSolution: "Seneste løsning", solvedAgo: "Løst for {minutes} min siden",
+      cost: "Pris", buy: "Køb", locked: "Låst", openPanel: "Åbn panelet", settings: "Indstillinger",
+      clubRead: "Klub læst: {cards} kort"
+    },
+    "options": {
+      title: "Indstillinger", subtitle: "Alle ændringer gemmes lokalt i browseren.",
+      costModel: {
+        title: "Prismodel for fyld",
+        body: "Vægtene afgør, hvor gerne løseren bruger et kort. Højere vægt betyder, at kortet bruges senere.",
+        untradeableDuplicate: "Kan ikke sælges, dublet", untradeable: "Kan ikke sælges",
+        tradeable: "Kan sælges", concept: "Konceptspiller"
+      },
+      concepts: {
+        title: "Konceptspillere", body: "Tillad kort, du ikke ejer, hvis opgaven ellers ikke kan løses.",
+        allow: "Tillad konceptspillere", max: "Maks. antal at købe", maxHint: "{value} kort"
+      },
+      effort: {
+        title: "Søgeindsats", body: "Højere indsats prøver flere opstillinger, før den giver op.",
+        fast: "Hurtig", balanced: "Afbalanceret", thorough: "Grundig",
+        hint: "Niveau {value} af 5 · op til {lineups} opstillinger"
+      },
+      prices: {
+        title: "Priskilde", body: "Markedspriser er præcise men langsommere. Klubværdier er øjeblikkelige.",
+        market: "Marked", marketHint: "Henter priser fra web-appen",
+        club: "Klubcachede værdier", clubHint: "Bruger værdier, der allerede ligger i klubben"
+      },
+      gentle: {
+        title: "Skånsom tilstand", body: "Spørger kun web-appen med faste mellemrum, så kontoen ikke bliver flagget.",
+        on: "Skånsom tilstand", hint: "Maks. {requests} forespørgsler pr. minut"
+      },
+      interface: {
+        title: "Interface", language: "Sprog", panelWidth: "Panelbredde",
+        panelWidthHint: "{value} px", showAvatars: "Vis kortmarkering i listen"
+      },
+      reset: "Gendan standard", resetConfirm: "Alle indstillinger sættes tilbage til standard."
+    },
+    "reference": {
+      pageTitle: "FUT Squad Lab — designreference",
+      state: "Tilstand", width: "Bredde", stateIdle: "Ingen løsning", stateSolving: "Søger", stateSolved: "Løst",
+      stateBuy: "Løst med køb", stateNoSolution: "Ingen løsning", stateNotOnPage: "Ikke en SBC-side",
+      hostNote: "Simuleret værtsapp — ingen EA-assets, ingen EA-CSS"
+    }
+  },
+  en: {
+    "meta": { locale: "en-GB" },
+    "common": { coins: "coins" },
+    "units": { ovr: "OVR", chem: "CHEM" },
+    "panel": {
+      brand: "FUT Squad Lab", badgeUnofficial: "Unofficial", challengeFallback: "No challenge detected",
+      clubPool: "Club pool", formation: "Formation", solvingLabel: "Solving",
+      slotsFilled: "{filled}/{slots} slots",
+      lockedCount: "{count} locked", resolve: "Solve again", solve: "Solve this challenge",
+      copyList: "Copy list", copied: "Copied",
+      footer: "Search: {formation} · {lineups} lineups · {seconds}s"
+    },
+    "summary": { totalCost: "Fodder cost", clubCards: "From club", toBuy: "To buy", chemistry: "Chem", avgRating: "Avg" },
+    "fit": { naturalShort: "NAT", outOfPositionShort: "OOP", outOfPosition: "Out of position" },
+    "cardState": { tradeable: "Tradeable", untradeable: "Untradeable", duplicate: "Duplicate", concept: "Concept" },
+    "cardStateHint": {
+      tradeable: "Tradeable — taken from the club", untradeable: "Untradeable — stays in the club",
+      duplicate: "Duplicate — you already hold an identical card", concept: "Not owned — has to be bought"
+    },
+    "lock": { lock: "Lock slot", unlock: "Unlock slot", locked: "Locked", hint: "Locked — survives a re-solve" },
+    "alts": {
+      title: "Alternatives for {slot}", subtitle: "Ranked by fodder cost", current: "In squad", swap: "Swap in",
+      more: "{count} more in the pool", deltaCheaper: "{amount} cheaper", deltaPricier: "{amount} dearer",
+      reason: {
+        sameLeague: "Same league", sameNation: "Same nation", sameClub: "Same club",
+        keepsChemistry: "Keeps the chemistry tier", oneRatingDown: "1 rating lower", twoRatingDown: "2 ratings lower",
+        breaksLink: "Breaks {count} link", keepsLinks: "Keeps every link", fromClubPool: "Already in the club",
+        positionMatch: "Natural slot in {formation}"
+      }
+    },
+    "buy": {
+      title: "Buy these", count: "{count} cards", conceptPlayers: "Concept players", buyTotal: "Buy total",
+      suggested: "Suggested price", openMarket: "Open market", separator: "These cards are not in your club",
+      honestNote: "This challenge can only be solved by buying {count} cards for about {cost} coins."
+    },
+    "states": {
+      idle: {
+        title: "Ready to solve",
+        body: "The challenge has been read from the page. The solver uses your club only and computes everything locally in this tab.",
+        poolLine: "{cards} cards · {eligible} above {minRating}", privacy: "No data leaves the browser."
+      },
+      solving: {
+        title: "Searching", step1: "Read club", step2: "Build pool", step3: "Search lineups",
+        step4: "Check chemistry", step5: "Price cards", lineups: "Lineups", bestCost: "Best cost",
+        depth: "Depth", elapsed: "Elapsed", hint: "Searching for the cheapest valid lineup. Depth {depth} of {max}."
+      },
+      noSolution: {
+        title: "No valid solution", body: "The club cannot satisfy the requirements as they stand. Nothing has been changed.",
+        missingTitle: "What is missing", missingLeagues: "{count} more leagues", missingNations: "{count} more nations",
+        missingChemistry: "Chemistry short by {points}", missingPosition: "No eligible card for {slot}",
+        closestTitle: "Closest attempt", closestBody: "{filled}/{slots} slots · chem {chemistry}/{required}",
+        fixTitle: "Ways forward", fixBuy: "Buy {count} cards (about {cost} coins)",
+        fixFormation: "Try the {formation} formation", fixRelax: "Relax the challenge requirements", fixShow: "Show the closest attempt"
+      },
+      notOnPage: {
+        title: "No SBC detected",
+        body: "This page is not a Squad Building Challenge. Open a challenge in the web app and the panel reads it automatically.",
+        hint: "The panel stays open and keeps listening for a challenge.", rescan: "Scan the page again"
+      }
+    },
+    "a11y": {
+      openAlts: "Show alternatives for {slot}", closeAlts: "Close alternatives for {slot}", lockPlayer: "Lock {player}",
+      unlockPlayer: "Unlock {player}", swapIn: "Swap {player} in for {current}", lockedRow: "{player}, locked",
+      costTotal: "Total fodder cost {cost} coins", squadList: "Solution, {count} slots",
+      panel: "FUT Squad Lab — solution panel", buyList: "Cards to buy, {count}",
+      swapped: "Swapped in {player}. New cost {cost}."
+    },
+    "popup": {
+      title: "FUT Squad Lab", statusSolved: "Solved", statusSolving: "Solving", statusIdle: "No challenge",
+      statusError: "Not an SBC page", lastSolution: "Last solution", solvedAgo: "Solved {minutes} min ago",
+      cost: "Cost", buy: "Buy", locked: "Locked", openPanel: "Open the panel", settings: "Settings",
+      clubRead: "Club read: {cards} cards"
+    },
+    "options": {
+      title: "Settings", subtitle: "Everything is stored locally in the browser.",
+      costModel: {
+        title: "Fodder cost model",
+        body: "The weights decide how willingly the solver spends a card. A higher weight means the card is spent later.",
+        untradeableDuplicate: "Untradeable duplicate", untradeable: "Untradeable",
+        tradeable: "Tradeable", concept: "Concept player"
+      },
+      concepts: {
+        title: "Concept players", body: "Allow cards you do not own when the challenge cannot be solved otherwise.",
+        allow: "Allow concept players", max: "Maximum to buy", maxHint: "{value} cards"
+      },
+      effort: {
+        title: "Solver effort", body: "Higher effort tries more lineups before giving up.",
+        fast: "Fast", balanced: "Balanced", thorough: "Thorough",
+        hint: "Level {value} of 5 · up to {lineups} lineups"
+      },
+      prices: {
+        title: "Price source", body: "Market prices are accurate but slower. Club values are instant.",
+        market: "Market", marketHint: "Fetches prices from the web app",
+        club: "Club cached values", clubHint: "Uses values already stored in the club"
+      },
+      gentle: {
+        title: "Gentle mode", body: "Only polls the web app on a fixed interval so the account does not get flagged.",
+        on: "Gentle mode", hint: "Max {requests} requests per minute"
+      },
+      interface: {
+        title: "Interface", language: "Language", panelWidth: "Panel width",
+        panelWidthHint: "{value} px", showAvatars: "Show card marker in the list"
+      },
+      reset: "Restore defaults", resetConfirm: "Every setting goes back to its default."
+    },
+    "reference": {
+      pageTitle: "FUT Squad Lab — design reference",
+      state: "State", width: "Width", stateIdle: "Nothing solved", stateSolving: "Solving", stateSolved: "Solved",
+      stateBuy: "Solved, buys required", stateNoSolution: "No solution", stateNotOnPage: "Not an SBC page",
+      hostNote: "Simulated host app — no EA assets, no EA CSS"
+    }
+  }
+};
+
+/* ── fixture club: structural placeholders, no real players ─────────────── */
+var FORMATION = "4-3-3";
+var CLUB = { cards: 1842, fodder: 512, eligible: 128, minRating: 82 };
+var SQUAD = [
+  { pos: "GK",  fit: "nat", name: "Player 01", rating: 79, l: "L31", n: "N07", c: "C12", state: "untradeable", cost: 320 },
+  { pos: "LB",  fit: "nat", name: "Player 23", rating: 81, l: "L31", n: "N04", c: "C07", state: "tradeable",   cost: 1200 },
+  { pos: "CB",  fit: "nat", name: "Player 05", rating: 83, l: "L04", n: "N07", c: "C19", state: "untradeable", cost: 360 },
+  { pos: "CB",  fit: "nat", name: "Player 18", rating: 82, l: "L04", n: "N11", c: "C19", state: "duplicate",   cost: 150 },
+  { pos: "RB",  fit: "oop", name: "Player 27", rating: 80, l: "L31", n: "N04", c: "C07", state: "tradeable",   cost: 1150 },
+  { pos: "CM",  fit: "nat", name: "Player 08", rating: 84, l: "L17", n: "N02", c: "C31", state: "untradeable", cost: 340 },
+  { pos: "CM",  fit: "nat", name: "Player 14", rating: 82, l: "L17", n: "N07", c: "C22", state: "tradeable",   cost: 980 },
+  { pos: "CM",  fit: "nat", name: "Player 06", rating: 81, l: "L04", n: "N02", c: "C31", state: "duplicate",   cost: 140 },
+  { pos: "LW",  fit: "nat", name: "Player 11", rating: 84, l: "L17", n: "N11", c: "C45", state: "concept",     cost: 4800 },
+  { pos: "ST",  fit: "nat", name: "Player 09", rating: 85, l: "L17", n: "N02", c: "C45", state: "concept",     cost: 5400 },
+  { pos: "RW",  fit: "oop", name: "Player 21", rating: 82, l: "L31", n: "N11", c: "C22", state: "concept",     cost: 1300 }
+];
+var ALTS = {
+  0: [ { name: "Player 32", rating: 78, pos: "GK", cost: 280,  reason: "sameLeague", delta: -40 },
+       { name: "Player 44", rating: 77, pos: "GK", cost: 190,  reason: "oneRatingDown", delta: -130 },
+       { name: "Player 51", rating: 81, pos: "GK", cost: 740,  reason: "keepsChemistry", delta: 420 } ],
+  2: [ { name: "Player 07", rating: 82, pos: "CB", cost: 210,  reason: "sameClub", delta: -150 },
+       { name: "Player 61", rating: 83, pos: "CB", cost: 310,  reason: "sameLeague", delta: -50 },
+       { name: "Player 66", rating: 80, pos: "CB", cost: 120,  reason: "twoRatingDown", delta: -240 } ],
+  5: [ { name: "Player 16", rating: 84, pos: "CM", cost: 260,  reason: "sameLeague", delta: -80 },
+       { name: "Player 29", rating: 82, pos: "CM", cost: 180,  reason: "fromClubPool", delta: -160 },
+       { name: "Player 33", rating: 85, pos: "CAM", cost: 1500, reason: "keepsChemistry", delta: 1160 } ],
+  8: [ { name: "Player 77", rating: 83, pos: "LW", cost: 3400, reason: "sameNation", delta: -1400 },
+       { name: "Player 12", rating: 82, pos: "LM", cost: 2100, reason: "breaksLink", reasonCount: 1, delta: -2700 },
+       { name: "Player 40", rating: 84, pos: "LW", cost: 6100, reason: "keepsChemistry", delta: 1300 } ]
+};
+var LOCKED = { 2: true, 9: true };
+var MISSING = [
+  { key: "missingLeagues", value: 3 },
+  { key: "missingNations", value: 2 },
+  { key: "missingChemistry", value: 12 },
+  { key: "missingPosition", value: "RW", isText: true }
+];
+
+/* ── state ──────────────────────────────────────────────────────────────── */
+var lang = "da";
+var view = "solved";
+var buying = true;
+var panelW = 400;
+var openRow = 5;
+var swappedRow = null;
+var pendingFocus = null;
+var skippedSolve = false;
+
+function t(key, vars) {
+  var parts = key.split("."), node = COPY[lang];
+  for (var i = 0; i < parts.length; i++) { node = node && node[parts[i]]; }
+  if (typeof node !== "string") { return key; }
+  if (vars) { Object.keys(vars).forEach(function (k) { node = node.split("{" + k + "}").join(vars[k]); }); }
+  return node;
+}
+function fmt(n) { return new Intl.NumberFormat(COPY[lang].meta.locale).format(n); }
+function el(html) { var d = document.createElement("div"); d.innerHTML = html.trim(); return d.firstElementChild; }
+function esc(s) { return String(s).replace(/[&<>]/g, function (c) { return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]; }); }
+
+var ICON = {
+  lock: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.8 7V5.4a2.2 2.2 0 0 1 4.4 0V7"/></svg>',
+  unlock: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.8 7V5.4a2.2 2.2 0 0 1 4.4-.4"/></svg>',
+  tradeable: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2.5 6h9l-2.5-2.5M13.5 10h-9l2.5 2.5"/></svg>',
+  untradeable: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6.2 5.5a3 3 0 0 1 4.6 1.3M13 4.5l1.6-1.6M2.4 11.5l1.6-1.6"/><path d="M9.6 10.5a3 3 0 0 1-4.6-1.3"/></svg>',
+  duplicate: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="2.5" y="2.5" width="8" height="8" rx="1"/><path d="M5.5 13.5h6a2 2 0 0 0 2-2v-6"/></svg>',
+  concept: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>',
+  warn: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8 2.5 14.5 13.5h-13z"/><path d="M8 6.5v3.2M8 11.6v.6"/></svg>',
+  search: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2 14 14"/></svg>',
+  off: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M4.2 11.8 11.8 4.2"/></svg>'
+};
+
+/* ── panel rendering ────────────────────────────────────────────────────── */
+function chip(state, locked) {
+  if (locked) {
+    return '<span class="fsl-chip" data-state="' + state + '" data-locked="true" title="' +
+      esc(t("lock.hint") + " · " + t("cardStateHint." + state)) + '" aria-label="' +
+      esc(t("lock.locked") + " — " + t("cardState." + state)) + '">' + ICON.lock +
+      "<span>" + esc(t("lock.locked")) + "</span></span>";
+  }
+  var glyph = ICON[state] || "";
+  return '<span class="fsl-chip" data-state="' + state + '" title="' + esc(t("cardStateHint." + state)) +
+    '" aria-label="' + esc(t("cardState." + state) + " — " + t("cardStateHint." + state)) + '">' +
+    glyph + "<span>" + esc(t("cardState." + state)) + "</span></span>";
+}
+
+function rowHTML(s, i) {
+  var locked = !!LOCKED[i];
+  var costHTML = '<div class="fsl-cost" data-zero="' + (s.cost === 0 ? "true" : "false") + '">' +
+    (s.cost === 0 ? "0" : fmt(s.cost)) + "<span>" + esc(t("common.coins")) + "</span></div>";
+  var fit = s.fit === "oop" ? t("fit.outOfPositionShort") : t("fit.naturalShort");
+  var open = openRow === i && (view === "solved");
+  var altRows = "";
+  if (open) {
+    var list = ALTS[i] || [];
+    var rows = list.map(function (a) {
+      var reason = t("alts.reason." + a.reason).replace("{count}", a.reasonCount || "");
+      var delta = (a.delta < 0 ? "−" : "+") + fmt(Math.abs(a.delta));
+      var deltaTxt = a.delta < 0 ? t("alts.deltaCheaper", { amount: delta }) : t("alts.deltaPricier", { amount: delta });
+      return '<button class="fsl-alt" type="button" data-act="swap" data-row="' + i + '" data-alt="' + a.name + '" data-cost="' + a.cost +
+        '" aria-label="' + esc(t("a11y.swapIn", { player: a.name, current: s.name })) + '">' +
+        '<span class="fsl-alt-rank fsl-num">' + (list.indexOf(a) + 1) + "</span>" +
+        '<span><span class="fsl-alt-name">' + esc(a.name) + " <em>" + a.rating + " " + a.pos + "</em></span>" +
+        '<span class="fsl-alt-reason">' + esc(reason) + " · <i data-dir=\"" + (a.delta < 0 ? "down" : "up") + "\">" +
+        esc(deltaTxt) + "</i></span></span>" +
+        '<span class="fsl-alt-cost fsl-num">' + fmt(a.cost) + "</span>" +
+        '<span class="fsl-alt-swap">' + esc(t("alts.swap")) + "</span></button>";
+    }).join("");
+    if (i === 5) {
+      rows = '<div class="fsl-alt" data-current="true"><span class="fsl-alt-rank">▪</span>' +
+        '<span><span class="fsl-alt-name">' + esc(s.name) + " <em>" + s.rating + " " + s.pos + "</em></span>" +
+        '<span class="fsl-alt-reason">' + esc(t("alts.reason.fromClubPool")) + "</span></span>" +
+        '<span class="fsl-alt-cost fsl-num">' + fmt(s.cost) + "</span>" +
+        '<span class="fsl-alt-current">' + esc(t("alts.current")) + "</span></div>" + rows;
+    }
+    altRows = '<div class="fsl-alts" id="alts-' + i + '" role="group" aria-label="' +
+      esc(t("alts.title", { slot: s.pos })) + '">' +
+      '<div class="fsl-alts-head"><span class="fsl-alts-title">' + esc(t("alts.title", { slot: s.pos })) +
+      '</span><span class="fsl-alts-sub">' + esc(t("alts.subtitle")) + "</span></div>" + rows +
+      '<button class="fsl-alts-more" type="button" data-act="more">' + esc(t("alts.more", { count: 7 })) + " →</button></div>";
+  }
+  return '<li class="fsl-row" data-index="' + i + '" data-state="' + s.state + '" data-fit="' + s.fit +
+    '" data-locked="' + locked + '" data-open="' + open + '"' + (swappedRow === i ? ' data-swapped="true"' : "") + ">" +
+    '<div class="fsl-pos"><span class="fsl-pos-code">' + esc(s.pos) + '</span><span class="fsl-fit">' +
+    (s.fit === "oop" ? "↔ " : "") + esc(fit) + "</span></div>" +
+    '<div class="fsl-ident"><button class="fsl-row-toggle" type="button" data-act="toggle" data-row="' + i +
+    '" aria-expanded="' + open + '"' + (open ? ' aria-controls="alts-' + i + '"' : "") + ">" +
+    '<span class="fsl-ident-top"><span class="fsl-ident-name">' + esc(s.name) + "</span>" + chip(s.state, locked) + "</span>" +
+    '<span class="fsl-meta"><span>' + s.rating + " " + esc(t("units.ovr")) + "</span><span>·</span><span>" + esc(s.l) +
+    "</span><span>" + esc(s.n) + "</span><span>" + esc(s.c) + "</span></span></button></div>" +
+    costHTML +
+    '<button class="fsl-lock" type="button" data-act="lock" data-row="' + i + '" aria-pressed="' + locked +
+    '" aria-label="' + esc(locked ? t("a11y.unlockPlayer", { player: s.name }) : t("a11y.lockPlayer", { player: s.name })) +
+    '" title="' + esc(locked ? t("lock.hint") : t("lock.lock")) + '">' + (locked ? ICON.lock : ICON.unlock) + "</button>" +
+    "</li>" + altRows;
+}
+
+function costbarHTML() {
+  var total = SQUAD.reduce(function (a, s) { return a + s.cost; }, 0);
+  var concepts = SQUAD.filter(function (s) { return s.state === "concept"; });
+  var buyTotal = concepts.reduce(function (a, s) { return a + s.cost; }, 0);
+  var chem = buying ? 22 : 28;
+  var sub = '<div class="fsl-costbar-sub">' +
+    '<div class="fsl-cell"><dt>' + esc(t("summary.clubCards")) + '</dt><dd class="fsl-num">' + (view === "idle" ? "—" : 11 - concepts.length) + "</dd></div>" +
+    '<div class="fsl-cell"><dt>' + esc(t("summary.chemistry")) + '</dt><dd class="fsl-num">' + (view === "idle" ? "—" : chem) + "</dd></div>" +
+    '<div class="fsl-cell"><dt>' + esc(t("summary.avgRating")) + '</dt><dd class="fsl-num">' + (view === "idle" ? "—" : "81") + "</dd></div></div>";
+  var main = '<div class="fsl-costbar-main">' +
+    '<div class="fsl-cell" data-headline="true"><dt>' + esc(t("summary.totalCost")) +
+    '</dt><dd class="fsl-num"' + (view === "idle" ? "" : ' id="costTotal" data-delta="down"') + ">" +
+    (view === "idle" ? "—" : fmt(total)) + "</dd></div>" +
+    '<div class="fsl-cell"' + (buying && view !== "idle" ? ' data-warn="true"' : "") + "><dt>" + esc(t("summary.toBuy")) +
+    '</dt><dd class="fsl-num">' + (view === "idle" ? "—" : (buying ? concepts.length + " · " + fmt(buyTotal) : "0")) + "</dd></div></div>";
+  return '<div class="fsl-costbar" aria-live="polite">' + main + sub + "</div>";
+}
+
+function headHTML() {
+  var name = view === "notOnPage" ? t("panel.challengeFallback") : "3 Leagues &amp; 2 Nations";
+  var sub = view === "notOnPage" ? "—" : "Advanced · " + FORMATION;
+  return '<div class="fsl-head"><div class="fsl-head-top">' +
+    '<span class="fsl-head-title">' + name + "</span>" +
+    '<span class="fsl-badge">' + esc(t("panel.badgeUnofficial")) + " · MIT</span></div>" +
+    '<div class="fsl-head-sub">' + sub + "</div></div>" + costbarHTML();
+}
+
+function toolbarHTML() {
+  var lockedCount = Object.keys(LOCKED).filter(function (k) { return LOCKED[k]; }).length;
+  var primary = view === "solving"
+    ? '<button class="fsl-btn fsl-btn-primary" type="button" disabled>' + esc(t("panel.solvingLabel")) + "…</button>"
+    : '<button class="fsl-btn fsl-btn-primary" type="button" data-act="solve">' +
+      esc(view === "idle" ? t("panel.solve") : t("panel.resolve")) + "</button>";
+  return '<div class="fsl-toolbar"><span class="fsl-toolbar-count">' +
+    esc(t("panel.slotsFilled", { filled: 11, slots: 11 })) + (lockedCount ? " · <b>" + esc(t("panel.lockedCount", { count: lockedCount })) + "</b>" : "") +
+    "</span>" + primary + "</div>";
+}
+
+function idleHTML() {
+  return '<div class="fsl-view">' +
+    '<h3 class="fsl-view-title">' + esc(t("states.idle.title")) + "</h3>" +
+    '<p class="fsl-view-body">' + esc(t("states.idle.body")) + "</p>" +
+    '<div class="fsl-readout">' +
+    '<div class="fsl-readout-row"><span>' + esc(t("panel.clubPool")) + "</span><b>" +
+    esc(t("states.idle.poolLine", { cards: fmt(CLUB.cards), eligible: CLUB.eligible, minRating: CLUB.minRating })) + "</b></div>" +
+    '<div class="fsl-readout-row"><span>' + esc(t("panel.formation")) + "</span><b>" + FORMATION + "</b></div>" +
+    "</div>" +
+    '<p class="fsl-footnote">' + esc(t("states.idle.privacy")) + "</p>" +
+    '<button class="fsl-btn fsl-btn-primary fsl-btn-wide" type="button" data-act="solve">' + esc(t("panel.solve")) + "</button></div>";
+}
+
+function solvingHTML() {
+  var steps = [
+    { key: "step1", done: true }, { key: "step2", done: true },
+    { key: "step3", done: false, active: true }, { key: "step4", done: false }, { key: "step5", done: false }
+  ];
+  var rail = steps.map(function (s, i) {
+    var pct = s.done ? 100 : (s.active ? 62 : 0);
+    return '<div class="fsl-step" data-done="' + s.done + '" data-active="' + !!s.active + '">' +
+      '<span class="fsl-step-mark"></span><span>' + esc(t("states.solving." + s.key)) +
+      '<span class="fsl-step-track"><i style="width:' + pct + '%"></i></span></span></div>';
+  }).join("");
+  var skeleton = "";
+  for (var i = 0; i < 11; i++) {
+    skeleton += '<div class="fsl-skeleton"><i style="width:' + (28 + (i % 4) * 9) + 'px"></i>' +
+      '<i style="width:' + (46 + (i % 3) * 14) + '%"></i><i style="width:34px"></i></div>';
+  }
+  return '<div class="fsl-view">' +
+    '<h3 class="fsl-view-title">' + ICON.search + esc(t("states.solving.title")) + "…</h3>" +
+    '<div class="fsl-rail">' + rail + "</div>" +
+    '<div class="fsl-readout">' +
+    '<div class="fsl-readout-row"><span>' + esc(t("states.solving.lineups")) + '</span><b class="fsl-num">' + fmt(214) + "</b></div>" +
+    '<div class="fsl-readout-row"><span>' + esc(t("states.solving.bestCost")) + '</span><b class="fsl-num">' + fmt(16140) + "</b></div>" +
+    '<div class="fsl-readout-row"><span>' + esc(t("states.solving.depth")) + '</span><b class="fsl-num">3 / 5</b></div>' +
+    '<div class="fsl-readout-row"><span>' + esc(t("states.solving.elapsed")) + '</span><b class="fsl-num">4.2 s</b></div>' +
+    "</div>" +
+    '<p class="fsl-hint">' + esc(t("states.solving.hint", { depth: 3, max: 5 })) + "</p></div>" + skeleton;
+}
+
+function noSolutionHTML() {
+  var items = MISSING.map(function (m) {
+    var label = m.isText ? t("states.noSolution." + m.key, { slot: m.value })
+      : t("states.noSolution." + m.key, { count: m.value, points: m.value });
+    return "<li><span>" + esc(label) + "</span><b>" + (m.isText ? "—" : "−" + m.value) + "</b></li>";
+  }).join("");
+  return '<div class="fsl-view" data-tone="warning">' +
+    '<h3 class="fsl-view-title">' + ICON.warn + esc(t("states.noSolution.title")) + "</h3>" +
+    '<p class="fsl-view-body">' + esc(t("states.noSolution.body")) + "</p>" +
+    '<div><p class="fsl-alts-title" style="margin-bottom:6px">' + esc(t("states.noSolution.missingTitle")) + "</p>" +
+    '<ul class="fsl-missing">' + items + "</ul></div>" +
+    '<div><p class="fsl-alts-title" style="margin-bottom:6px">' + esc(t("states.noSolution.closestTitle")) + "</p>" +
+    '<p class="fsl-footnote">' + esc(t("states.noSolution.closestBody", { filled: 10, slots: 11, chemistry: 21, required: 30 })) + "</p></div>" +
+    '<div><p class="fsl-alts-title" style="margin-bottom:6px">' + esc(t("states.noSolution.fixTitle")) + "</p>" +
+    '<div class="fsl-fixes">' +
+    '<button class="fsl-fix" type="button" data-act="buy-fix">' + esc(t("states.noSolution.fixBuy", { count: 2, cost: fmt(9800) })) +
+    '<span class="fsl-fix-cost">→</span></button>' +
+    '<button class="fsl-fix" type="button" data-act="noop">' + esc(t("states.noSolution.fixFormation", { formation: "4-2-3-1" })) + "</button>" +
+    '<button class="fsl-fix" type="button" data-act="noop">' + esc(t("states.noSolution.fixRelax")) + "</button>" +
+    "</div></div></div>";
+}
+
+function notOnPageHTML() {
+  return '<div class="fsl-view">' +
+    '<h3 class="fsl-view-title">' + ICON.off + esc(t("states.notOnPage.title")) + "</h3>" +
+    '<p class="fsl-view-body">' + esc(t("states.notOnPage.body")) + "</p>" +
+    '<p class="fsl-footnote">' + esc(t("states.notOnPage.hint")) + "</p>" +
+    '<button class="fsl-btn fsl-btn-ghost" type="button" data-act="solve">' + esc(t("states.notOnPage.rescan")) + "</button></div>";
+}
+
+function buyHTML() {
+  var concepts = SQUAD.filter(function (s) { return s.state === "concept"; });
+  var buyTotal = concepts.reduce(function (a, s) { return a + s.cost; }, 0);
+  var rows = concepts.map(function (s) {
+    return '<div class="fsl-buy-row">' +
+      '<span><span class="fsl-buy-name">' + esc(s.name) + "</span>" +
+      '<span class="fsl-buy-sub">' + s.rating + " · " + esc(s.pos) + " · " + esc(s.l) + " " + esc(s.n) +
+      ' · <a class="fsl-buy-link" href="#market">' + esc(t("buy.openMarket")) + " ↗</a></span></span>" +
+      '<span class="fsl-buy-price fsl-num">' + fmt(s.cost) + "<span>" + esc(t("buy.suggested")) + "</span></span></div>";
+  }).join("");
+  return '<div class="fsl-buy" aria-label="' + esc(t("a11y.buyList", { count: concepts.length })) + '">' +
+    '<div class="fsl-buy-head"><span class="fsl-buy-title">' + esc(t("buy.title")) + "</span>" +
+    '<span class="fsl-buy-count">' + esc(t("buy.count", { count: concepts.length })) + "</span></div>" +
+    '<p class="fsl-buy-note">' + esc(t("buy.separator")) + "</p>" + rows +
+    '<div class="fsl-buy-total"><span>' + esc(t("buy.buyTotal")) + '</span><b class="fsl-num">' + fmt(buyTotal) + "</b></div>" +
+    '<p class="fsl-buy-honest">' + esc(t("buy.honestNote", { count: concepts.length, cost: fmt(buyTotal) })) + "</p></div>";
+}
+
+function panelHTML() {
+  var body;
+  if (view === "idle") { body = idleHTML(); }
+  else if (view === "solving") { body = solvingHTML(); }
+  else if (view === "noSolution") { body = noSolutionHTML(); }
+  else if (view === "notOnPage") { body = notOnPageHTML(); }
+  else {
+    body = '<ul class="fsl-list" role="list" aria-label="' + esc(t("a11y.squadList", { count: 11 })) + '">' +
+      SQUAD.map(rowHTML).join("") + "</ul>" + (buying ? buyHTML() : "") +
+      '<div class="fsl-toolbar" style="border-top:1px solid var(--fsl-border);border-bottom:0">' +
+      '<span class="fsl-toolbar-count">' + esc(t("panel.footer", { formation: FORMATION, lineups: fmt(214), seconds: "4.2" })) + "</span>" +
+      '<button class="fsl-btn fsl-btn-ghost" type="button" data-act="copy">' + esc(t("panel.copyList")) + "</button></div>";
+  }
+  var showToolbar = view === "solved" || view === "solving";
+  return '<${TAG} class="fsl-root fsl-panel" data-od-id="fsl-panel" data-view="' + view + '" data-buying="' + buying +
+    '" role="region" aria-label="' + esc(t("a11y.panel")) + '" style="--rb-panel-w:' + panelW + 'px">' +
+    headHTML() + (showToolbar ? toolbarHTML() : "") + body + "</${TAG}>";
+}
+
+function renderPanel() {
+  var mount = document.getElementById("panelMount");
+  mount.innerHTML = panelHTML().split("${TAG}").join("section");
+  if (pendingFocus) {
+    var target = pendingFocus.lock
+      ? mount.querySelector('.fsl-lock[data-row="' + pendingFocus.row + '"]')
+      : mount.querySelector('.fsl-row-toggle[data-row="' + pendingFocus.row + '"]');
+    if (target) { target.focus(); }
+    pendingFocus = null;
+  }
+}
+
+/* ── static i18n for popup, options, board chrome ───────────────────────── */
+function applyStatic() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach(function (n) {
+    var vars = n.getAttribute("data-i18n-vars");
+    n.textContent = t(n.getAttribute("data-i18n"), vars ? JSON.parse(vars) : null);
+  });
+  document.title = t("reference.pageTitle");
+}
+
+function renderPopupList() {
+  var ul = document.getElementById("popupList");
+  ul.innerHTML = SQUAD.slice(0, 5).map(function (s) {
+    return "<li><span class=\"fsl-popup-pos\">" + esc(s.pos) + '</span><span class="fsl-popup-playername">' +
+      esc(s.name) + '</span><span class="fsl-num">' + (s.cost ? fmt(s.cost) : "0") + "</span></li>";
+  }).join("") + '<li><span class="fsl-popup-pos">+6</span><span class="fsl-popup-more">' +
+    esc(t("panel.slotsFilled", { filled: 11, slots: 11 })) + '</span><span class="fsl-num fsl-popup-more">…</span></li>';
+}
+
+/* ── board chrome ───────────────────────────────────────────────────────── */
+var STATES = [
+  { id: "idle", key: "reference.stateIdle" },
+  { id: "solving", key: "reference.stateSolving" },
+  { id: "solved", key: "reference.stateSolved", buying: true },
+  { id: "buy", key: "reference.stateBuy", buying: true },
+  { id: "noSolution", key: "reference.stateNoSolution" },
+  { id: "notOnPage", key: "reference.stateNotOnPage" }
+];
+var WIDTHS = [320, 400, 420];
+
+function renderControls() {
+  var seg = document.getElementById("stateSeg");
+  seg.innerHTML = STATES.map(function (s) {
+    var on = (view === "solved" && s.id === "solved" && !buying) || (view === "solved" && s.id === "buy" && buying) ||
+      (view !== "solved" && s.id === view);
+    return '<button type="button" data-state="' + s.id + '" aria-pressed="' + on + '">' + esc(t(s.key)) + "</button>";
+  }).join("");
+  document.getElementById("widthSeg").innerHTML = WIDTHS.map(function (w) {
+    return '<button type="button" data-width="' + w + '" aria-pressed="' + (panelW === w) + '">' + w + " px</button>";
+  }).join("");
+  document.querySelectorAll("[data-lang]").forEach(function (b) {
+    b.setAttribute("aria-pressed", String(b.getAttribute("data-lang") === lang));
+  });
+  document.getElementById("railNote").textContent =
+    "alts open: slot 06 · locked: " + Object.keys(LOCKED).filter(function (k) { return LOCKED[k]; }).join(", ");
+}
+
+function renderTables() {
+  document.getElementById("kbdTable").innerHTML = [
+    ["Tab / Shift+Tab", "Move between slots, lock toggles, alternatives, buy links", "Panel"],
+    ["↑ / ↓", "Previous / next slot row", "Row focused"],
+    ["Enter / Space", "Open or close that row's alternatives", "Row focused"],
+    ["L", "Toggle lock on the focused row", "Row focused"],
+    ["↑ / ↓", "Move between ranked alternatives", "Alternatives open"],
+    ["Enter", "Swap the focused alternative into the squad", "Alternatives open"],
+    ["Esc", "Close alternatives, return focus to the row", "Alternatives open"],
+    ["S", "Solve / re-solve", "Panel"]
+  ].map(function (r) {
+    return "<tr><td><span class=\"rb-kbd\">" + esc(r[0]) + "</span></td><td>" + esc(r[1]) + "</td><td class=\"rb-mono\">" + esc(r[2]) + "</td></tr>";
+  }).join("");
+  document.getElementById("motionTable").innerHTML = [
+    ["Row hover / focus wash", "90 ms · ease-out"],
+    ["Alternatives expansion", "140 ms · ease-out"],
+    ["Cost counter settling", "220 ms · ease-settle"],
+    ["Swapped-row confirmation", "340 ms · ease-settle"],
+    ["Solver rail pass", "1400 ms · linear / ease-in-out"],
+    ["Switch knob", "140 ms · ease-in-out"]
+  ].map(function (r) {
+    return "<tr><td>" + esc(r[0]) + "</td><td class=\"rb-mono\">" + esc(r[1]) + "</td></tr>";
+  }).join("");
+  document.getElementById("stateTable").innerHTML = [
+    ["Idle", "Challenge read, cost placeholders, club pool readout", "One primary: solve"],
+    ["Solving", "Five-step rail, three live counters, skeleton rows", "Primary disabled"],
+    ["Solved", "11 slots, cost summary, inline alternatives", "Primary: solve again"],
+    ["Solved with purchases", "Concept rows and a separated buy list with an honest total", "Primary unchanged"],
+    ["No valid solution", "Exact deficits, closest attempt, three ways forward", "Secondary fixes"],
+    ["Not on an SBC page", "Explanation and a rescan action", "One ghost action"]
+  ].map(function (r) {
+    return "<tr><td class=\"rb-mono\">" + esc(r[0]) + "</td><td>" + esc(r[1]) + "</td><td class=\"rb-mono\">" + esc(r[2]) + "</td></tr>";
+  }).join("");
+}
+
+function renderSwatches() {
+  var data = [
+    ["--fsl-surface-0", "var(--fsl-surface-0)", "Panel body, sits on the host page"],
+    ["--fsl-surface-1", "var(--fsl-surface-1)", "Slot rows, header, cards"],
+    ["--fsl-surface-2", "var(--fsl-surface-2)", "Row hover, open row, locked row"],
+    ["--fsl-surface-inset", "var(--fsl-surface-inset)", "Cost bar, alternatives, buy list"],
+    ["--fsl-fg", "var(--fsl-fg)", "Primary text — 16.1:1 on surface-1"],
+    ["--fsl-fg-muted", "var(--fsl-fg-muted)", "Secondary text — 7.9:1"],
+    ["--fsl-fg-dim", "var(--fsl-fg-dim)", "Micro labels, mono meta — 5.2:1"],
+    ["--fsl-accent", "var(--fsl-accent)", "The one accent: primary CTA + concept state"],
+    ["--fsl-success", "var(--fsl-success)", "Untradeable, cheapest alternative deltas"],
+    ["--fsl-warning", "var(--fsl-warning)", "Duplicate, out of position, buy list"],
+    ["--fsl-danger", "var(--fsl-danger)", "Destructive reset only — never an error state"],
+    ["--fsl-border-strong", "var(--fsl-border-strong)", "Control outlines, input borders"]
+  ];
+  document.getElementById("swatches").innerHTML = data.map(function (d) {
+    return '<div class="rb-swatch"><div class="rb-swatch-chip" style="background:' + d[1] + '"></div>' +
+      '<div class="rb-swatch-meta"><div class="rb-swatch-name">' + esc(d[0]) + '</div>' +
+      '<div class="rb-swatch-use">' + esc(d[2]) + "</div></div></div>";
+  }).join("");
+}
+
+function renderOptions() {
+  var effort = [{ v: "1", k: "options.effort.fast" }, { v: "3", k: "options.effort.balanced" }, { v: "5", k: "options.effort.thorough" }];
+  document.getElementById("effortSeg").innerHTML = effort.map(function (e, i) {
+    return '<button type="button" data-effort="' + e.v + '" aria-pressed="' + (e.v === "3") + '">' + esc(t(e.k)) + "</button>";
+  }).join("");
+  document.getElementById("priceSeg").innerHTML = [
+    { v: "market", k: "options.prices.market" }, { v: "club", k: "options.prices.club" }
+  ].map(function (p) {
+    return '<button type="button" data-price="' + p.v + '" aria-pressed="' + (p.v === "market") + '">' + esc(t(p.k)) + "</button>";
+  }).join("");
+  document.getElementById("priceHint").textContent = t("options.prices.marketHint");
+  document.getElementById("langSeg").innerHTML = [["da", "Dansk"], ["en", "English"]].map(function (l) {
+    return '<button type="button" data-lang="' + l[0] + '" aria-pressed="' + (l[0] === lang) + '">' + esc(l[1]) + "</button>";
+  }).join("");
+  document.querySelector('[data-out="maxBuy"]').textContent = t("options.concepts.maxHint", { value: 3 });
+  document.querySelector('[data-out="panelW"]').textContent = t("options.interface.panelWidthHint", { value: panelW });
+}
+
+function renderAll() {
+  applyStatic();
+  renderControls();
+  renderPanel();
+  renderPopupList();
+  renderTables();
+  renderSwatches();
+  renderOptions();
+}
+
+/* ── interactions ───────────────────────────────────────────────────────── */
+function setState(id) {
+  var spec = STATES.filter(function (s) { return s.id === id; })[0] || STATES[2];
+  view = id === "buy" ? "solved" : id;
+  buying = id === "buy" || id === "solved" ? (id === "buy") : true;
+  openRow = view === "solved" ? 5 : null;
+  renderAll();
+}
+function setLang(next) { lang = next; renderAll(); }
+
+document.addEventListener("click", function (e) {
+  var b = e.target.closest("button, a");
+  if (!b) { return; }
+  if (b.hasAttribute("data-state")) { setState(b.getAttribute("data-state")); return; }
+  if (b.hasAttribute("data-width")) { panelW = parseInt(b.getAttribute("data-width"), 10); renderAll(); return; }
+  if (b.hasAttribute("data-lang")) { setLang(b.getAttribute("data-lang")); return; }
+  if (b.hasAttribute("data-effort")) {
+    document.querySelectorAll("[data-effort]").forEach(function (n) { n.setAttribute("aria-pressed", String(n === b)); });
+    document.querySelector(".fsl-hint").textContent = t("options.effort.hint", { value: b.getAttribute("data-effort"), lineups: fmt(Number(b.getAttribute("data-effort")) * 800) });
+    return;
+  }
+  if (b.hasAttribute("data-price")) {
+    document.querySelectorAll("[data-price]").forEach(function (n) { n.setAttribute("aria-pressed", String(n === b)); });
+    document.getElementById("priceHint").textContent = t(b.getAttribute("data-price") === "market" ? "options.prices.marketHint" : "options.prices.clubHint");
+    return;
+  }
+  var act = b.getAttribute("data-act");
+  if (act === "toggle") {
+    var i = Number(b.getAttribute("data-row"));
+    openRow = openRow === i ? null : i;
+    pendingFocus = { row: i, lock: false };
+    swappedRow = null;
+    renderPanel();
+    return;
+  }
+  if (act === "lock") {
+    var li = Number(b.getAttribute("data-row"));
+    LOCKED[li] = !LOCKED[li];
+    if (!LOCKED[li]) { delete LOCKED[li]; }
+    pendingFocus = { row: li, lock: true };
+    renderPanel();
+    renderControls();
+    return;
+  }
+  if (act === "swap") {
+    var row = Number(b.getAttribute("data-row"));
+    var name = b.getAttribute("data-alt");
+    var cost = Number(b.getAttribute("data-cost"));
+    var alt = (ALTS[row] || []).filter(function (a) { return a.name === name; })[0];
+    SQUAD[row].name = name;
+    SQUAD[row].cost = cost;
+    SQUAD[row].rating = alt.rating;
+    SQUAD[row].state = "tradeable";
+    openRow = null;
+    swappedRow = row;
+    pendingFocus = { row: row, lock: false };
+    renderPanel();
+    var total = SQUAD.reduce(function (a, s) { return a + s.cost; }, 0);
+    var live = document.getElementById("costTotal");
+    if (live) { live.textContent = fmt(total); }
+    window.setTimeout(function () { swappedRow = null; }, 400);
+    return;
+  }
+  if (act === "solve") { setState("solving"); return; }
+  if (act === "copy") { b.textContent = t("panel.copied") || "OK"; return; }
+  if (b.hasAttribute("data-lang")) { return; }
+});
+
+document.addEventListener("keydown", function (e) {
+  var row = e.target.closest && e.target.closest(".fsl-row");
+  if (e.key === "Escape" && openRow !== null) { pendingFocus = { row: openRow, lock: false }; openRow = null; renderPanel(); return; }
+  if (!row) { return; }
+  var lists = Array.prototype.slice.call(document.querySelectorAll(".fsl-row-toggle"));
+  var idx = Number(row.getAttribute("data-index"));
+  if (e.key === "ArrowDown" && e.target.classList.contains("fsl-row-toggle")) {
+    e.preventDefault();
+    var nd = lists.filter(function (n) { return Number(n.getAttribute("data-row")) === Math.min(idx + 1, 10); })[0];
+    if (nd) { nd.focus(); }
+  } else if (e.key === "ArrowUp" && e.target.classList.contains("fsl-row-toggle")) {
+    e.preventDefault();
+    var nu = lists.filter(function (n) { return Number(n.getAttribute("data-row")) === Math.max(idx - 1, 0); })[0];
+    if (nu) { nu.focus(); }
+  } else if (e.key.toLowerCase() === "l" && document.activeElement.classList.contains("fsl-row-toggle")) {
+    e.preventDefault();
+    LOCKED[idx] = !LOCKED[idx];
+    if (!LOCKED[idx]) { delete LOCKED[idx]; }
+    pendingFocus = { row: idx, lock: false };
+    renderPanel();
+  } else if (e.key.toLowerCase() === "s" && !document.activeElement.closest(".fsl-options")) {
+    e.preventDefault();
+    setState("solving");
+  }
+});
+
+/* switches + ranges in the options page */
+document.addEventListener("click", function (e) {
+  var sw = e.target.closest(".fsl-switch");
+  if (sw) { sw.setAttribute("aria-checked", sw.getAttribute("aria-checked") === "true" ? "false" : "true"); }
+});
+document.addEventListener("input", function (e) {
+  var r = e.target.closest(".fsl-range");
+  if (!r) { return; }
+  var out = document.querySelector('[data-out="' + r.id + '"]');
+  if (!out) { return; }
+  if (r.id === "panelW") {
+    panelW = Number(r.value);
+    out.textContent = t("options.interface.panelWidthHint", { value: r.value });
+    document.getElementById("widthSeg").innerHTML = WIDTHS.map(function (w) {
+      return '<button type="button" data-width="' + w + '" aria-pressed="' + (panelW === w) + '">' + w + " px</button>";
+    }).join("");
+    renderPanel();
+  } else if (r.id === "maxBuy") {
+    out.textContent = t("options.concepts.maxHint", { value: r.value });
+  } else {
+    out.textContent = Number(r.value).toFixed(2);
+  }
+});
+
+renderAll();
+</script>
+</body>
+</html>

@@ -1,0 +1,179 @@
+/* ============================================================================
+   FUT Squad Lab — tokens.css
+   Single source of truth for colour, typography, spacing, radii and motion.
+
+   SCOPE: every custom property is prefixed `--fsl-` and every component class
+   is prefixed `fsl-`. The panel is injected into EA's web app, whose own
+   variables change between game versions; collision-proof naming is what keeps
+   this stylesheet independent of theirs. Nothing here reads a host variable,
+   and nothing here writes a global selector.
+
+   USAGE: link this file once, then wrap the injected UI in `.fsl-root`:
+
+       <aside class="fsl-root" data-od-id="fsl-panel"> … </aside>
+
+   `.fsl-root` re-declares the palette so that a light host page can never bleed
+   through, and so that a future light theme is a second `.fsl-root` block
+   rather than a fork of every component.
+   ========================================================================== */
+
+.fsl-root {
+  /* ── Surfaces — three levels, near-black, cool neutral ─────────────────── */
+  --fsl-surface-0: oklch(0.165 0.013 250);   /* panel body; sits on the host page  */
+  --fsl-surface-1: oklch(0.208 0.015 250);   /* slot rows, cards, panel header     */
+  --fsl-surface-2: oklch(0.255 0.017 250);   /* row hover, open row, popover       */
+  --fsl-surface-inset: oklch(0.135 0.012 250); /* wells: cost summary, buy list    */
+
+  /* ── Lines ─────────────────────────────────────────────────────────────── */
+  --fsl-border: oklch(0.30 0.016 250);         /* hairline separators (decorative) */
+  --fsl-border-strong: oklch(0.48 0.018 250);  /* input + control outlines         */
+  --fsl-border-inverse: oklch(0.965 0.006 250); /* locked row: the user's own choice */
+
+  /* ── Text ──────────────────────────────────────────────────────────────── */
+  --fsl-fg: oklch(0.965 0.006 250);   /* 16.1:1 on surface-1 */
+  --fsl-fg-muted: oklch(0.745 0.014 250); /* 7.9:1 */
+  --fsl-fg-dim: oklch(0.635 0.014 250);   /* 5.2:1 — micro labels, mono meta */
+
+  /* ── The one accent (cyan). Budget: primary CTA + the concept/buy state. ── */
+  --fsl-accent: oklch(0.815 0.135 197);
+  --fsl-accent-fg: oklch(0.18 0.02 240);       /* text on accent fill — 11.1:1 */
+  --fsl-accent-deep: oklch(0.62 0.11 197);     /* borders that must not shout  */
+  --fsl-accent-soft: color-mix(in oklch, var(--fsl-accent) 16%, transparent);
+  --fsl-accent-line: color-mix(in oklch, var(--fsl-accent) 42%, transparent);
+
+  /* ── Semantic ──────────────────────────────────────────────────────────── */
+  --fsl-success: oklch(0.835 0.16 142);        /* 11.3:1 on surface-1 */
+  --fsl-warning: oklch(0.83 0.145 82);         /* 10.4:1 */
+  --fsl-danger: oklch(0.715 0.185 25);         /*  6.4:1 */
+  --fsl-success-soft: color-mix(in oklch, var(--fsl-success) 16%, transparent);
+  --fsl-warning-soft: color-mix(in oklch, var(--fsl-warning) 16%, transparent);
+  --fsl-danger-soft: color-mix(in oklch, var(--fsl-danger) 16%, transparent);
+  --fsl-fg-on-warning: oklch(0.28 0.06 82);    /* text on a warning fill */
+
+  /* ── Card states. Each state = colour + glyph + word, never colour alone. ─ */
+  --fsl-state-tradeable: var(--fsl-fg-muted);      /* ⇄  neutral: yours to sell   */
+  --fsl-state-untradeable: var(--fsl-success);     /* ⛓̶  lime: stays in the club */
+  --fsl-state-duplicate: var(--fsl-warning);       /* ⧉  amber: wasted copy       */
+  --fsl-state-concept: var(--fsl-accent);          /* +  cyan: not owned yet      */
+  --fsl-state-tradeable-bg: color-mix(in oklch, var(--fsl-fg-muted) 12%, transparent);
+  --fsl-state-untradeable-bg: var(--fsl-success-soft);
+  --fsl-state-duplicate-bg: var(--fsl-warning-soft);
+  --fsl-state-concept-bg: var(--fsl-accent-soft);
+
+  /* ── Typography ─────────────────────────────────────────────────────────
+     One sans family for everything, per the brief. Headings get the condensed
+     uppercase treatment through tracking + `font-stretch`, not a second file.
+     Every figure carries `--fsl-font-mono` with tabular figures so costs,
+     ratings and chemistry align in columns. */
+  --fsl-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+                 "Helvetica Neue", Arial, sans-serif;
+  --fsl-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono",
+                   Menlo, Consolas, monospace;
+  --fsl-font-display: var(--fsl-font-ui);
+
+  --fsl-fs-10: 10px;   /* legal, slot position code                     */
+  --fsl-fs-11: 11px;   /* state chips, mono meta, column headers        */
+  --fsl-fs-12: 12px;   /* secondary body, alternative rows              */
+  --fsl-fs-13: 13px;   /* default body — the panel's base size          */
+  --fsl-fs-15: 15px;   /* section titles, emphasis numbers              */
+  --fsl-fs-20: 20px;   /* the header cost total                         */
+  --fsl-fs-28: 28px;   /* options page section title                    */
+
+  --fsl-lh-tight: 1.15;
+  --fsl-lh-snug: 1.3;
+  --fsl-lh-base: 1.45;
+
+  --fsl-track-tight: -0.01em;   /* headings            */
+  --fsl-track-wide: 0.06em;     /* uppercase labels    */
+  --fsl-track-caps: 0.1em;      /* micro caps + codes  */
+
+  --fsl-w-regular: 400;
+  --fsl-w-medium: 500;
+  --fsl-w-semibold: 600;
+
+  /* ── Space — 4 px grid, tuned for a 320 px column ──────────────────────── */
+  --fsl-sp-1: 2px;
+  --fsl-sp-2: 4px;
+  --fsl-sp-3: 6px;
+  --fsl-sp-4: 8px;
+  --fsl-sp-5: 12px;
+  --fsl-sp-6: 16px;
+  --fsl-sp-7: 20px;
+  --fsl-sp-8: 28px;
+
+  /* ── Radii — nothing here is a big soft SaaS card ──────────────────────── */
+  --fsl-r-1: 3px;    /* chips, tags                 */
+  --fsl-r-2: 5px;    /* inputs, buttons, rows       */
+  --fsl-r-3: 8px;    /* panel, popover              */
+  --fsl-r-pill: 999px;
+
+  /* ── Sizing ────────────────────────────────────────────────────────────── */
+  --fsl-panel-min: 320px;
+  --fsl-panel-default: 400px;
+  --fsl-panel-max: 420px;
+  --fsl-row-min-h: 46px;      /* slot row at 320 px     */
+  --fsl-row-min-h-wide: 44px;
+  --fsl-ctl: 32px;            /* visual control size    */
+  --fsl-hit: 44px;            /* pointer target, reached with a pseudo-element */
+  --fsl-popup-w: 360px;
+  --fsl-options-w: 620px;
+
+  /* ── Motion ─────────────────────────────────────────────────────────────
+     Four durations, three easings. Everything below is the full allowance:
+     there is no fifth duration and no decorative animation in this product. */
+  --fsl-dur-1: 90ms;    /* chip + border changes on hover / focus     */
+  --fsl-dur-2: 140ms;   /* popover + alternatives expansion           */
+  --fsl-dur-3: 220ms;   /* the cost counter settling after a swap     */
+  --fsl-dur-4: 340ms;   /* the swapped row's confirmation wash        */
+  --fsl-dur-solve: 1400ms; /* one pass of the solver progress rail    */
+
+  --fsl-ease-out: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --fsl-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --fsl-ease-settle: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ── Elevation ───────────────────────────────────────────────────────────
+     Two shadows only. The panel must read as a surface over the host page,
+     not as a floating widget: a 1 px light edge plus a soft drop. */
+  --fsl-shadow-panel: 0 1px 0 color-mix(in oklch, var(--fsl-fg) 7%, transparent) inset,
+                      0 12px 32px color-mix(in oklch, black 55%, transparent);
+  --fsl-shadow-popover: 0 8px 24px color-mix(in oklch, black 62%, transparent);
+
+  --fsl-z-panel: 5;
+  --fsl-z-popover: 20;
+}
+
+/* ── Reset scoped to the injected root: never touches host markup ────────── */
+.fsl-root,
+.fsl-root *,
+.fsl-root *::before,
+.fsl-root *::after { box-sizing: border-box; }
+
+.fsl-root {
+  font-family: var(--fsl-font-ui);
+  font-size: var(--fsl-fs-13);
+  line-height: var(--fsl-lh-base);
+  color: var(--fsl-fg);
+  background: var(--fsl-surface-0);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── Figure treatment: costs, ratings, chemistry, timers ─────────────────── */
+.fsl-num {
+  font-family: var(--fsl-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+  letter-spacing: var(--fsl-track-tight);
+}
+
+/* ── Reduced motion: the swap confirmation and the solver rail become cuts,
+      and the cost counter jumps to its final value instead of counting. ──── */
+@media (prefers-reduced-motion: reduce) {
+  .fsl-root {
+    --fsl-dur-1: 0.01ms;
+    --fsl-dur-2: 0.01ms;
+    --fsl-dur-3: 0.01ms;
+    --fsl-dur-4: 0.01ms;
+    --fsl-dur-solve: 0.01ms;
+  }
+}
