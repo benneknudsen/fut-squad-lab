@@ -98,12 +98,20 @@ const without = (object, key) => {
 const rawClubItems = () =>
   Array.from({ length: 11 }, (_, index) => ({
     id: 9000 + index,
+    assetId: 5000 + index,
     rating: 80,
     nation: 10 + index,
     leagueId: 100 + index,
     teamid: index < 2 ? 700 : 700 + index,
     rareflag: 0,
+    cardsubtypeid: 0,
+    playStyle: 0,
+    preferredPosition: 'ST',
+    possiblePositions: ['ST'],
     untradeable: false,
+    pile: 7,
+    owners: 1,
+    isCollected: true,
   }));
 
 const rawClubSquad = () => ({
@@ -834,24 +842,46 @@ describe('stable field mapping through normaliseClubItem', () => {
 
     expect(normaliseClubItem(raw)).toEqual({
       id: raw.id,
+      assetId: raw.assetId,
       rating: raw.rating,
       nationId: raw.nation,
       leagueId: raw.leagueId,
       clubId: raw.teamid,
       rarity: raw.rareflag,
+      cardSubtype: raw.cardsubtypeid,
+      playStyles: raw.playStyle,
+      preferredPosition: raw.preferredPosition,
+      possiblePositions: raw.possiblePositions,
+      rolePlus: raw.plusRoles,
+      rolePlusPlus: raw.plusPlusRoles ?? [],
       untradeable: raw.untradeable,
+      pile: raw.pile,
+      owners: raw.owners,
+      collected: raw.isCollected,
+      marketAverage: raw.marketAverage,
+      marketMin: raw.marketDataMinPrice,
+      marketMax: raw.marketDataMaxPrice,
+      discardValue: raw.discardValue,
     });
   });
 
   it('takes clubId from the raw teamid even when the payload carries a conflicting clubId', () => {
     const raw = {
       id: 1,
+      assetId: 1,
       rating: 80,
       nation: 1,
       leagueId: 16,
       teamid: 5,
       rareflag: 0,
+      cardsubtypeid: 0,
+      playStyle: 0,
+      preferredPosition: 'ST',
+      possiblePositions: ['ST'],
       untradeable: false,
+      pile: 7,
+      owners: 1,
+      isCollected: true,
       clubId: 999,
     };
 
