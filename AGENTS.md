@@ -35,6 +35,48 @@ surface and the requirement model, which this project depends on.
 6. **No auto-submit.** The extension fills a squad. It must never submit a
    challenge on the user's behalf.
 
+## Design contract
+
+`design/` is the design contract for `src/ui/`. It is the **sole** source for colour,
+typography, spacing, motion and UI copy.
+
+**The authoritative document is `design/README.md`.** Read it before any UI work.
+
+> **`design/DESIGN-HANDOFF.md` is OpenDesign's generic boilerplate and does NOT apply
+> here.** It instructs you to start from `logo.html`, to map HTML screens to routes, and
+> it discusses landing pages, OS widgets and React/Vue/SwiftUI targets. There is none of
+> that in this project: our UI is a panel injected into someone else's web app. Where
+> `DESIGN-HANDOFF.md` and `design/README.md` disagree, **`design/README.md` wins.**
+
+Rules that follow from the contract:
+
+1. **No invented styles.** Colour, type, space, radii and motion come from
+   `design/tokens.css`. Do not add hex values, do not invent a token, do not reach for a
+   framework default.
+2. **No invented copy.** Every UI string exists in `design/copy.da.json` and
+   `design/copy.en.json`. Nothing is hardcoded, including micro-labels and the state
+   words on chips.
+3. **Scope everything.** All selectors live under `.fsl-root`; all custom properties are
+   prefixed `--fsl-`. Never style `body`, `html`, `*`, or any host class.
+4. **Never read the host's CSS variables.** They change between game versions. Read the
+   DOM for challenge data; never read the host stylesheet for presentation.
+5. **Container queries, not media queries**, for the panel's internal reflow. The
+   viewport is the player's browser; the container is the injected column. Breakpoint:
+   348 px.
+6. **`design/reference/vision.html` is a reference board to read, not markup to copy.**
+7. **No EA-owned asset** may be added at any point. The design uses placeholder player
+   identities deliberately.
+
+Run the bundle's own checks before claiming UI work is done:
+
+```bash
+cd design
+python3 tools/contrast-check.py                                     # token contrast table
+NODE_PATH=/tmp/fsl-test/node_modules node tools/vision-smoke-test.js reference/vision.html
+```
+
+The jsdom dependency is one-time: `cd /tmp && mkdir -p fsl-test && cd fsl-test && npm i jsdom`.
+
 ## Repository layout
 
 ```
