@@ -1,7 +1,12 @@
 /**
  * The one file that knows EA SPORTS FC 27 SBC class names, eligibility key
- * numbers and enum values. Every other module imports EA-specific naming from
- * here, so that when EA renames something exactly one file changes.
+ * numbers, enum values and the raw `/club` item payload shape. Every other
+ * module imports EA-specific naming from here, so that when EA renames
+ * something exactly one file changes.
+ *
+ * `normaliseClubItem` at the bottom is the club-payload half of that boundary:
+ * it translates raw items into the stable solver schema, and the solver core
+ * may only ever see the translated form.
  *
  * ## Production entry point vs. pinned observation data
  *
@@ -110,4 +115,49 @@ export function readEligibilityKeys() {
       'not fall back to the pinned observation table; tests import PINNED_ELIGIBILITY_KEYS ' +
       'directly.'
   );
+}
+
+/** Raw `/club` item fields the stable schema cannot be built without. */
+const RAW_ITEM_NUMERIC_FIELDS = Object.freeze(['rating', 'nation', 'teamid']);
+
+/**
+ * The one translation from a raw `/club` payload item to the stable item schema
+ * the solver core codes against:
+ *
+ *   { id, rating, nationId, leagueId, clubId, rarity, untradeable }
+ *
+ * `nation` becomes `nationId`, `teamid` becomes `clubId` and `rareflag` becomes
+ * `rarity`; `id`, `rating`, `leagueId` and `untradeable` keep their names. This
+ * is the only place that may know the raw `/club` field names —
+ * `src/solver/validate.js` reads the stable schema only, and rejects an
+ * un-normalised item.
+ *
+ * The raw payload must carry `rating`, `nation` and `teamid` as finite numbers.
+ * This boundary is the only point where the raw shape is known, so a missing
+ * field throws here with that context instead of silently producing an
+ * `undefined` that only surfaces later as a confusing solver error.
+ *
+ * @param {object} rawItem one item from the `/club` response
+ * @returns {{ id: number, rating: number, nationId: number, leagueId: number,
+ *   clubId: number, rarity: number, untradeable: boolean }}
+ * @throws {Error} when the raw item lacks a finite `rating`, `nation` or `teamid`
+ */
+export function normaliseClubItem(rawItem) {
+  for (const field of RAW_ITEM_NUMERIC_FIELDS) {
+    if (!Number.isFinite(rawItem[field])) {
+      throw new Error(
+        `normaliseClubItem: raw item must carry a finite ${field}; the /club payload shape may` +
+          ' have changed'
+      );
+    }
+  }
+  return {
+    id: rawItem.id,
+    rating: rawItem.rating,
+    nationId: rawItem.nation,
+    leagueId: rawItem.leagueId,
+    clubId: rawItem.teamid,
+    rarity: rawItem.rareflag,
+    untradeable: rawItem.untradeable,
+  };
 }
