@@ -22,6 +22,16 @@
  * development and test data, read off the captured fixtures in `test/fixtures/`.
  * Tests import them directly; production code must not.
  *
+ * ## Optional role-id lists
+ *
+ * `normaliseClubItem` exposes `plusRoles` as `rolePlus` and `plusPlusRoles` as
+ * `rolePlusPlus`: lists of role-id numbers for later rarity and special-card
+ * rules (#6 and beyond). `plusRoles` is present on every captured fixture item
+ * and `plusPlusRoles` on only a few, but neither list feeds any measurement
+ * yet, so a missing list is not evidence that the payload shape changed and
+ * normalises to `[]` rather than throwing. A list that is present must still be
+ * dense and numeric; see `normaliseClubItem`.
+ *
  * ## Stable solver vocabulary
  *
  * `PINNED_ELIGIBILITY_KEYS` maps `eligibilityKey` to a descriptor:
@@ -117,47 +127,194 @@ export function readEligibilityKeys() {
   );
 }
 
-/** Raw `/club` item fields the stable schema cannot be built without. */
-const RAW_ITEM_NUMERIC_FIELDS = Object.freeze(['rating', 'nation', 'teamid']);
+/**
+ * Raw `/club` fields the stable schema cannot be built without, by the kind of
+ * value the payload must carry. Most keep their name across the boundary;
+ * `nation` becomes `nationId`, `teamid` becomes `clubId` and `rareflag` becomes
+ * `rarity` (see `normaliseClubItem`).
+ */
+const RAW_ITEM_NUMBER_FIELDS = Object.freeze([
+  'id',
+  'assetId',
+  'rating',
+  'nation',
+  'leagueId',
+  'teamid',
+  'rareflag',
+  'cardsubtypeid',
+  'playStyle',
+  'pile',
+  'owners',
+]);
+
+const RAW_ITEM_STRING_FIELDS = Object.freeze(['preferredPosition']);
+
+const RAW_ITEM_BOOLEAN_FIELDS = Object.freeze(['untradeable', 'isCollected']);
+
+const RAW_ITEM_POSITION_LIST_FIELD = 'possiblePositions';
+
+/**
+ * Optional role-id lists for later rarity/special-card rules, keyed by their raw
+ * payload names. Both are read through `readRoleList`, which tolerates absence.
+ */
+const RAW_ITEM_ROLE_PLUS_FIELD = 'plusRoles';
+const RAW_ITEM_ROLE_PLUS_PLUS_FIELD = 'plusPlusRoles';
+
+/**
+ * Price fields are nullable in the real payload: a club item can carry no
+ * market average at all. `null` and an absent key both normalise to `null` —
+ * unknown, not free — so a missing price can never quietly become 0. A present
+ * value that is not a finite number is rejected instead of coerced.
+ */
+const RAW_ITEM_PRICE_FIELDS = Object.freeze([
+  'marketAverage',
+  'marketDataMinPrice',
+  'marketDataMaxPrice',
+  'discardValue',
+]);
+
+const isNonEmptyString = (value) => typeof value === 'string' && value.length > 0;
+
+const isBoolean = (value) => typeof value === 'boolean';
+
+/**
+ * `Array.prototype.every` skips holes, so a sparse list like
+ * `['ST', , 'CAM']` would pass an element check vacuously and spread an
+ * `undefined` into the stable record. Reject holes before checking elements.
+ */
+const isDenseArray = (value) => {
+  for (let index = 0; index < value.length; index++) {
+    if (!Object.hasOwn(value, index)) return false;
+  }
+  return true;
+};
+
+const isStringArray = (value) =>
+  Array.isArray(value) && isDenseArray(value) && value.every(isNonEmptyString);
+
+const isFiniteNumberArray = (value) =>
+  Array.isArray(value) && isDenseArray(value) && value.every(Number.isFinite);
+
+const isNullablePrice = (value) => value === null || value === undefined || Number.isFinite(value);
+
+const requireRawField = (rawItem, field, isValid, expected) => {
+  if (!isValid(rawItem[field])) {
+    throw new Error(
+      `normaliseClubItem: raw item must carry ${expected}; the /club payload shape may have` +
+        ' changed'
+    );
+  }
+};
+
+/**
+ * Reads an optional role-id list. Absence (`undefined`) and `null` both mean
+ * "no roles", never an error: the field is informational for later rules and is
+ * not measured yet, so its absence is not evidence of a payload change. When
+ * the field is present it must be a dense list of finite numbers; a wrong shape
+ * throws with the raw field name, the only place such names may appear.
+ */
+const readRoleList = (rawItem, field) => {
+  const value = rawItem[field];
+  if (value === undefined || value === null) return [];
+  if (!isFiniteNumberArray(value)) {
+    throw new Error(
+      `normaliseClubItem: raw item must carry ${field} as a dense array of finite numbers` +
+        ' when present; the /club payload shape may have changed'
+    );
+  }
+  return [...value];
+};
 
 /**
  * The one translation from a raw `/club` payload item to the stable item schema
  * the solver core codes against:
  *
- *   { id, rating, nationId, leagueId, clubId, rarity, untradeable }
+ *   { id, assetId, rating, nationId, leagueId, clubId, rarity, cardSubtype,
+ *     playStyles, preferredPosition, possiblePositions, rolePlus,
+ *     rolePlusPlus, untradeable, pile, owners, collected, marketAverage,
+ *     marketMin, marketMax, discardValue }
  *
- * `nation` becomes `nationId`, `teamid` becomes `clubId` and `rareflag` becomes
- * `rarity`; `id`, `rating`, `leagueId` and `untradeable` keep their names. This
- * is the only place that may know the raw `/club` field names —
+ * `nation` becomes `nationId`, `teamid` becomes `clubId`, `rareflag` becomes
+ * `rarity`, `cardsubtypeid` becomes `cardSubtype`, `playStyle` becomes
+ * `playStyles` and `isCollected` becomes `collected`; `id`, `assetId`,
+ * `rating`, `leagueId`, `preferredPosition`, `possiblePositions`,
+ * `untradeable`, `pile`, `owners`, `marketAverage`, `discardValue` keep their
+ * names. This is the only place that may know the raw `/club` field names —
  * `src/solver/validate.js` reads the stable schema only, and rejects an
  * un-normalised item.
  *
- * The raw payload must carry `rating`, `nation` and `teamid` as finite numbers.
+ * The raw payload must carry every non-price field as its declared type
+ * (finite number, non-empty string, array of position strings, or boolean).
  * This boundary is the only point where the raw shape is known, so a missing
  * field throws here with that context instead of silently producing an
- * `undefined` that only surfaces later as a confusing solver error.
+ * `undefined` that only surfaces later as a confusing solver error. The four
+ * price fields are the exception: `marketAverage`, `marketDataMinPrice`,
+ * `marketDataMaxPrice` and `discardValue` normalise a `null` or absent value
+ * to `null`, meaning "price unknown", never to 0.
+ *
+ * `plusRoles` and `plusPlusRoles` are a second deliberate exception, both
+ * optional lists of role-id numbers for later rarity rules that no measurement
+ * reads yet: absence (or `null`) normalises to `[]` because it carries no
+ * signal about the payload shape. A list that is present is still validated as
+ * dense and numeric.
  *
  * @param {object} rawItem one item from the `/club` response
- * @returns {{ id: number, rating: number, nationId: number, leagueId: number,
- *   clubId: number, rarity: number, untradeable: boolean }}
- * @throws {Error} when the raw item lacks a finite `rating`, `nation` or `teamid`
+ * @returns {{ id: number, assetId: number, rating: number, nationId: number,
+ *   leagueId: number, clubId: number, rarity: number, cardSubtype: number,
+ *   playStyles: number, preferredPosition: string,
+ *   possiblePositions: Array<string>, rolePlus: Array<number>,
+ *   rolePlusPlus: Array<number>, untradeable: boolean, pile: number,
+ *   owners: number, collected: boolean, marketAverage: number|null,
+ *   marketMin: number|null, marketMax: number|null,
+ *   discardValue: number|null }}
+ * @throws {Error} when the raw item lacks a required field or carries one of
+ *   the wrong type
  */
 export function normaliseClubItem(rawItem) {
-  for (const field of RAW_ITEM_NUMERIC_FIELDS) {
-    if (!Number.isFinite(rawItem[field])) {
-      throw new Error(
-        `normaliseClubItem: raw item must carry a finite ${field}; the /club payload shape may` +
-          ' have changed'
-      );
-    }
+  if (rawItem === null || typeof rawItem !== 'object' || Array.isArray(rawItem)) {
+    throw new Error(
+      'normaliseClubItem: raw item must be an object; the /club payload shape may have changed'
+    );
+  }
+  for (const field of RAW_ITEM_NUMBER_FIELDS) {
+    requireRawField(rawItem, field, Number.isFinite, `a finite ${field}`);
+  }
+  for (const field of RAW_ITEM_STRING_FIELDS) {
+    requireRawField(rawItem, field, isNonEmptyString, `a non-empty string ${field}`);
+  }
+  for (const field of RAW_ITEM_BOOLEAN_FIELDS) {
+    requireRawField(rawItem, field, isBoolean, `a boolean ${field}`);
+  }
+  requireRawField(
+    rawItem,
+    RAW_ITEM_POSITION_LIST_FIELD,
+    isStringArray,
+    `an array of non-empty strings ${RAW_ITEM_POSITION_LIST_FIELD}`
+  );
+  for (const field of RAW_ITEM_PRICE_FIELDS) {
+    requireRawField(rawItem, field, isNullablePrice, `a finite ${field} or null`);
   }
   return {
     id: rawItem.id,
+    assetId: rawItem.assetId,
     rating: rawItem.rating,
     nationId: rawItem.nation,
     leagueId: rawItem.leagueId,
     clubId: rawItem.teamid,
     rarity: rawItem.rareflag,
+    cardSubtype: rawItem.cardsubtypeid,
+    playStyles: rawItem.playStyle,
+    preferredPosition: rawItem.preferredPosition,
+    possiblePositions: [...rawItem.possiblePositions],
+    rolePlus: readRoleList(rawItem, RAW_ITEM_ROLE_PLUS_FIELD),
+    rolePlusPlus: readRoleList(rawItem, RAW_ITEM_ROLE_PLUS_PLUS_FIELD),
     untradeable: rawItem.untradeable,
+    pile: rawItem.pile,
+    owners: rawItem.owners,
+    collected: rawItem.isCollected,
+    marketAverage: rawItem.marketAverage ?? null,
+    marketMin: rawItem.marketDataMinPrice ?? null,
+    marketMax: rawItem.marketDataMaxPrice ?? null,
+    discardValue: rawItem.discardValue ?? null,
   };
 }
