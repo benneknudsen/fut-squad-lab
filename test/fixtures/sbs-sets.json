@@ -1,0 +1,238 @@
+{
+ "categories": [
+  {
+   "categoryId": 5,
+   "name": "Foundations",
+   "priority": 5,
+   "sets": [
+    {
+     "awards": [],
+     "categoryId": 5,
+     "challengesCompletedCount": 4,
+     "challengesCount": 4,
+     "contentId": 22532,
+     "description": "Complete these OVR-based challenges to earn rewards. ",
+     "endTime": 281568925,
+     "hidden": false,
+     "name": "Intro to SBCs",
+     "priority": 0,
+     "releaseTime": 1786381200,
+     "repeatabilityMode": "NON_REPEATABLE",
+     "repeatable": false,
+     "setId": 1,
+     "setImageId": "1000003-434aedb9-85ee",
+     "tagged": 1,
+     "taggedByProduction": true,
+     "taggedByUser": false,
+     "timesCompleted": 1,
+     "tutorial": true
+    },
+    {
+     "awards": [],
+     "categoryId": 5,
+     "challengesCompletedCount": 3,
+     "challengesCount": 3,
+     "contentId": 22542,
+     "description": "Complete these Upgrade-based challenges to earn rewards. ",
+     "endTime": 281568925,
+     "hidden": false,
+     "name": "Intro to Upgrade SBCs",
+     "priority": 0,
+     "releaseTime": 1786381200,
+     "repeatabilityMode": "NON_REPEATABLE",
+     "repeatable": false,
+     "setId": 3,
+     "setImageId": "1000005-4c415b79-8f77",
+     "tagged": 0,
+     "taggedByProduction": false,
+     "taggedByUser": false,
+     "timesCompleted": 1,
+     "tutorial": false
+    }
+   ]
+  },
+  {
+   "categoryId": 3,
+   "name": "Challenges",
+   "priority": 3,
+   "sets": [
+    {
+     "awards": [
+      {
+       "count": 1,
+       "halId": 3,
+       "isUntradeable": true,
+       "loan": 0,
+       "loanType": "NONE",
+       "type": "pack",
+       "value": 302
+      },
+      {
+       "count": 1,
+       "halId": 3,
+       "isUntradeable": false,
+       "loan": 0,
+       "loanType": "NONE",
+       "type": "coin",
+       "value": 5000
+      }
+     ],
+     "categoryId": 3,
+     "challengesCompletedCount": 0,
+     "challengesCount": 3,
+     "contentId": 22566,
+     "description": "Complete these Puzzle-based challenges to earn rewards.",
+     "endTime": 282519325,
+     "hidden": false,
+     "name": "League & Nation Advanced",
+     "priority": 0,
+     "releaseTime": 1786381200,
+     "repeatabilityMode": "NON_REPEATABLE",
+     "repeatable": false,
+     "setId": 10,
+     "setImageId": "1000021-cd13db71-9eec",
+     "tagged": 0,
+     "taggedByProduction": false,
+     "taggedByUser": false,
+     "timesCompleted": 0,
+     "tutorial": false
+    },
+    {
+     "awards": [
+      {
+       "count": 1,
+       "halId": 4,
+       "isUntradeable": false,
+       "loan": 0,
+       "loanType": "NONE",
+       "type": "pack",
+       "value": 302
+      }
+     ],
+     "categoryId": 3,
+     "challengesCompletedCount": 0,
+     "challengesCount": 4,
+     "contentId": 24784,
+     "description": "Complete challenges themed around this week's key matchups.",
+     "endTime": 596125,
+     "hidden": false,
+     "name": "Marquee Matchups",
+     "priority": 0,
+     "releaseTime": 1789664400,
+     "repeatabilityMode": "NON_REPEATABLE",
+     "repeatable": false,
+     "setId": 16,
+     "setImageId": "1000010-26960a06-de7f",
+     "tagged": 0,
+     "taggedByProduction": false,
+     "taggedByUser": false,
+     "timesCompleted": 0,
+     "tutorial": false
+    }
+   ]
+  },
+  {
+   "categoryId": 2,
+   "name": "Upgrades",
+   "priority": 2,
+   "sets": [
+    {
+     "awards": [
+      {
+       "count": 1,
+       "halId": 2,
+       "isUntradeable": true,
+       "loan": 0,
+       "loanType": "NONE",
+       "type": "pack",
+       "value": 509
+      }
+     ],
+     "categoryId": 2,
+     "challengesCompletedCount": 0,
+     "challengesCount": 1,
+     "contentId": 22551,
+     "description": "Exchange Bronze items for rewards.",
+     "endTime": 281568925,
+     "hidden": true,
+     "name": "Bronze Upgrade",
+     "priority": 0,
+     "releaseTime": 1786381200,
+     "repeatabilityMode": "UNLIMITED",
+     "repeatable": true,
+     "setId": 4,
+     "setImageId": "1000006-952125f1-c8b2",
+     "tagged": 0,
+     "taggedByProduction": false,
+     "taggedByUser": false,
+     "timesCompleted": 0,
+     "tutorial": false
+    },
+    {
+     "awards": [
+      {
+       "count": 1,
+       "halId": 4,
+       "isUntradeable": true,
+       "loan": 0,
+       "loanType": "NONE",
+       "type": "pack",
+       "value": 1013
+      }
+     ],
+     "categoryId": 2,
+     "challengesCompletedCount": 0,
+     "challengesCount": 1,
+     "contentId": 22553,
+     "description": "Exchange Silver items for rewards.",
+     "endTime": 281547325,
+     "hidden": true,
+     "name": "Silver Upgrade",
+     "priority": 0,
+     "releaseTime": 1786381200,
+     "repeatabilityMode": "UNLIMITED",
+     "repeatable": true,
+     "setId": 5,
+     "setImageId": "1000007-b4d7f224-255a",
+     "tagged": 0,
+     "taggedByProduction": false,
+     "taggedByUser": false,
+     "timesCompleted": 0,
+     "tutorial": false
+    },
+    {
+     "awards": [
+      {
+       "count": 1,
+       "halId": 3,
+       "isUntradeable": true,
+       "loan": 0,
+       "loanType": "NONE",
+       "type": "pack",
+       "value": 1022
+      }
+     ],
+     "categoryId": 2,
+     "challengesCompletedCount": 0,
+     "challengesCount": 1,
+     "contentId": 22555,
+     "description": "Exchange Gold items for rewards.",
+     "endTime": 281568925,
+     "hidden": true,
+     "name": "Gold Upgrade",
+     "priority": 0,
+     "releaseTime": 1786381200,
+     "repeatabilityMode": "UNLIMITED",
+     "repeatable": true,
+     "setId": 6,
+     "setImageId": "1000008-14539219-1839",
+     "tagged": 0,
+     "taggedByProduction": false,
+     "taggedByUser": false,
+     "timesCompleted": 0,
+     "tutorial": false
+    }
+   ]
+  }
+ ]
+}
