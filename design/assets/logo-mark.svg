@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"
+     role="img" aria-labelledby="fsl-mark-title" fill="none">
+  <title id="fsl-mark-title">FUT Squad Lab</title>
+  <!--
+    THE MARK — a FUT card with its top-right corner chamfered, holding a
+    four-node formation (one forward, a back line of three, joined).
+
+    · Drawn entirely in `currentColor`: one file covers the panel, a light
+      surface and the accent surface. There is no second colour to keep in sync.
+    · The card is an outline, the formation is solid — the weight goes to the
+      squad, not the container.
+    · The chamfer is the card's cut corner: the slot the solver did not spend.
+    · Vector master for 20 px and up. For 16 px use logo-mark-16.svg, where the
+      connectors and nodes are thickened for the downscale.
+    · Fill rule is nonzero and every subpath shares one winding, so nodes and
+      connectors union cleanly instead of punching holes in each other.
+    · No EA-owned asset is referenced: no crest, badge, club mark, league mark,
+      kit or player likeness anywhere in this file.
+  -->
+  <path d="M 8.2 3.6 H 20 L 28.4 12 V 23.8 A 4.6 4.6 0 0 1 23.8 28.4 H 8.2 A 4.6 4.6 0 0 1 3.6 23.8 V 8.2 A 4.6 4.6 0 0 1 8.2 3.6 Z"
+        stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
+  <path fill="currentColor"
+        d="M 13.6 11.2 a 2.4 2.4 0 1 0 4.8 0 a 2.4 2.4 0 1 0 -4.8 0 Z
+           M 8.4 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z
+           M 14 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z
+           M 19.6 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z
+           M 10.4 20.05 L 21.6 20.05 L 21.6 21.55 L 10.4 21.55 Z
+           M 16.648 11.578 L 11.048 21.178 L 9.752 20.422 L 15.352 10.822 Z
+           M 16.648 10.822 L 22.248 20.422 L 20.952 21.178 L 15.352 11.578 Z"/>
+</svg>

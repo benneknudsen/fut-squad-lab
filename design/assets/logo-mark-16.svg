@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="16" height="16"
+     role="img" aria-labelledby="fsl-mark16-title" fill="none">
+  <title id="fsl-mark16-title">FUT Squad Lab</title>
+  <!--
+    16 px OPTICAL VARIANT of logo-mark.svg. Same card, same chamfer, same
+    formation — re-cut for the downscale, not replaced by a different idea.
+
+    Why this file exists: in the master, the card outline lands on 0.95 px at
+    16 px and the back line of three nodes fuses with its connectors into one
+    blob. So here the outline goes to 2.6, the forward node to a 3.3 radius, the
+    back pair to 3.0 with the middle back node dropped, and the connectors to
+    1.2 — thin enough to stay lines instead of turning the formation into a
+    solid play triangle, thick enough to survive the raster.
+
+    Three nodes plus their links is the floor: tested against a four-node cut and
+    a connectors-off cut, this is the one that still reads as a squad.
+    Use this below 20 px, and nothing else.
+  -->
+  <path d="M 7.6 1.6 H 21.6 L 30.4 10.4 V 24.4 A 6 6 0 0 1 24.4 30.4 H 7.6 A 6 6 0 0 1 1.6 24.4 V 7.6 A 6 6 0 0 1 7.6 1.6 Z"
+        stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/>
+  <path fill="currentColor"
+        d="M 12.7 12.4 a 3.3 3.3 0 1 0 6.6 0 a 3.3 3.3 0 1 0 -6.6 0 Z
+           M 6.4 21.8 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 Z
+           M 19.6 21.8 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 Z
+           M 16.982 13.09 L 10.382 22.49 L 8.418 21.11 L 15.018 11.71 Z
+           M 16.982 11.71 L 23.582 21.11 L 21.618 22.49 L 15.018 13.09 Z
+           M 9.4 20.6 L 22.6 20.6 L 22.6 23 L 9.4 23 Z"/>
+</svg>

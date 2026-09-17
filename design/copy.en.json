@@ -1,0 +1,262 @@
+{
+  "meta": {
+    "lang": "en",
+    "locale": "en-GB",
+    "name": "FUT Squad Lab",
+    "tagline": "SBC solving, local to your browser"
+  },
+  "common": {
+    "close": "Close",
+    "cancel": "Cancel",
+    "apply": "Apply",
+    "reset": "Reset",
+    "retry": "Retry",
+    "saved": "Saved",
+    "undo": "Undo",
+    "fromClub": "From club",
+    "coins": "coins",
+    "of": "of",
+    "loading": "Loading"
+  },
+  "units": {
+    "ovr": "OVR",
+    "chem": "CHEM",
+    "rating": "Rating",
+    "cost": "Cost",
+    "total": "Total"
+  },
+  "panel": {
+    "brand": "FUT Squad Lab",
+    "badgeUnofficial": "Unofficial",
+    "badgeLicence": "MIT",
+    "challengeFallback": "No challenge detected",
+    "formation": "Formation",
+    "clubPool": "Club pool",
+    "slotsFilled": "{filled}/{slots} slots",
+    "lockedCount": "{count} locked",
+    "resolve": "Solve again",
+    "solve": "Solve this challenge",
+    "solvingLabel": "Solving",
+    "copyList": "Copy list",
+    "copied": "Copied",
+    "footer": "Search: {formation} · {lineups} lineups · {seconds}s"
+  },
+  "summary": {
+    "title": "Cost summary",
+    "totalCost": "Fodder cost",
+    "clubCards": "From club",
+    "toBuy": "To buy",
+    "chemistry": "Chem",
+    "avgRating": "Avg"
+  },
+  "columns": {
+    "slot": "Slot",
+    "player": "Player",
+    "state": "State",
+    "cost": "Cost"
+  },
+  "fit": {
+    "natural": "Natural",
+    "naturalShort": "NAT",
+    "outOfPosition": "Out of position",
+    "outOfPositionShort": "OOP"
+  },
+  "cardState": {
+    "tradeable": "Tradeable",
+    "untradeable": "Untradeable",
+    "duplicate": "Duplicate",
+    "concept": "Concept"
+  },
+  "cardStateHint": {
+    "tradeable": "Tradeable — taken from the club",
+    "untradeable": "Untradeable — stays in the club",
+    "duplicate": "Duplicate — you already hold an identical card",
+    "concept": "Not owned — has to be bought"
+  },
+  "lock": {
+    "lock": "Lock slot",
+    "unlock": "Unlock slot",
+    "locked": "Locked",
+    "hint": "Locked — survives a re-solve",
+    "pinNote": "Locked slots are pinned when the squad is solved again."
+  },
+  "alts": {
+    "title": "Alternatives for {slot}",
+    "subtitle": "Ranked by fodder cost",
+    "rankedBy": "Ranked by cost",
+    "current": "In squad",
+    "swap": "Swap in",
+    "swapped": "Swapped in",
+    "empty": "No alternatives for this slot in the club.",
+    "more": "{count} more in the pool",
+    "why": "Why",
+    "deltaCheaper": "{amount} cheaper",
+    "deltaPricier": "{amount} dearer",
+    "reason": {
+      "sameLeague": "Same league",
+      "sameNation": "Same nation",
+      "sameClub": "Same club",
+      "keepsChemistry": "Keeps the chemistry tier",
+      "oneRatingDown": "1 rating lower",
+      "twoRatingDown": "2 ratings lower",
+      "breaksLink": "Breaks {count} link",
+      "keepsLinks": "Keeps every link",
+      "fromClubPool": "Already in the club",
+      "positionMatch": "Natural slot in {formation}",
+      "outOfPosition": "Playing out of position"
+    }
+  },
+  "buy": {
+    "title": "Buy these",
+    "count": "{count} cards",
+    "conceptPlayers": "Concept players",
+    "buyTotal": "Buy total",
+    "suggested": "Suggested price",
+    "openMarket": "Open market",
+    "marketLink": "Market",
+    "separator": "These cards are not in your club",
+    "honestNote": "This challenge can only be solved by buying {count} cards for about {cost} coins.",
+    "honestNoteNone": "This challenge can be solved with club cards alone."
+  },
+  "states": {
+    "idle": {
+      "title": "Ready to solve",
+      "body": "The challenge has been read from the page. The solver uses your club only and computes everything locally in this tab.",
+      "poolLine": "{cards} cards · {eligible} above {minRating}",
+      "privacy": "No data leaves the browser."
+    },
+    "solving": {
+      "title": "Searching",
+      "step1": "Read club",
+      "step2": "Build pool",
+      "step3": "Search lineups",
+      "step4": "Check chemistry",
+      "step5": "Price cards",
+      "lineups": "Lineups",
+      "bestCost": "Best cost",
+      "depth": "Depth",
+      "elapsed": "Elapsed",
+      "hint": "Searching for the cheapest valid lineup. Depth {depth} of {max}."
+    },
+    "solved": {
+      "title": "Solution",
+      "subtitle": "{set} · {slots} slots"
+    },
+    "noSolution": {
+      "title": "No valid solution",
+      "body": "The club cannot satisfy the requirements as they stand. Nothing has been changed.",
+      "missingTitle": "What is missing",
+      "missingLeagues": "{count} more leagues",
+      "missingNations": "{count} more nations",
+      "missingChemistry": "Chemistry short by {points}",
+      "missingPosition": "No eligible card for {slot}",
+      "missingRating": "Rating short by {points}",
+      "closestTitle": "Closest attempt",
+      "closestBody": "{filled}/{slots} slots · chem {chemistry}/{required}",
+      "fixTitle": "Ways forward",
+      "fixBuy": "Buy {count} cards (about {cost} coins)",
+      "fixFormation": "Try the {formation} formation",
+      "fixRelax": "Relax the challenge requirements",
+      "fixShow": "Show the closest attempt"
+    },
+    "notOnPage": {
+      "title": "No SBC detected",
+      "body": "This page is not a Squad Building Challenge. Open a challenge in the web app and the panel reads it automatically.",
+      "hint": "The panel stays open and keeps listening for a challenge.",
+      "rescan": "Scan the page again",
+      "howItWorks": "How it works"
+    }
+  },
+  "popup": {
+    "title": "FUT Squad Lab",
+    "statusSolved": "Solved",
+    "statusSolving": "Solving",
+    "statusIdle": "No challenge",
+    "statusError": "Not an SBC page",
+    "lastSolution": "Last solution",
+    "solvedAgo": "Solved {minutes} min ago",
+    "cost": "Cost",
+    "buy": "Buy",
+    "locked": "Locked",
+    "openPanel": "Open the panel",
+    "settings": "Settings",
+    "clubRead": "Club read: {cards} cards"
+  },
+  "options": {
+    "title": "Settings",
+    "subtitle": "Everything is stored locally in the browser.",
+    "costModel": {
+      "title": "Fodder cost model",
+      "body": "The weights decide how willingly the solver spends a card. A higher weight means the card is spent later.",
+      "untradeableDuplicate": "Untradeable duplicate",
+      "untradeable": "Untradeable",
+      "tradeable": "Tradeable",
+      "concept": "Concept player"
+    },
+    "concepts": {
+      "title": "Concept players",
+      "body": "Allow cards you do not own when the challenge cannot be solved otherwise.",
+      "allow": "Allow concept players",
+      "max": "Maximum to buy",
+      "maxHint": "{value} cards"
+    },
+    "effort": {
+      "title": "Solver effort",
+      "body": "Higher effort tries more lineups before giving up.",
+      "fast": "Fast",
+      "balanced": "Balanced",
+      "thorough": "Thorough",
+      "hint": "Level {value} of 5 · up to {lineups} lineups"
+    },
+    "prices": {
+      "title": "Price source",
+      "body": "Market prices are accurate but slower. Club values are instant.",
+      "market": "Market",
+      "marketHint": "Fetches prices from the web app",
+      "club": "Club cached values",
+      "clubHint": "Uses values already stored in the club"
+    },
+    "gentle": {
+      "title": "Gentle mode",
+      "body": "Only polls the web app on a fixed interval so the account does not get flagged.",
+      "on": "Gentle mode",
+      "hint": "Max {requests} requests per minute"
+    },
+    "interface": {
+      "title": "Interface",
+      "language": "Language",
+      "panelWidth": "Panel width",
+      "panelWidthHint": "{value} px",
+      "showAvatars": "Show card marker in the list"
+    },
+    "reset": "Restore defaults",
+    "resetConfirm": "Every setting goes back to its default."
+  },
+  "a11y": {
+    "panel": "FUT Squad Lab — solution panel",
+    "squadList": "Solution, {count} slots",
+    "openAlts": "Show alternatives for {slot}",
+    "closeAlts": "Close alternatives for {slot}",
+    "lockPlayer": "Lock {player}",
+    "unlockPlayer": "Unlock {player}",
+    "swapIn": "Swap {player} in for {current}",
+    "lockedRow": "{player}, locked",
+    "costTotal": "Total fodder cost {cost} coins",
+    "buyList": "Cards to buy, {count}",
+    "focusHint": "Use the arrow keys to move between slots, Enter for alternatives.",
+    "swapped": "Swapped in {player}. New cost {cost}."
+  },
+  "reference": {
+    "pageTitle": "FUT Squad Lab — design reference",
+    "state": "State",
+    "stateIdle": "Nothing solved",
+    "stateSolving": "Solving",
+    "stateSolved": "Solved",
+    "stateBuy": "Solved, buys required",
+    "stateNoSolution": "No solution",
+    "stateNotOnPage": "Not an SBC page",
+    "width": "Width",
+    "altsOpen": "Alternatives open",
+    "hostNote": "Simulated host app — no EA assets, no EA CSS"
+  }
+}

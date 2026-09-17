@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="16" height="16"
+     role="img" aria-labelledby="fsl-tile16-title">
+  <title id="fsl-tile16-title">FUT Squad Lab</title>
+  <!--
+    16 px slot of icon-tile.svg — this is the file behind icon-16.png, so it is
+    the one that has to survive the toolbar.
+
+    Two things change for 16 px. The formation drops to three nodes with 1.2
+    connectors, because the four-node cut fuses into a blob at this size. The
+    edge goes up to 1.6 at 45% alpha, because a near-black tile on a dark
+    toolbar has nothing else to separate it — on a light toolbar the tile
+    separates by itself and the edge simply reads as a rim light.
+  -->
+  <path d="M 7.6 1.6 H 21.6 L 30.4 10.4 V 24.4 A 6 6 0 0 1 24.4 30.4 H 7.6 A 6 6 0 0 1 1.6 24.4 V 7.6 A 6 6 0 0 1 7.6 1.6 Z"
+        fill="#0a0f14" stroke="#f0f4f7" stroke-opacity="0.45" stroke-width="1.6" stroke-linejoin="round"/>
+  <path fill="#1fdde0"
+        d="M 12.7 12.4 a 3.3 3.3 0 1 0 6.6 0 a 3.3 3.3 0 1 0 -6.6 0 Z
+           M 6.4 21.8 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 Z
+           M 19.6 21.8 a 3 3 0 1 0 6 0 a 3 3 0 1 0 -6 0 Z
+           M 16.982 13.09 L 10.382 22.49 L 8.418 21.11 L 15.018 11.71 Z
+           M 16.982 11.71 L 23.582 21.11 L 21.618 22.49 L 15.018 13.09 Z
+           M 9.4 20.6 L 22.6 20.6 L 22.6 23 L 9.4 23 Z"/>
+</svg>
