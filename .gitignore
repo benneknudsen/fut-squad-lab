@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+!.vscode/extensions.json
+
+# Local capture artefacts — may contain account data.
+# Never commit these; sanitised copies belong in test/fixtures/.
+*.crx
+*.har
+*-recon*.json
+recon-data/
+.cc-review/
+.hermes/
+
+# Build / coverage output
+coverage/
+dist/
+*.zip

@@ -1,0 +1,18 @@
+{
+  "name": "fut-squad-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension that solves EA SPORTS FC 27 Ultimate Team Squad Building Challenges from your own club.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/benneknudsen/fut-squad-lab.git"
+  },
+  "scripts": {
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,476 @@
+{
+ "challenges": [
+  {
+   "awards": [
+    {
+     "count": 1,
+     "halId": 4,
+     "isUntradeable": false,
+     "loan": 0,
+     "loanType": "NONE",
+     "type": "pack",
+     "value": 320
+    }
+   ],
+   "challengeId": 35,
+   "challengeImageId": "340000-8ccca676-e53a",
+   "contentId": 24785,
+   "description": "Exchange a squad themed around Celtic and Rangers.",
+   "elgDesc": [],
+   "elgOperation": "AND",
+   "elgReq": [
+    {
+     "eligibilityKey": 2,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 1,
+     "type": "PLAYER_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 10,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 42,
+     "type": "NATION_ID"
+    },
+    {
+     "eligibilityKey": 9,
+     "eligibilitySlot": 2,
+     "eligibilityValue": 2,
+     "type": "CLUB_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 2,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 2,
+     "eligibilitySlot": 3,
+     "eligibilityValue": 1,
+     "type": "PLAYER_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 3,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 17,
+     "eligibilitySlot": 3,
+     "eligibilityValue": 2,
+     "type": "PLAYER_LEVEL"
+    },
+    {
+     "eligibilityKey": 3,
+     "eligibilitySlot": 4,
+     "eligibilityValue": 1,
+     "type": "PLAYER_QUALITY"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 4,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 35,
+     "eligibilitySlot": 5,
+     "eligibilityValue": 14,
+     "type": "CHEMISTRY_POINTS"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 5,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    }
+   ],
+   "endTime": 596106,
+   "formation": "f442",
+   "name": "Celtic v Rangers",
+   "priority": 1,
+   "repeatable": false,
+   "setId": 16,
+   "status": "IN_PROGRESS",
+   "timesCompleted": 0,
+   "tutorial": 0,
+   "type": "OPEN_CHALLENGE"
+  },
+  {
+   "awards": [
+    {
+     "count": 1,
+     "halId": 4,
+     "isUntradeable": false,
+     "loan": 0,
+     "loanType": "NONE",
+     "type": "pack",
+     "value": 519
+    }
+   ],
+   "challengeId": 37,
+   "challengeImageId": "340001-f6f424ea-2be5",
+   "contentId": 24794,
+   "description": "Exchange a squad themed around FC Porto and SL Benfica.",
+   "elgDesc": [],
+   "elgOperation": "AND",
+   "elgReq": [
+    {
+     "eligibilityKey": 2,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 2,
+     "type": "PLAYER_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 11,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 308,
+     "type": "LEAGUE_ID"
+    },
+    {
+     "eligibilityKey": 2,
+     "eligibilitySlot": 2,
+     "eligibilityValue": 2,
+     "type": "PLAYER_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 2,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 10,
+     "eligibilitySlot": 2,
+     "eligibilityValue": 38,
+     "type": "NATION_ID"
+    },
+    {
+     "eligibilityKey": 8,
+     "eligibilitySlot": 3,
+     "eligibilityValue": 6,
+     "type": "LEAGUE_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 3,
+     "eligibilityValue": 1,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 2,
+     "eligibilitySlot": 4,
+     "eligibilityValue": 1,
+     "type": "PLAYER_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 4,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 17,
+     "eligibilitySlot": 4,
+     "eligibilityValue": 3,
+     "type": "PLAYER_LEVEL"
+    },
+    {
+     "eligibilityKey": 3,
+     "eligibilitySlot": 5,
+     "eligibilityValue": 2,
+     "type": "PLAYER_QUALITY"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 5,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 35,
+     "eligibilitySlot": 6,
+     "eligibilityValue": 18,
+     "type": "CHEMISTRY_POINTS"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 6,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    }
+   ],
+   "endTime": 596106,
+   "formation": "f451",
+   "name": "FC Porto v SL Benfica",
+   "priority": 2,
+   "repeatable": false,
+   "setId": 16,
+   "status": "IN_PROGRESS",
+   "timesCompleted": 0,
+   "tutorial": 0,
+   "type": "OPEN_CHALLENGE"
+  },
+  {
+   "awards": [
+    {
+     "count": 1,
+     "halId": 4,
+     "isUntradeable": false,
+     "loan": 0,
+     "loanType": "NONE",
+     "type": "pack",
+     "value": 300
+    }
+   ],
+   "challengeId": 38,
+   "challengeImageId": "340002-ee52b200-a784",
+   "contentId": 24795,
+   "description": "Exchange a squad themed around Paris Saint-Germain and Olympique de Marseille.",
+   "elgDesc": [],
+   "elgOperation": "AND",
+   "elgReq": [
+    {
+     "eligibilityKey": 2,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 1,
+     "type": "PLAYER_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 12,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 73,
+     "type": "CLUB_ID"
+    },
+    {
+     "eligibilityKey": 12,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 219,
+     "type": "CLUB_ID"
+    },
+    {
+     "eligibilityKey": 2,
+     "eligibilitySlot": 2,
+     "eligibilityValue": 2,
+     "type": "PLAYER_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 2,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 10,
+     "eligibilitySlot": 2,
+     "eligibilityValue": 18,
+     "type": "NATION_ID"
+    },
+    {
+     "eligibilityKey": 5,
+     "eligibilitySlot": 3,
+     "eligibilityValue": 5,
+     "type": "SAME_LEAGUE_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 3,
+     "eligibilityValue": 1,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 2,
+     "eligibilitySlot": 4,
+     "eligibilityValue": 1,
+     "type": "PLAYER_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 4,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 17,
+     "eligibilitySlot": 4,
+     "eligibilityValue": 3,
+     "type": "PLAYER_LEVEL"
+    },
+    {
+     "eligibilityKey": 3,
+     "eligibilitySlot": 5,
+     "eligibilityValue": 2,
+     "type": "PLAYER_QUALITY"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 5,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 35,
+     "eligibilitySlot": 6,
+     "eligibilityValue": 22,
+     "type": "CHEMISTRY_POINTS"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 6,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    }
+   ],
+   "endTime": 596106,
+   "formation": "f532",
+   "name": "Paris Saint-Germain v Olympique de Marseille",
+   "priority": 3,
+   "repeatable": false,
+   "setId": 16,
+   "status": "IN_PROGRESS",
+   "timesCompleted": 0,
+   "tutorial": 0,
+   "type": "OPEN_CHALLENGE"
+  },
+  {
+   "awards": [
+    {
+     "count": 1,
+     "halId": 4,
+     "isUntradeable": false,
+     "loan": 0,
+     "loanType": "NONE",
+     "type": "pack",
+     "value": 515
+    }
+   ],
+   "challengeId": 39,
+   "challengeImageId": "340003-e86b8718-ba10",
+   "contentId": 24796,
+   "description": "Exchange a squad themed around Atlético de Madrid and Real Madrid.",
+   "elgDesc": [],
+   "elgOperation": "AND",
+   "elgReq": [
+    {
+     "eligibilityKey": 2,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 2,
+     "type": "PLAYER_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 12,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 240,
+     "type": "CLUB_ID"
+    },
+    {
+     "eligibilityKey": 12,
+     "eligibilitySlot": 1,
+     "eligibilityValue": 243,
+     "type": "CLUB_ID"
+    },
+    {
+     "eligibilityKey": 2,
+     "eligibilitySlot": 2,
+     "eligibilityValue": 2,
+     "type": "PLAYER_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 2,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 11,
+     "eligibilitySlot": 2,
+     "eligibilityValue": 53,
+     "type": "LEAGUE_ID"
+    },
+    {
+     "eligibilityKey": 4,
+     "eligibilitySlot": 3,
+     "eligibilityValue": 4,
+     "type": "SAME_NATION_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 3,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 6,
+     "eligibilitySlot": 4,
+     "eligibilityValue": 3,
+     "type": "SAME_CLUB_COUNT"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 4,
+     "eligibilityValue": 1,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 19,
+     "eligibilitySlot": 5,
+     "eligibilityValue": 75,
+     "type": "TEAM_RATING_1_TO_100"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 5,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    },
+    {
+     "eligibilityKey": 35,
+     "eligibilitySlot": 6,
+     "eligibilityValue": 26,
+     "type": "CHEMISTRY_POINTS"
+    },
+    {
+     "eligibilityKey": 13,
+     "eligibilitySlot": 6,
+     "eligibilityValue": 0,
+     "type": "SCOPE"
+    }
+   ],
+   "endTime": 596106,
+   "formation": "f5212",
+   "name": "Atlético de Madrid v Real Madrid",
+   "priority": 4,
+   "repeatable": false,
+   "setId": 16,
+   "status": "IN_PROGRESS",
+   "timesCompleted": 0,
+   "tutorial": 0,
+   "type": "OPEN_CHALLENGE"
+  }
+ ]
+}

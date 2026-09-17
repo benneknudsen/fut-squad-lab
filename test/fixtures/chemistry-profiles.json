@@ -1,0 +1,37 @@
+{
+ "mappings": [
+  {
+   "profileId": 4,
+   "rarityIds": [
+    69
+   ]
+  }
+ ],
+ "profiles": [
+  {
+   "baseOverride": true,
+   "fullChemistryOnPreferredPosition": false,
+   "heroOverride": false,
+   "iconOverride": false,
+   "id": 4,
+   "rules": [
+    {
+     "calculationType": "NORMAL",
+     "parameterType": "NATION",
+     "value": 1
+    },
+    {
+     "calculationType": "UNIVERSAL",
+     "parameterType": "LEAGUE",
+     "value": 3
+    },
+    {
+     "calculationType": "UNIVERSAL",
+     "parameterType": "CLUB",
+     "value": 2
+    }
+   ]
+  }
+ ],
+ "version": 3
+}
