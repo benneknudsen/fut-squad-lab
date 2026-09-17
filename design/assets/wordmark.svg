@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 224 48" width="224" height="48"
+     role="img" aria-labelledby="fsl-wordmark-title" fill="none">
+  <title id="fsl-wordmark-title">FUT Squad Lab</title>
+  <!--
+    HORIZONTAL LOCKUP. Mark at 32 px, wordmark set in the panel's heading
+    treatment: uppercase, 600 weight, 1.9 tracking. The tagline is mono caps at
+    0.55 opacity, the same voice as every micro label in the panel.
+
+    Type is live text on the system UI stack, so the file carries no font
+    dependency — but it is text, not outlines. Where the exact letterforms must
+    be frozen (social preview, print) outline it first, or render logo.html at
+    the target size and export.
+
+    Monochrome on purpose: colour comes from the surface it sits on.
+  -->
+  <g transform="translate(4 9.5)">
+    <path d="M 8.2 3.6 H 20 L 28.4 12 V 23.8 A 4.6 4.6 0 0 1 23.8 28.4 H 8.2 A 4.6 4.6 0 0 1 3.6 23.8 V 8.2 A 4.6 4.6 0 0 1 8.2 3.6 Z"
+          stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
+    <path fill="currentColor"
+          d="M 13.6 11.2 a 2.4 2.4 0 1 0 4.8 0 a 2.4 2.4 0 1 0 -4.8 0 Z
+             M 8.4 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z
+             M 14 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z
+             M 19.6 20.8 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 Z
+             M 10.4 20.05 L 21.6 20.05 L 21.6 21.55 L 10.4 21.55 Z
+             M 16.648 11.578 L 11.048 21.178 L 9.752 20.422 L 15.352 10.822 Z
+             M 16.648 10.822 L 22.248 20.422 L 20.952 21.178 L 15.352 11.578 Z"/>
+  </g>
+  <text x="44" y="25" fill="currentColor"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, 'Helvetica Neue', sans-serif"
+        font-size="16" font-weight="600" letter-spacing="1.9">FUT SQUAD LAB</text>
+  <text x="44" y="38" fill="currentColor" opacity="0.55"
+        font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace"
+        font-size="8" letter-spacing="1.4">SBC SOLVER · LOCAL · MIT</text>
+</svg>
