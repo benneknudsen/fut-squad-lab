@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"
+     role="img" aria-labelledby="fsl-tile-title">
+  <title id="fsl-tile-title">FUT Squad Lab</title>
+  <!--
+    APP ICON TILE — the mark carried on its own surface, for the Chrome toolbar
+    and any context whose background is not ours to choose.
+
+    Why a filled tile instead of the bare glyph: the toolbar is dark in dark mode
+    and light in light mode. A dark cut corner stays visible on both, and the
+    0.24 alpha edge keeps the tile from melting into a dark toolbar. The
+    formation is the accent (oklch(0.815 0.135 197) → #1fdde0) and the card is
+    surface-0 (oklch(0.165 0.013 250) → #0a0f14); both are tokens.css values,
+    restated in hex because rasterisers do not read CSS custom properties.
+
+    32 px and up. The 16 px slot uses icon-tile-16.svg, which is re-cut heavier.
+  -->
+  <path d="M 7.8 2.4 H 21.2 L 29.6 10.8 V 24.2 A 5.4 5.4 0 0 1 24.2 29.6 H 7.8 A 5.4 5.4 0 0 1 2.4 24.2 V 7.8 A 5.4 5.4 0 0 1 7.8 2.4 Z"
+        fill="#0a0f14" stroke="#f0f4f7" stroke-opacity="0.24" stroke-width="0.9" stroke-linejoin="round"/>
+  <path fill="#1fdde0"
+        d="M 13.264 10.528 a 2.736 2.736 0 1 0 5.472 0 a 2.736 2.736 0 1 0 -5.472 0 Z
+           M 7.336 21.472 a 2.28 2.28 0 1 0 4.56 0 a 2.28 2.28 0 1 0 -4.56 0 Z
+           M 13.72 21.472 a 2.28 2.28 0 1 0 4.56 0 a 2.28 2.28 0 1 0 -4.56 0 Z
+           M 20.104 21.472 a 2.28 2.28 0 1 0 4.56 0 a 2.28 2.28 0 1 0 -4.56 0 Z
+           M 9.616 20.617 L 22.384 20.617 L 22.384 22.327 L 9.616 22.327 Z
+           M 16.739 10.959 L 10.355 21.903 L 8.877 21.041 L 15.261 10.097 Z
+           M 16.739 10.097 L 23.123 21.041 L 21.645 21.903 L 15.261 10.959 Z"/>
+</svg>

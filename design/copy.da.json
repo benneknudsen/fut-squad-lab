@@ -1,0 +1,262 @@
+{
+  "meta": {
+    "lang": "da",
+    "locale": "da-DK",
+    "name": "FUT Squad Lab",
+    "tagline": "SBC-løser, lokalt i din browser"
+  },
+  "common": {
+    "close": "Luk",
+    "cancel": "Annuller",
+    "apply": "Anvend",
+    "reset": "Nulstil",
+    "retry": "Prøv igen",
+    "saved": "Gemt",
+    "undo": "Fortryd",
+    "fromClub": "Fra klub",
+    "coins": "coins",
+    "of": "af",
+    "loading": "Indlæser"
+  },
+  "units": {
+    "ovr": "OVR",
+    "chem": "CHEM",
+    "rating": "Rating",
+    "cost": "Pris",
+    "total": "I alt"
+  },
+  "panel": {
+    "brand": "FUT Squad Lab",
+    "badgeUnofficial": "Uofficiel",
+    "badgeLicence": "MIT",
+    "challengeFallback": "Ingen udfordring fundet",
+    "formation": "Formation",
+    "clubPool": "Klubpulje",
+    "slotsFilled": "{filled}/{slots} pladser",
+    "lockedCount": "{count} låst",
+    "resolve": "Løs igen",
+    "solve": "Løs denne udfordring",
+    "solvingLabel": "Løser",
+    "copyList": "Kopiér liste",
+    "copied": "Kopieret",
+    "footer": "Søgning: {formation} · {lineups} opstillinger · {seconds}s"
+  },
+  "summary": {
+    "title": "Prisoversigt",
+    "totalCost": "Fyldpris",
+    "clubCards": "Fra klub",
+    "toBuy": "Skal købes",
+    "chemistry": "Kemi",
+    "avgRating": "Snit"
+  },
+  "columns": {
+    "slot": "Plads",
+    "player": "Spiller",
+    "state": "Status",
+    "cost": "Pris"
+  },
+  "fit": {
+    "natural": "Naturlig",
+    "naturalShort": "NAT",
+    "outOfPosition": "Ude af position",
+    "outOfPositionShort": "OOP"
+  },
+  "cardState": {
+    "tradeable": "Kan sælges",
+    "untradeable": "Kan ikke sælges",
+    "duplicate": "Dublet",
+    "concept": "Koncept"
+  },
+  "cardStateHint": {
+    "tradeable": "Kan sælges — taget fra klubben",
+    "untradeable": "Kan ikke sælges — bliver i klubben",
+    "duplicate": "Dublet — du har et identisk kort i forvejen",
+    "concept": "Ikke ejet — skal købes"
+  },
+  "lock": {
+    "lock": "Lås pladsen",
+    "unlock": "Lås pladsen op",
+    "locked": "Låst",
+    "hint": "Låst — overlever en ny søgning",
+    "pinNote": "Låste pladser holdes fast, når der søges igen."
+  },
+  "alts": {
+    "title": "Alternativer til {slot}",
+    "subtitle": "Rangeret efter fyldpris",
+    "rankedBy": "Rangeret efter pris",
+    "current": "Valgt",
+    "swap": "Skift ind",
+    "swapped": "Skiftet ind",
+    "empty": "Ingen alternativer i klubben til denne plads.",
+    "more": "{count} flere i puljen",
+    "why": "Hvorfor",
+    "deltaCheaper": "{amount} billigere",
+    "deltaPricier": "{amount} dyrere",
+    "reason": {
+      "sameLeague": "Samme liga",
+      "sameNation": "Samme nation",
+      "sameClub": "Samme klub",
+      "keepsChemistry": "Beholder keminiveauet",
+      "oneRatingDown": "1 rating lavere",
+      "twoRatingDown": "2 ratings lavere",
+      "breaksLink": "Bryder {count} link",
+      "keepsLinks": "Beholder alle links",
+      "fromClubPool": "Allerede i klubben",
+      "positionMatch": "Naturlig plads i {formation}",
+      "outOfPosition": "Spiller ude af position"
+    }
+  },
+  "buy": {
+    "title": "Køb disse",
+    "count": "{count} kort",
+    "conceptPlayers": "Konceptspillere",
+    "buyTotal": "Køb i alt",
+    "suggested": "Foreslået pris",
+    "openMarket": "Åbn marked",
+    "marketLink": "Marked",
+    "separator": "Disse kort er ikke i din klub",
+    "honestNote": "Opgaven kan kun løses ved at købe {count} kort for ca. {cost} coins.",
+    "honestNoteNone": "Opgaven kan løses med kort fra klubben alene."
+  },
+  "states": {
+    "idle": {
+      "title": "Klar til at løse",
+      "body": "Udfordringen er læst fra siden. Løseren bruger kun din klub og regner alt ud lokalt i denne fane.",
+      "poolLine": "{cards} kort · {eligible} over {minRating}",
+      "privacy": "Ingen data forlader browseren."
+    },
+    "solving": {
+      "title": "Søger",
+      "step1": "Læser klub",
+      "step2": "Bygger pulje",
+      "step3": "Søger opstillinger",
+      "step4": "Tjekker kemi",
+      "step5": "Priser kort",
+      "lineups": "Opstillinger",
+      "bestCost": "Bedste pris",
+      "depth": "Dybde",
+      "elapsed": "Tid",
+      "hint": "Søger efter den billigste gyldige opstilling. Dybde {depth} af {max}."
+    },
+    "solved": {
+      "title": "Løsning",
+      "subtitle": "{set} · {slots} pladser"
+    },
+    "noSolution": {
+      "title": "Ingen gyldig løsning",
+      "body": "Klubben kan ikke opfylde kravene, som de står. Intet er ændret.",
+      "missingTitle": "Det mangler",
+      "missingLeagues": "{count} ligaer mere",
+      "missingNations": "{count} nationer mere",
+      "missingChemistry": "Kemi mangler {points}",
+      "missingPosition": "Ingen gyldig spiller til {slot}",
+      "missingRating": "Rating mangler {points}",
+      "closestTitle": "Tætteste forsøg",
+      "closestBody": "{filled}/{slots} pladser · kemi {chemistry}/{required}",
+      "fixTitle": "Sådan kommer du videre",
+      "fixBuy": "Køb {count} kort (ca. {cost} coins)",
+      "fixFormation": "Prøv formationen {formation}",
+      "fixRelax": "Levn kravene i udfordringen",
+      "fixShow": "Vis tætteste forsøg"
+    },
+    "notOnPage": {
+      "title": "Ingen SBC fundet",
+      "body": "Denne side er ikke en Squad Building Challenge. Åbn en udfordring i web-appen, så læser panelet den automatisk.",
+      "hint": "Panelet bliver åbent og lytter efter en udfordring.",
+      "rescan": "Skan siden igen",
+      "howItWorks": "Sådan virker det"
+    }
+  },
+  "popup": {
+    "title": "FUT Squad Lab",
+    "statusSolved": "Løst",
+    "statusSolving": "Løser",
+    "statusIdle": "Ingen udfordring",
+    "statusError": "Ikke en SBC-side",
+    "lastSolution": "Seneste løsning",
+    "solvedAgo": "Løst for {minutes} min siden",
+    "cost": "Pris",
+    "buy": "Køb",
+    "locked": "Låst",
+    "openPanel": "Åbn panelet",
+    "settings": "Indstillinger",
+    "clubRead": "Klub læst: {cards} kort"
+  },
+  "options": {
+    "title": "Indstillinger",
+    "subtitle": "Alle ændringer gemmes lokalt i browseren.",
+    "costModel": {
+      "title": "Prismodel for fyld",
+      "body": "Vægtene afgør, hvor gerne løseren bruger et kort. Højere vægt betyder, at kortet bruges senere.",
+      "untradeableDuplicate": "Kan ikke sælges, dublet",
+      "untradeable": "Kan ikke sælges",
+      "tradeable": "Kan sælges",
+      "concept": "Konceptspiller"
+    },
+    "concepts": {
+      "title": "Konceptspillere",
+      "body": "Tillad kort, du ikke ejer, hvis opgaven ellers ikke kan løses.",
+      "allow": "Tillad konceptspillere",
+      "max": "Maks. antal at købe",
+      "maxHint": "{value} kort"
+    },
+    "effort": {
+      "title": "Søgeindsats",
+      "body": "Højere indsats prøver flere opstillinger, før den giver op.",
+      "fast": "Hurtig",
+      "balanced": "Afbalanceret",
+      "thorough": "Grundig",
+      "hint": "Niveau {value} af 5 · op til {lineups} opstillinger"
+    },
+    "prices": {
+      "title": "Priskilde",
+      "body": "Markedspriser er præcise men langsommere. Klubværdier er øjeblikkelige.",
+      "market": "Marked",
+      "marketHint": "Henter priser fra web-appen",
+      "club": "Klubcachede værdier",
+      "clubHint": "Bruger værdier, der allerede ligger i klubben"
+    },
+    "gentle": {
+      "title": "Skånsom tilstand",
+      "body": "Spørger kun web-appen med faste mellemrum, så kontoen ikke bliver flagget.",
+      "on": "Skånsom tilstand",
+      "hint": "Maks. {requests} forespørgsler pr. minut"
+    },
+    "interface": {
+      "title": "Interface",
+      "language": "Sprog",
+      "panelWidth": "Panelbredde",
+      "panelWidthHint": "{value} px",
+      "showAvatars": "Vis kortmarkering i listen"
+    },
+    "reset": "Gendan standard",
+    "resetConfirm": "Alle indstillinger sættes tilbage til standard."
+  },
+  "a11y": {
+    "panel": "FUT Squad Lab — løsningspanel",
+    "squadList": "Løsning, {count} pladser",
+    "openAlts": "Vis alternativer for {slot}",
+    "closeAlts": "Luk alternativer for {slot}",
+    "lockPlayer": "Lås {player}",
+    "unlockPlayer": "Lås {player} op",
+    "swapIn": "Skift {player} ind i stedet for {current}",
+    "lockedRow": "{player}, låst",
+    "costTotal": "Samlet fyldpris {cost} coins",
+    "buyList": "Kort der skal købes, {count}",
+    "focusHint": "Brug piletasterne til at flytte mellem pladser, Enter for alternativer.",
+    "swapped": "{player} skiftet ind. Ny pris {cost}."
+  },
+  "reference": {
+    "pageTitle": "FUT Squad Lab — designreference",
+    "state": "Tilstand",
+    "stateIdle": "Ingen løsning",
+    "stateSolving": "Søger",
+    "stateSolved": "Løst",
+    "stateBuy": "Løst med køb",
+    "stateNoSolution": "Ingen løsning",
+    "stateNotOnPage": "Ikke en SBC-side",
+    "width": "Bredde",
+    "altsOpen": "Alternativer åbne",
+    "hostNote": "Simuleret værtsapp — ingen EA-assets, ingen EA-CSS"
+  }
+}
