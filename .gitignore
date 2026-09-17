@@ -25,3 +25,25 @@ recon-data/
 coverage/
 dist/
 *.zip
+
+# Secrets — prophylactic. The extension needs no credentials today, but a price
+# API key or similar must never reach a public repository.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local-only agent instructions. AGENTS.md itself IS committed — it is the shared
+# contract for anyone (human or agent) working on this repo. Personal overrides
+# belong here instead.
+AGENTS.local.md
+*.local.md
+
+# Raw OpenDesign exports. The curated design contract lives in design/ and IS
+# committed; the zip exports and the scratch extraction are not.
+design/unzipped/
+design/*.zip
+
+# Logs
+*.log
