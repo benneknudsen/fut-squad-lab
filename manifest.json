@@ -41,7 +41,13 @@
         "src/ui/panel-mount.js",
         "src/ui/solve-button.js",
         "src/solver/candidates.js",
-        "src/solver/prices.js"
+        "src/solver/prices.js",
+        "src/solver/worker.js",
+        "src/solver/worker-protocol.js",
+        "src/solver/solve.js",
+        "src/solver/validate.js",
+        "src/solver/chemistry.js",
+        "src/solver/requirements.js"
       ],
       "matches": ["https://www.ea.com/*"]
     }
