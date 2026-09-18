@@ -72,6 +72,20 @@ describe('manifest.json', () => {
     }
   });
 
+  it('exposes the solver worker and every module it imports', () => {
+    const [war] = manifest.web_accessible_resources;
+    for (const module of [
+      'src/solver/worker.js',
+      'src/solver/worker-protocol.js',
+      'src/solver/solve.js',
+      'src/solver/validate.js',
+      'src/solver/chemistry.js',
+      'src/solver/requirements.js',
+    ]) {
+      expect(war.resources).toContain(module);
+    }
+  });
+
   it('points the icons at files that exist', () => {
     for (const size of ['16', '32', '48', '128']) {
       const icon = manifest.icons[size];
