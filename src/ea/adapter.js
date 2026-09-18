@@ -1,12 +1,12 @@
 /**
  * The one file that knows EA SPORTS FC 27 SBC class names, eligibility key
- * numbers, enum values and the raw `/club` item and `/chemistry/teamlinks`
- * payload shapes. Every other module imports EA-specific naming from here, so
- * that when EA renames something exactly one file changes.
+ * numbers, enum values and the raw `/club` item, `/chemistry/teamlinks` and
+ * `/chemistry/profiles` payload shapes. Every other module imports EA-specific
+ * naming from here, so that when EA renames something exactly one file changes.
  *
- * `normaliseClubItem` at the bottom is the club-payload half of that boundary:
- * it translates raw items into the stable solver schema, and the solver core
- * may only ever see the translated form.
+ * The `normalise*` exports at the bottom are the payload half of that boundary:
+ * they translate raw payloads into the stable solver schema, and the solver
+ * core may only ever see the translated form.
  *
  * ## Production entry point vs. pinned observation data
  *
@@ -374,4 +374,253 @@ export function normaliseTeamChemLinks(rawLinks) {
     }
     return { clubId: rawLink.teamId, linkedClubIds: [...rawLink.linkedTeams] };
   });
+}
+
+/**
+ * The dimensions a chemistry rule may measure, translated from EA's raw
+ * `parameterType` enum to the stable internal vocabulary. The stable values are
+ * lowercase and double as the `countLinks` result keys; a raw value outside this
+ * table throws, because a dimension the solver cannot score must never be
+ * silently dropped from the arithmetic.
+ */
+const CHEMISTRY_DIMENSIONS = Object.freeze({
+  NATION: 'nation',
+  LEAGUE: 'league',
+  CLUB: 'club',
+});
+
+/**
+ * The calculation types the captured payload shows, translated from EA's raw
+ * `calculationType` enum. The solver accepts only these named values and treats
+ * them identically (see `src/solver/chemistry.js`); anything else throws at this
+ * boundary rather than reaching the solver unnamed.
+ */
+const CHEMISTRY_CALCULATIONS = Object.freeze({
+  NORMAL: 'normal',
+  UNIVERSAL: 'universal',
+});
+
+const normaliseChemistryRule = (rawRule, profileId, index) => {
+  if (rawRule === null || typeof rawRule !== 'object' || Array.isArray(rawRule)) {
+    throw new Error(
+      `normaliseChemistryProfile: rule ${index} of profile ${profileId} must be an object; the` +
+        ' /chemistry/profiles payload shape may have changed'
+    );
+  }
+  if (
+    typeof rawRule.parameterType !== 'string' ||
+    !Object.hasOwn(CHEMISTRY_DIMENSIONS, rawRule.parameterType)
+  ) {
+    throw new Error(
+      `normaliseChemistryProfile: rule ${index} of profile ${profileId} carries the unsupported` +
+        ` parameterType ${JSON.stringify(rawRule.parameterType)}; the /chemistry/profiles payload` +
+        ' carries a dimension this adapter cannot name'
+    );
+  }
+  if (
+    typeof rawRule.calculationType !== 'string' ||
+    !Object.hasOwn(CHEMISTRY_CALCULATIONS, rawRule.calculationType)
+  ) {
+    throw new Error(
+      `normaliseChemistryProfile: rule ${index} of profile ${profileId} carries the unsupported` +
+        ` calculationType ${JSON.stringify(rawRule.calculationType)}; only the named calculation` +
+        ' types may reach the solver'
+    );
+  }
+  if (!Number.isFinite(rawRule.value) || rawRule.value <= 0) {
+    throw new Error(
+      `normaliseChemistryProfile: rule ${index} of profile ${profileId} must carry a positive` +
+        ` finite value, got ${JSON.stringify(rawRule.value)}; a non-positive value would divide` +
+        ' by zero'
+    );
+  }
+  return {
+    dimension: CHEMISTRY_DIMENSIONS[rawRule.parameterType],
+    calculation: CHEMISTRY_CALCULATIONS[rawRule.calculationType],
+    value: rawRule.value,
+  };
+};
+
+/**
+ * Reads a profile boolean that the payload may omit, because issue #5
+ * guarantees only the fields EA actually displays and a normaliser must not
+ * reject a valid payload over fields nothing measures.
+ *
+ * `undefined` and `null` both mean "not stated" and return the fallback; a
+ * present value must still be a real boolean, so a retyped field fails loudly
+ * instead of being coerced.
+ *
+ * The three override flags (`baseOverride`, `iconOverride`, `heroOverride`)
+ * fall back to `false`: absence means "no override", and nothing reads them
+ * yet. `fullChemistryOnPreferredPosition` — the field name in the captured
+ * payload; the `fullPositionBonus` name in the issue text is only an example
+ * and is not what the capture carries — falls back to `null`, because a
+ * missing position flag means "unknown", never "EA said false". The solver
+ * then marks the result with a missing-flag reason instead of silently
+ * assuming the flag was false.
+ */
+const readOptionalProfileBoolean = (rawProfile, field, fallback) => {
+  const value = rawProfile[field];
+  if (value === undefined || value === null) return fallback;
+  if (!isBoolean(value)) {
+    throw new Error(
+      `normaliseChemistryProfile: profile ${rawProfile.id} must carry ${field} as a boolean or` +
+        ' null when present; the /chemistry/profiles payload shape may have changed'
+    );
+  }
+  return value;
+};
+
+const normaliseChemistryProfileEntry = (rawProfile, index) => {
+  if (rawProfile === null || typeof rawProfile !== 'object' || Array.isArray(rawProfile)) {
+    throw new Error(
+      `normaliseChemistryProfile: profile ${index} must be an object; the /chemistry/profiles` +
+        ' payload shape may have changed'
+    );
+  }
+  if (!Number.isFinite(rawProfile.id)) {
+    throw new Error(
+      `normaliseChemistryProfile: profile ${index} must carry a finite id; the /chemistry/profiles` +
+        ' payload shape may have changed'
+    );
+  }
+  if (!Array.isArray(rawProfile.rules) || !isDenseArray(rawProfile.rules)) {
+    throw new Error(
+      `normaliseChemistryProfile: profile ${rawProfile.id} must carry rules as a dense array;` +
+        ' the /chemistry/profiles payload shape may have changed'
+    );
+  }
+  return {
+    id: rawProfile.id,
+    fullChemistryAtPreferredPosition: readOptionalProfileBoolean(
+      rawProfile,
+      'fullChemistryOnPreferredPosition',
+      null
+    ),
+    overrides: {
+      base: readOptionalProfileBoolean(rawProfile, 'baseOverride', false),
+      icon: readOptionalProfileBoolean(rawProfile, 'iconOverride', false),
+      hero: readOptionalProfileBoolean(rawProfile, 'heroOverride', false),
+    },
+    rules: rawProfile.rules.map((rule, ruleIndex) =>
+      normaliseChemistryRule(rule, rawProfile.id, ruleIndex)
+    ),
+  };
+};
+
+const normaliseChemistryMapping = (rawMapping, index) => {
+  if (rawMapping === null || typeof rawMapping !== 'object' || Array.isArray(rawMapping)) {
+    throw new Error(
+      `normaliseChemistryProfile: mapping ${index} must be an object; the /chemistry/profiles` +
+        ' payload shape may have changed'
+    );
+  }
+  if (!Number.isFinite(rawMapping.profileId)) {
+    throw new Error(
+      `normaliseChemistryProfile: mapping ${index} must carry a finite profileId; the` +
+        ' /chemistry/profiles payload shape may have changed'
+    );
+  }
+  if (!isFiniteNumberArray(rawMapping.rarityIds)) {
+    throw new Error(
+      `normaliseChemistryProfile: mapping ${index} must carry rarityIds as a dense array of` +
+        ' finite numbers; the /chemistry/profiles payload shape may have changed'
+    );
+  }
+  return { profile: rawMapping.profileId, rarities: [...rawMapping.rarityIds] };
+};
+
+/**
+ * The one translation from a raw `/chemistry/profiles` payload to the stable
+ * profile schema the solver core codes against:
+ *
+ *   { mappings: [{ profile, rarities }],
+ *     profiles: [{ id, fullChemistryAtPreferredPosition,  // boolean|null
+ *                  overrides: { base, icon, hero },
+ *                  rules: [{ dimension, calculation, value }] }] }
+ *
+ * Raw name                        Stable name
+ * mappings[].profileId            mappings[].profile
+ * mappings[].rarityIds            mappings[].rarities
+ * profiles[].id                   profiles[].id
+ * profiles[].fullChemistryOnPreferredPosition
+ *                                 profiles[].fullChemistryAtPreferredPosition
+ * profiles[].baseOverride         profiles[].overrides.base
+ * profiles[].iconOverride         profiles[].overrides.icon
+ * profiles[].heroOverride         profiles[].overrides.hero
+ * rules[].parameterType           rules[].dimension (nation | league | club)
+ * rules[].calculationType         rules[].calculation (normal | universal)
+ * rules[].value                   rules[].value
+ *
+ * The enum translations are closed sets: a raw `parameterType` outside
+ * NATION/LEAGUE/CLUB or a raw `calculationType` outside NORMAL/UNIVERSAL
+ * throws, because the captured payload cannot name any other value and a
+ * guessed translation would change every score silently. The payload `version`
+ * is not carried across: nothing reads it.
+ *
+ * Every profile must carry a dense rules array. The four boolean fields are
+ * optional because issue #5 guarantees only the fields EA actually displays:
+ * the three override flags default to `false` when absent, and a missing
+ * `fullChemistryOnPreferredPosition` normalises to `null` ("unknown"), never
+ * to `false`, so the solver can tell "EA said no" from "we do not know". A
+ * boolean field that is present but not a boolean still throws.
+ *
+ * Every mapping must carry a finite profile id and a dense rarity list. A
+ * profile id that appears twice throws, and so does a rarity that appears in
+ * more than one mapping: resolution takes the first match, so duplicates and
+ * overlaps would make the choice depend on payload order.
+ *
+ * @param {object} rawProfile the parsed `/chemistry/profiles` response
+ * @returns {{ mappings: Array<{ profile: number, rarities: Array<number> }>,
+ *   profiles: Array<object> }} the stable rule set for
+ *   `resolveProfile` in `src/solver/chemistry.js`
+ * @throws {Error} when the payload is not shaped like a profile rule set, names
+ *   an unknown dimension or calculation, or carries a malformed profile,
+ *   mapping or rule
+ */
+export function normaliseChemistryProfile(rawProfile) {
+  if (rawProfile === null || typeof rawProfile !== 'object' || Array.isArray(rawProfile)) {
+    throw new Error(
+      'normaliseChemistryProfile: raw profile must be an object; the /chemistry/profiles payload' +
+        ' shape may have changed'
+    );
+  }
+  for (const field of ['mappings', 'profiles']) {
+    if (!Array.isArray(rawProfile[field]) || !isDenseArray(rawProfile[field])) {
+      throw new Error(
+        `normaliseChemistryProfile: raw profile must carry ${field} as a dense array; the` +
+          ' /chemistry/profiles payload shape may have changed'
+      );
+    }
+  }
+
+  const profiles = rawProfile.profiles.map(normaliseChemistryProfileEntry);
+  const seenIds = new Set();
+  for (const profile of profiles) {
+    if (seenIds.has(profile.id)) {
+      throw new Error(
+        `normaliseChemistryProfile: profile id ${profile.id} appears twice; resolution takes the` +
+          ' first match and duplicates would make it depend on payload order'
+      );
+    }
+    seenIds.add(profile.id);
+  }
+
+  const mappings = rawProfile.mappings.map(normaliseChemistryMapping);
+  const mappingOfRarity = new Map();
+  for (const [index, mapping] of mappings.entries()) {
+    for (const rarity of mapping.rarities) {
+      const firstIndex = mappingOfRarity.get(rarity);
+      if (firstIndex !== undefined && firstIndex !== index) {
+        throw new Error(
+          `normaliseChemistryProfile: rarity ${rarity} appears in more than one mapping;` +
+            ' resolution takes the first match and overlapping mappings would make it depend on' +
+            ' payload order'
+        );
+      }
+      mappingOfRarity.set(rarity, index);
+    }
+  }
+
+  return { mappings, profiles };
 }

@@ -56,6 +56,10 @@
  *   quality-not-checked        {}          PLAYER_QUALITY
  *   rating-formula-unverified  {}          TEAM_RATING (unverified)
  *   player-level-not-checked   {}          playerLevels match (unverified)
+ *   chemistry-formula-unverified {}        CHEMISTRY_POINTS (unverified; also
+ *                                          used when the payload did not state
+ *                                          the position rule, whose distinct
+ *                                          reason stays on the entry)
  *
  * `count` and `points` are the shortfall in the constraint's own unit. A new
  * measurable kind must be given an id here; `checkConstraint` throws instead
@@ -63,11 +67,42 @@
  *
  * ## Chemistry is an input, never computed here
  *
- * `CHEMISTRY_POINTS` reads `squad.chemistry`. The chemistry model lives in
- * issue #5 (`chemistry.js`) and this module must not import it. When a
- * CHEMISTRY_POINTS constraint is present and `squad.chemistry` is not a finite
- * number, this module throws: a missing chemistry input is a caller bug, and a
- * plausible-looking wrong answer is worse than a loud failure.
+ * `CHEMISTRY_POINTS` reads `squad.chemistry`, which has two accepted forms:
+ *
+ *   a finite number                  an already-verified chemistry total
+ *                                    (issue #13 supplies EA's own number this
+ *                                    way)
+ *   { chemistry, verified, reason }  the result object from `squadChemistry` in
+ *                                    `chemistry.js`
+ *
+ * The chemistry model lives in issue #5 and this module must not import it; it
+ * only reads the status the caller passes. When the object says
+ * `verified: false`, the CHEMISTRY_POINTS requirement is reported in
+ * `unverified` with the object's own reason and is never measured: a computed
+ * formula must not approve a constraint. Two reason codes are accepted:
+ * `chemistry-formula-unverified` for the computed formula and
+ * `chemistry-position-flag-missing` for a payload that did not state whether
+ * full chemistry needs the preferred position. Both map to the same diagnostic
+ * id; the reason stays on the entry, so the two remain distinguishable. The
+ * established exception is a caller-supplied
+ * `options.measures.CHEMISTRY_POINTS`, which counts as verified by the caller
+ * exactly like a TEAM_RATING override, since the caller takes responsibility
+ * for what it measures.
+ *
+ * The object form is validated strictly, from its own fields only: a missing
+ * or inherited `chemistry`, `verified` or `reason`, a non-finite `chemistry`,
+ * a non-boolean `verified`, a verified object whose `reason` is not `null`, an
+ * unverified object whose `reason` is not one of the known reason codes, or a
+ * chemistry value that is neither a finite number nor a plain object throws. A
+ * missing chemistry input is a caller bug, and a plausible-looking wrong
+ * answer is worse than a loud failure.
+ *
+ * `squad.chemistry` is read at most once per `validateSquad` call. One
+ * snapshot taken at the first read feeds both the reason decision and the
+ * measured value, so a chemistry object whose fields change between reads
+ * (a Proxy, for example) cannot let a failing total satisfy the constraint.
+ * This is the same TOCTOU class `snapshotMeasureEntries` removes for
+ * `options.measures`.
  *
  * ## Unverified semantics are flagged, never invented
  *
@@ -140,6 +175,8 @@ const UNVERIFIED_REASONS = Object.freeze({
   PLAYER_QUALITY: 'player-quality-aggregation-unverified',
   TEAM_RATING: 'team-rating-formula-unverified',
   PLAYER_LEVELS: 'player-level-field-unverified',
+  CHEMISTRY_FORMULA: 'chemistry-formula-unverified',
+  CHEMISTRY_POSITION_FLAG: 'chemistry-position-flag-missing',
 });
 
 /**
@@ -192,7 +229,18 @@ const UNVERIFIED_DIAGNOSTIC_IDS = Object.freeze({
   [UNVERIFIED_REASONS.PLAYER_QUALITY]: 'quality-not-checked',
   [UNVERIFIED_REASONS.TEAM_RATING]: 'rating-formula-unverified',
   [UNVERIFIED_REASONS.PLAYER_LEVELS]: 'player-level-not-checked',
+  [UNVERIFIED_REASONS.CHEMISTRY_FORMULA]: 'chemistry-formula-unverified',
+  [UNVERIFIED_REASONS.CHEMISTRY_POSITION_FLAG]: 'chemistry-formula-unverified',
 });
+
+/**
+ * Every reason code this validator knows. A chemistry object that reports
+ * `verified: false` must carry one of these: a free-form string cannot be
+ * translated to a diagnostic, and a plausible-looking wrong reason must not
+ * pass. The chemistry reasons are then filtered further below, because a known
+ * reason from another domain still cannot describe a chemistry result.
+ */
+const KNOWN_UNVERIFIED_REASONS = new Set(Object.values(UNVERIFIED_REASONS));
 
 const fail = (message) => {
   throw new Error(`validateSquad: ${message}`);
@@ -228,6 +276,87 @@ const meanRating = (squad) =>
   Math.round(squad.players.reduce((sum, player) => sum + player.rating, 0) / squad.players.length);
 
 /**
+ * Reads `squad.chemistry` in either supported form and returns `{ value }` for
+ * a verified total or `{ reason }` for an explicit unverified result.
+ *
+ * The object form is read from one snapshot of its own fields taken at entry:
+ * only own string-named properties are consulted, never an inherited field, so
+ * an object that merely inherits `chemistry` or `verified` cannot be approved.
+ * The shape is strict: own finite `chemistry`, own boolean `verified`, own
+ * `reason`. A verified object must carry `reason: null` — a reason next to
+ * `verified: true` is a contradiction — and an unverified object must carry
+ * one of the known reason codes, not a free-form string. Anything else throws:
+ * see the chemistry section of the header.
+ */
+const readChemistryStatus = (chemistry) => {
+  if (Number.isFinite(chemistry)) return { value: chemistry };
+  if (!isPlainObject(chemistry)) {
+    fail(
+      'squad.chemistry must be a finite number to check CHEMISTRY_POINTS, received' +
+        ` ${String(chemistry)}`
+    );
+  }
+
+  const ownFields = new Map(
+    Object.getOwnPropertyNames(chemistry).map((key) => [
+      key,
+      Object.getOwnPropertyDescriptor(chemistry, key).value,
+    ])
+  );
+
+  if (!ownFields.has('chemistry')) {
+    fail(
+      'squad.chemistry must carry its own finite chemistry field; an inherited or prototype value' +
+        ' is not accepted'
+    );
+  }
+  const value = ownFields.get('chemistry');
+  if (!Number.isFinite(value)) {
+    fail(
+      'squad.chemistry.chemistry must be a finite number to check CHEMISTRY_POINTS, received' +
+        ` ${String(value)}`
+    );
+  }
+
+  if (!ownFields.has('verified')) {
+    fail(
+      'squad.chemistry must carry its own verified boolean; an inherited or prototype value is' +
+        ' not accepted'
+    );
+  }
+  const verified = ownFields.get('verified');
+  if (typeof verified !== 'boolean') {
+    fail(
+      'squad.chemistry.verified must be a boolean so a computed result states whether it is' +
+        ' verified'
+    );
+  }
+
+  const reason = ownFields.get('reason');
+  if (verified === true) {
+    if (reason !== null) {
+      fail(
+        'squad.chemistry.reason must be null when verified is true, received' +
+          ` ${JSON.stringify(reason)}`
+      );
+    }
+    return { value };
+  }
+
+  if (typeof reason !== 'string' || reason.length === 0) {
+    fail('squad.chemistry.reason must be a non-empty string when verified is false');
+  }
+  if (!KNOWN_UNVERIFIED_REASONS.has(reason)) {
+    fail(
+      `squad.chemistry.reason ${JSON.stringify(
+        reason
+      )} is not a known unverified reason and cannot map for CHEMISTRY_POINTS`
+    );
+  }
+  return { reason };
+};
+
+/**
  * Pure measure functions, `(squad, constraint, context) => number`. `context`
  * carries `clubIdentity(clubId)`, which is the literal clubId unless the caller
  * supplied `options.clubLinks`. Override any entry through `options.measures`;
@@ -241,13 +370,15 @@ const meanRating = (squad) =>
  */
 export const MEASURES = Object.freeze({
   CHEMISTRY_POINTS: (squad) => {
-    if (!Number.isFinite(squad.chemistry)) {
+    const status = readChemistryStatus(squad.chemistry);
+    if (status.reason !== undefined) {
       fail(
-        'squad.chemistry must be a finite number to check CHEMISTRY_POINTS, received' +
-          ` ${String(squad.chemistry)}`
+        `squad.chemistry is computed and unverified (reason ${JSON.stringify(status.reason)});` +
+          ' validateSquad reports it in `unverified` and never measures it as a satisfied' +
+          ' requirement'
       );
     }
-    return squad.chemistry;
+    return status.value;
   },
 
   CLUB_COUNT: (squad) => distinctCount(squad.players, (player) => player.clubId),
@@ -520,7 +651,8 @@ const checkConstraint = (constraint, actual, unverified) => {
 };
 
 /**
- * @param {{ players: Array<object>, chemistry: number }} squad
+ * @param {{ players: Array<object>, chemistry: number|{ chemistry: number,
+ *   verified: boolean, reason: string|null } }} squad
  * @param {Array<object>} constraints normalised constraints from `requirements.js`
  * @param {{ measures?: object, clubLinks?: Function|Map }} [options]
  * @returns {{ valid: boolean, failures: Array<object>, unverified: Array<object> }}
@@ -560,6 +692,15 @@ export function validateSquad(squad, constraints, options = {}) {
   const failures = [];
   const unverified = [];
 
+  // `squad.chemistry` is read at most once, lazily, the first time a
+  // CHEMISTRY_POINTS constraint without a caller override needs it. The same
+  // snapshot decides both the unverified reason below and the measured value,
+  // so a chemistry object whose fields change between reads (a Proxy, for
+  // example) cannot let a failing total satisfy the constraint. This is the
+  // same TOCTOU class that `snapshotMeasureEntries` removes for
+  // `options.measures`.
+  let chemistryStatus;
+
   constraints.forEach((constraint, index) => {
     const { kind } = constraint;
 
@@ -581,12 +722,38 @@ export function validateSquad(squad, constraints, options = {}) {
     // table's inferred kinds stay flagged. The same snapshot used for
     // validation and merge decides this, so the steps cannot diverge.
     const callerVerified = callerKeys.has(kind);
+
     const inferredMeasure = kind === 'TEAM_RATING' && !callerVerified;
     if (inferredMeasure) {
       unverified.push(unverifiedEntry(constraint, UNVERIFIED_REASONS.TEAM_RATING));
     }
 
-    const actual = measures[kind](squad, constraint, context);
+    let actual;
+    if (kind === 'CHEMISTRY_POINTS' && !callerVerified) {
+      chemistryStatus ??= readChemistryStatus(squad.chemistry);
+      const { reason, value } = chemistryStatus;
+      if (reason !== undefined) {
+        if (
+          reason !== UNVERIFIED_REASONS.CHEMISTRY_FORMULA &&
+          reason !== UNVERIFIED_REASONS.CHEMISTRY_POSITION_FLAG
+        ) {
+          fail(
+            `squad.chemistry carries the unverified reason ${JSON.stringify(
+              reason
+            )}, which this module cannot map for CHEMISTRY_POINTS`
+          );
+        }
+        // A computed formula must never approve the constraint: report it and
+        // skip the measure entirely, so the unverified number cannot pass.
+        // The entry keeps the producer's specific reason, so a missing
+        // position flag stays distinguishable from the formula marker.
+        unverified.push(unverifiedEntry(constraint, reason));
+        return;
+      }
+      actual = value;
+    } else {
+      actual = measures[kind](squad, constraint, context);
+    }
     if (!Number.isFinite(actual)) {
       fail(
         `measure for ${kind} on constraint ${index} must return a finite number, received` +
