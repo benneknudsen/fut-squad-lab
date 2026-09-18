@@ -80,6 +80,83 @@ export const SCOPE_VALUES = Object.freeze({
 });
 
 /**
+ * The eleven starting slot positions of every SBC formation the solver may
+ * solve, keyed by the raw payload formation code. A formation is EA payload
+ * vocabulary, so the table lives here and the solver asks for the resolved
+ * shape instead of knowing any code.
+ *
+ * `f343` means the 4-3-3 shape: four defenders, three midfielders, three
+ * forwards, read left to right as the payload orders them. The list is the
+ * ordered XI in slot order; chemistry slots, the squad writer and the panel all
+ * index it. Only formations confirmed from the captured payloads are listed —
+ * an unknown code must fail loudly rather than fall back to a guessed shape.
+ *
+ * The position vocabulary is fixed to what the captured club payload uses:
+ * `GK CB LB RB CDM CM CAM LM RM LW RW ST`.
+ */
+export const FORMATION_SLOTS = Object.freeze({
+  f343: Object.freeze(['GK', 'LB', 'CB', 'CB', 'RB', 'CM', 'CM', 'CM', 'LW', 'ST', 'RW']),
+  f442: Object.freeze(['GK', 'LB', 'CB', 'CB', 'RB', 'LM', 'CM', 'CM', 'RM', 'ST', 'ST']),
+  f4141: Object.freeze(['GK', 'LB', 'CB', 'CB', 'RB', 'CDM', 'LM', 'CM', 'CM', 'RM', 'ST']),
+  f451: Object.freeze(['GK', 'LB', 'CB', 'CB', 'RB', 'LM', 'CM', 'CM', 'CM', 'RM', 'ST']),
+  f532: Object.freeze(['GK', 'LB', 'CB', 'CB', 'CB', 'RB', 'CM', 'CM', 'CM', 'ST', 'ST']),
+  f5212: Object.freeze(['GK', 'LB', 'CB', 'CB', 'CB', 'RB', 'CDM', 'CDM', 'CAM', 'ST', 'ST']),
+  f3142: Object.freeze(['GK', 'CB', 'CB', 'CB', 'CDM', 'LM', 'CM', 'CM', 'RM', 'ST', 'ST']),
+});
+
+/** The fixed position vocabulary a formation slot may name. */
+const FORMATION_POSITIONS = Object.freeze(
+  new Set(['GK', 'CB', 'LB', 'RB', 'CDM', 'CM', 'CAM', 'LM', 'RM', 'LW', 'RW', 'ST'])
+);
+
+/**
+ * Resolves a raw formation code to its ordered eleven slot positions:
+ * `{ formation, positions }`. The returned `positions` array is a fresh copy,
+ * so the caller cannot mutate the frozen module table.
+ *
+ * An unknown code, a non-string input, or a table entry that is neither exactly
+ * eleven slots nor drawn from the fixed position vocabulary throws: a guessed
+ * formation would place players in the wrong slots and silently produce a squad
+ * EA rejects, so this boundary never falls back to a default shape.
+ *
+ * @param {string} formation a raw payload formation code, e.g. `f343`
+ * @returns {{ formation: string, positions: Array<string> }} ordered slot
+ *   positions, left to right as the payload lists them
+ * @throws {Error} when `formation` is not a known string code, or the table
+ *   entry behind it is malformed
+ */
+export function normaliseFormation(formation) {
+  if (typeof formation !== 'string') {
+    throw new Error(
+      `normaliseFormation: formation must be a string; the payload may have changed or a caller` +
+        ` passed ${JSON.stringify(formation)}`
+    );
+  }
+  if (!Object.hasOwn(FORMATION_SLOTS, formation)) {
+    throw new Error(
+      `normaliseFormation: unknown formation ${JSON.stringify(formation)}; refusing to guess a` +
+        ' shape'
+    );
+  }
+  const positions = FORMATION_SLOTS[formation];
+  if (positions.length !== 11) {
+    throw new Error(
+      `normaliseFormation: formation ${formation} must carry exactly 11 slots, found` +
+        ` ${positions.length}`
+    );
+  }
+  for (const position of positions) {
+    if (!FORMATION_POSITIONS.has(position)) {
+      throw new Error(
+        `normaliseFormation: formation ${formation} names the unsupported position` +
+          ` ${JSON.stringify(position)}`
+      );
+    }
+  }
+  return { formation, positions: [...positions] };
+}
+
+/**
  * Observation-based development and test data. Only tests may import this; the
  * production path is `readEligibilityKeys()`. The key numbers and kinds come
  * from the captured fixtures and may be incomplete or stale.
