@@ -9,12 +9,14 @@
  *   `initWithSBCSet` entry point (both names come from `src/ea/adapter.js`);
  * - mount the design-contract Solve button into the rendered panel once the
  *   copy label arrives from the isolated relay;
- * - on click, read the challenge and the club through the adapter and readers,
- *   then post the diagnostic summary back;
+ * - on click, hand the panel subject to `src/ea/solve-service.js`, which reads
+ *   the challenge and the club, solves through the Worker relay and writes the
+ *   result through EA's own save path, then post the diagnostic summaries back;
  * - degrade to a clear message naming the missing symbol, never an unhandled
  *   throw: a renamed EA class is the expected failure mode here.
  *
- * The solver core is untouched: this module imports pure readers only.
+ * The solver core is untouched: this module talks to it through the pure
+ * modules and the isolated relay, never by running `solve` on the page.
  */
 
 import {
@@ -22,13 +24,11 @@ import {
   EA_PANEL_HOOK,
   formatEligibilityKeysLine,
   readEligibilityKeys,
-  resolveChallengeSubject,
-  resolveClubItems,
   resolveEaGlobal,
 } from './ea/adapter.js';
-import { readChallenge } from './ea/challenge-reader.js';
-import { readClubItems } from './ea/club-reader.js';
-import { buildReadSummary } from './ea/summary.js';
+import { createSolveService } from './ea/solve-service.js';
+import { createSolveTransport } from './ea/solve-transport.js';
+import { buildSolveSummary } from './ea/summary.js';
 import { CONTENT_SOURCE, CONTENT_TO_PAGE_KINDS, PAGE_SOURCE, PAGE_TO_CONTENT_KINDS } from './ui/messages.js';
 import { findPanelMount } from './ui/panel-mount.js';
 import { mountSolveButton } from './ui/solve-button.js';
@@ -56,12 +56,31 @@ export function startPageBridge(pageWindow, options = {}) {
     busy: false,
     eligibilityRead: false,
     eligibility: null,
+    eligibilityError: null,
   };
 
   const post = (kind, payload = {}) =>
     pageWindow.postMessage({ source: PAGE_SOURCE, kind, ...payload }, '*');
 
   const reportError = (message) => post(PAGE_TO_CONTENT_KINDS.ERROR, { message });
+
+  const transport = createSolveTransport({
+    post: (message) => {
+      const { kind, ...payload } = message;
+      post(kind, payload);
+    },
+  });
+
+  const service = createSolveService({
+    pageWindow,
+    requestSolve: (operation, payload) => transport.requestSolve(operation, payload),
+    steps: {
+      readEligibilityKeys: () => {
+        if (state.eligibilityError !== null) throw state.eligibilityError;
+        return state.eligibility;
+      },
+    },
+  });
 
   /**
    * Resolves EA's live `SBCEligibilityKey` enum once per session and logs one
@@ -80,6 +99,7 @@ export function startPageBridge(pageWindow, options = {}) {
       log?.info?.(formatEligibilityKeysLine(state.eligibility));
     } catch (error) {
       state.eligibility = null;
+      state.eligibilityError = error;
       log?.info?.(`FUT Squad Lab: eligibility keys unreadable (${error.message})`);
     }
     return state.eligibility;
@@ -114,20 +134,26 @@ export function startPageBridge(pageWindow, options = {}) {
     if (state.busy) return;
     state.busy = true;
     try {
-      const subjectResult = resolveChallengeSubject(state.subject);
-      const challenge = subjectResult.ok ? readChallenge(subjectResult.payload) : null;
-      const clubResult = await resolveClubItems(pageWindow);
-      const clubItems = clubResult.ok ? readClubItems(clubResult.items) : [];
-      const summary = buildReadSummary({
-        challenge,
-        clubResult: clubResult.ok ? { ...clubResult, items: clubItems } : clubResult,
-      });
+      const outcome = await service.solve(state.subject);
       post(PAGE_TO_CONTENT_KINDS.SUMMARY, {
-        summary,
-        challengeStrategy: subjectResult.strategy,
-        challengeAttempts: subjectResult.attempts,
-        clubStrategy: clubResult.strategy,
-        clubAttempts: clubResult.attempts,
+        summary: outcome.read.summary,
+        challengeStrategy: outcome.read.challengeStrategy,
+        challengeAttempts: outcome.read.challengeAttempts,
+        clubStrategy: outcome.read.clubStrategy,
+        clubAttempts: outcome.read.clubAttempts,
+      });
+      if (outcome.ok === false) {
+        if (outcome.stage !== 'challenge' && outcome.error.name !== 'AbortError') {
+          reportError(`solve failed (${outcome.stage}): ${outcome.error.message}`);
+        }
+        return;
+      }
+      post(PAGE_TO_CONTENT_KINDS.SUMMARY, {
+        summary: buildSolveSummary({
+          readSummary: outcome.read.summary,
+          result: outcome,
+          write: outcome.write,
+        }),
       });
     } finally {
       state.busy = false;
@@ -135,6 +161,7 @@ export function startPageBridge(pageWindow, options = {}) {
   };
 
   const onPanel = (controller, subject) => {
+    if (state.subject !== subject) transport.cancel();
     state.controller = controller;
     state.subject = subject;
     resolveEligibilityOnce();
@@ -186,8 +213,18 @@ export function startPageBridge(pageWindow, options = {}) {
         state.label = data.label;
         ensureMounted();
       }
+      return;
+    }
+    if (
+      data.kind === CONTENT_TO_PAGE_KINDS.SOLVE_RESPONSE ||
+      data.kind === CONTENT_TO_PAGE_KINDS.SOLVE_ERROR ||
+      data.kind === CONTENT_TO_PAGE_KINDS.SOLVE_PROGRESS
+    ) {
+      transport.handle(data);
     }
   });
+
+  pageWindow.addEventListener('pagehide', () => transport.cancel());
 
   const deadline = Date.now() + hookTimeoutMs;
   const poll = () => {

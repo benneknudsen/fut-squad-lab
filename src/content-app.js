@@ -10,12 +10,14 @@
  */
 
 import { readCopyPath, resolveCopyLocale } from './ui/copy.js';
+import { createWorkerClient } from './ea/worker-client.js';
 import {
   BRIDGE_MODULE_FILE,
   CONTENT_SOURCE,
   CONTENT_TO_PAGE_KINDS,
   PAGE_SOURCE,
   PAGE_TO_CONTENT_KINDS,
+  WORKER_MODULE_FILE,
 } from './ui/messages.js';
 
 const COPY_FILES = Object.freeze({
@@ -78,13 +80,30 @@ export function injectStylesheets(document, chrome) {
 /**
  * Wires the isolated relay: injects styles, announces the copy and, on the
  * bridge's hello, hands over the bridge module URL. Prints the summary and any
- * bridge error to the page console.
+ * bridge error to the page console. It also owns the one solver Worker for the
+ * session: the page's token-tagged solve requests are brokered to it and its
+ * answers are posted back with the same token.
  *
  * @param {{ window: object, document: object, chrome: object, navigator: object,
- *   fetch: Function, console: object }} environment
+ *   fetch: Function, console: object, createWorker?: (url: string) => object }}
+ *   environment `createWorker` is injectable for tests; production constructs a
+ *   module Worker from the extension URL
  */
-export function startContentApp({ window, document, chrome, navigator, fetch, console }) {
+export function startContentApp({
+  window,
+  document,
+  chrome,
+  navigator,
+  fetch,
+  console,
+  createWorker = (url) => new Worker(url, { type: 'module' }),
+}) {
   const send = (message) => window.postMessage(message, '*');
+
+  const workerClient = createWorkerClient({
+    createWorker: () => createWorker(chrome.runtime.getURL(WORKER_MODULE_FILE)),
+    deliver: (message) => send({ source: CONTENT_SOURCE, ...message }),
+  });
 
   const announceCopy = () =>
     loadCopyMessage({ chrome, navigator, fetch })
@@ -100,6 +119,14 @@ export function startContentApp({ window, document, chrome, navigator, fetch, co
       announceCopy();
       return;
     }
+    if (data.kind === PAGE_TO_CONTENT_KINDS.SOLVE_REQUEST) {
+      workerClient.request(data.token, data.operation, data.payload);
+      return;
+    }
+    if (data.kind === PAGE_TO_CONTENT_KINDS.SOLVE_CANCEL) {
+      workerClient.cancel(data.token);
+      return;
+    }
     if (data.kind === PAGE_TO_CONTENT_KINDS.BRIDGE_READY || data.kind === PAGE_TO_CONTENT_KINDS.MOUNTED) {
       console.log(`[FUT Squad Lab] ${data.message ?? data.kind}`);
       return;
@@ -112,6 +139,8 @@ export function startContentApp({ window, document, chrome, navigator, fetch, co
       console.warn(`[FUT Squad Lab] ${data.message}`);
     }
   });
+
+  window.addEventListener('pagehide', () => workerClient.teardown());
 
   injectStylesheets(document, chrome);
   // Proactive, so the handshake works no matter which world starts first: the
