@@ -10,6 +10,7 @@ import {
   mergePrices,
 } from '../src/solver/prices.js';
 import { reevaluate, solve } from '../src/solver/solve.js';
+import { withEligibility } from './helpers/eligibility.js';
 import clubFixture from './fixtures/club-items.json';
 import linksFixture from './fixtures/chemistry-teamlinks.json';
 import profilesFixture from './fixtures/chemistry-profiles.json';
@@ -33,12 +34,13 @@ const CHEMISTRY_RULE_SET = normaliseChemistryProfile({
   mappings: [{ profileId: 4, rarityIds: [0, 69] }],
 });
 
-const options = (overrides = {}) => ({
-  seed: 1,
-  chemistryRuleSet: CHEMISTRY_RULE_SET,
-  clubLinks: linksFixture.teamChemLinks,
-  ...overrides,
-});
+const options = (overrides = {}) =>
+  withEligibility({
+    seed: 1,
+    chemistryRuleSet: CHEMISTRY_RULE_SET,
+    clubLinks: linksFixture.teamChemLinks,
+    ...overrides,
+  });
 
 const raw = (overrides = {}) => ({
   id: 1000,
@@ -309,7 +311,7 @@ describe('solve cost completeness', () => {
       discardValue: null,
     }));
 
-    const result = solve(EMPTY_CHALLENGE, buildPool(normaliseClub(rawItems)), { seed: 1 });
+    const result = solve(EMPTY_CHALLENGE, buildPool(normaliseClub(rawItems)), withEligibility({ seed: 1 }));
 
     expect(result.valid).toBe(true);
     expect(result.cost).toBe(UNKNOWN_CONTRIBUTION);
@@ -322,7 +324,7 @@ describe('solve cost completeness', () => {
   });
 
   it('reports a concept card as unknown even when the other ten starters are priced', () => {
-    const result = solve(EMPTY_CHALLENGE, conceptSquadPool(), { seed: 1 });
+    const result = solve(EMPTY_CHALLENGE, conceptSquadPool(), withEligibility({ seed: 1 }));
 
     expect(result.valid).toBe(true);
     expect(result.cost).toBe(UNKNOWN_CONTRIBUTION);
@@ -352,12 +354,14 @@ describe('reevaluate cost completeness', () => {
 
   it('reports a locked concept card as an incomplete total', () => {
     const pool = conceptSquadPool();
-    const solved = solve(EMPTY_CHALLENGE, pool, { seed: 1 });
+    const solved = solve(EMPTY_CHALLENGE, pool, withEligibility({ seed: 1 }));
 
-    const result = reevaluate(solved.squad, ALL_SLOTS, pool, {
-      challenge: EMPTY_CHALLENGE,
-      seed: 1,
-    });
+    const result = reevaluate(
+      solved.squad,
+      ALL_SLOTS,
+      pool,
+      withEligibility({ challenge: EMPTY_CHALLENGE, seed: 1 })
+    );
 
     expect(result.cost).toBe(UNKNOWN_CONTRIBUTION);
     expect(result.costComplete).toBe(false);

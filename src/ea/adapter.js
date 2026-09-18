@@ -8,19 +8,14 @@
  * they translate raw payloads into the stable solver schema, and the solver
  * core may only ever see the translated form.
  *
- * ## Production entry point vs. pinned observation data
+ * ## Production entry point vs. observation data
  *
  * M2 of `docs/PLAN.md` requires the eligibility key table to be built by reading
  * EA's live `SBCEligibilityKey` enum at runtime (`window.SBCEligibilityKey`)
- * rather than hardcoding numbers. That page-side read needs the M1 page bridge,
- * which does not exist yet (issue #16). Production code must therefore call
- * `readEligibilityKeys()`, which throws a clear error until the bridge lands: a
- * silent fallback to pinned numbers could decode requirements into the wrong
- * constraints without anyone noticing.
- *
- * `PINNED_ELIGIBILITY_KEYS` and `SCOPE_VALUES` below are observation-based
- * development and test data, read off the captured fixtures in `test/fixtures/`.
- * Tests import them directly; production code must not.
+ * rather than hardcoding numbers. Production calls `readEligibilityKeys()`; the
+ * pinned observation table this used to ship with now lives in
+ * `test/fixtures/eligibility-observation.js`, where `src/solver/` cannot reach
+ * it. There is no fallback table in `src/`.
  *
  * ## Optional role-id lists
  *
@@ -34,10 +29,12 @@
  *
  * ## Stable solver vocabulary
  *
- * `PINNED_ELIGIBILITY_KEYS` maps `eligibilityKey` to a descriptor:
+ * The table `readEligibilityKeys()` builds maps `eligibilityKey` to a
+ * descriptor:
  *
- *   type   the payload's `type` string for that key (input side). The decoder
- *          only cross-checks the payload against it; it is never emitted.
+ *   type   the payload's `type` string for that key (input side), which is also
+ *          EA's enum member name. The decoder only cross-checks the payload
+ *          against it; it is never emitted.
  *   kind   the stable internal kind emitted on a decoded constraint (output
  *          side). This is the vocabulary the rest of the solver codes against.
  *          EA's `type` strings are volatile between game versions; `kind` is
@@ -53,16 +50,11 @@
  * so `kind` names the measured dimension only: a LOWER-scoped same-league count
  * is not a "min" requirement, it is a cap.
  *
- * `SCOPE_VALUES` maps `eligibilityValue` to a comparison operator name.
- *
- * Provenance of `SCOPE_VALUES`: EA's client bundle documents the comparison
- * semantics (`GREATER ? n<=r : LOWER ? r<=n : r===n`) but does not expose the
- * enum numbers. The 0/1/2 mapping below is an inference supported by the
- * captured fixtures and their challenge descriptions, not a direct reading of an
- * EA enum. Fixture cross-check: set 10 challenge 25 is titled
- * "3 Leagues & 2 Nations" and its payload carries key 8 value 3 with scope 2,
- * key 7 value 2 with scope 2, key 5 value 6 with scope 1 and key 4 value 6 with
- * scope 1 — that title is only reachable if 2 is EXACT and 1 is LOWER.
+ * `ELIGIBILITY_KEY_MODEL` is the name-keyed half of that descriptor, the part
+ * that is our model rather than EA's data: member name to `kind`/`role`/`field`.
+ * The numbers are read live. The observed number ↔ name pairs and the scope
+ * mapping's provenance are test data, documented beside the pinned table in
+ * `test/fixtures/eligibility-observation.js`.
  *
  * `PLAYER_QUALITY` (key 3) is an opaque integer. The fixtures only ever observe
  * values 1, 2 and 3, but that is an observation, not a verified complete enum,
@@ -72,12 +64,6 @@
  *
  * This file is pure data and pure functions. No DOM, no chrome APIs, no network.
  */
-
-export const SCOPE_VALUES = Object.freeze({
-  0: 'GREATER',
-  1: 'LOWER',
-  2: 'EXACT',
-});
 
 /**
  * The eleven starting slot positions of every SBC formation the solver may
@@ -157,51 +143,235 @@ export function normaliseFormation(formation) {
 }
 
 /**
- * Observation-based development and test data. Only tests may import this; the
- * production path is `readEligibilityKeys()`. The key numbers and kinds come
- * from the captured fixtures and may be incomplete or stale.
+ * The stable solver semantics for every eligibility enum member we model,
+ * keyed by EA's enum member name — which is also the payload `type` string the
+ * decoder cross-checks. The key numbers are deliberately absent: they are EA's
+ * volatile part and come from the live `SBCEligibilityKey` enum at runtime. A
+ * live member with no entry here is reported as unmodelled and left out of the
+ * decode table, so a challenge that uses it raises instead of decoding into a
+ * guessed constraint.
  */
-export const PINNED_ELIGIBILITY_KEYS = Object.freeze({
-  2: Object.freeze({ type: 'PLAYER_COUNT', kind: 'PLAYER_COUNT_MATCH', role: 'count' }),
-  3: Object.freeze({ type: 'PLAYER_QUALITY', kind: 'PLAYER_QUALITY', role: 'scalar' }),
-  4: Object.freeze({ type: 'SAME_NATION_COUNT', kind: 'SAME_NATION_COUNT', role: 'scalar' }),
-  5: Object.freeze({ type: 'SAME_LEAGUE_COUNT', kind: 'SAME_LEAGUE_COUNT', role: 'scalar' }),
-  6: Object.freeze({ type: 'SAME_CLUB_COUNT', kind: 'SAME_CLUB_COUNT', role: 'scalar' }),
-  7: Object.freeze({ type: 'NATION_COUNT', kind: 'NATION_COUNT', role: 'scalar' }),
-  8: Object.freeze({ type: 'LEAGUE_COUNT', kind: 'LEAGUE_COUNT', role: 'scalar' }),
-  9: Object.freeze({ type: 'CLUB_COUNT', kind: 'CLUB_COUNT', role: 'scalar' }),
-  10: Object.freeze({ type: 'NATION_ID', kind: 'NATION_MATCH', role: 'match', field: 'nationIds' }),
-  11: Object.freeze({ type: 'LEAGUE_ID', kind: 'LEAGUE_MATCH', role: 'match', field: 'leagueIds' }),
-  12: Object.freeze({ type: 'CLUB_ID', kind: 'CLUB_MATCH', role: 'match', field: 'clubIds' }),
-  13: Object.freeze({ type: 'SCOPE', kind: 'SCOPE', role: 'scope' }),
-  17: Object.freeze({
-    type: 'PLAYER_LEVEL',
-    kind: 'PLAYER_LEVEL_MATCH',
-    role: 'match',
-    field: 'playerLevels',
-  }),
-  19: Object.freeze({ type: 'TEAM_RATING_1_TO_100', kind: 'TEAM_RATING', role: 'scalar' }),
-  35: Object.freeze({ type: 'CHEMISTRY_POINTS', kind: 'CHEMISTRY_POINTS', role: 'scalar' }),
+export const ELIGIBILITY_KEY_MODEL = Object.freeze({
+  PLAYER_COUNT: Object.freeze({ kind: 'PLAYER_COUNT_MATCH', role: 'count' }),
+  PLAYER_QUALITY: Object.freeze({ kind: 'PLAYER_QUALITY', role: 'scalar' }),
+  SAME_NATION_COUNT: Object.freeze({ kind: 'SAME_NATION_COUNT', role: 'scalar' }),
+  SAME_LEAGUE_COUNT: Object.freeze({ kind: 'SAME_LEAGUE_COUNT', role: 'scalar' }),
+  SAME_CLUB_COUNT: Object.freeze({ kind: 'SAME_CLUB_COUNT', role: 'scalar' }),
+  NATION_COUNT: Object.freeze({ kind: 'NATION_COUNT', role: 'scalar' }),
+  LEAGUE_COUNT: Object.freeze({ kind: 'LEAGUE_COUNT', role: 'scalar' }),
+  CLUB_COUNT: Object.freeze({ kind: 'CLUB_COUNT', role: 'scalar' }),
+  NATION_ID: Object.freeze({ kind: 'NATION_MATCH', role: 'match', field: 'nationIds' }),
+  LEAGUE_ID: Object.freeze({ kind: 'LEAGUE_MATCH', role: 'match', field: 'leagueIds' }),
+  CLUB_ID: Object.freeze({ kind: 'CLUB_MATCH', role: 'match', field: 'clubIds' }),
+  SCOPE: Object.freeze({ kind: 'SCOPE', role: 'scope' }),
+  PLAYER_LEVEL: Object.freeze({ kind: 'PLAYER_LEVEL_MATCH', role: 'match', field: 'playerLevels' }),
+  TEAM_RATING_1_TO_100: Object.freeze({ kind: 'TEAM_RATING', role: 'scalar' }),
+  CHEMISTRY_POINTS: Object.freeze({ kind: 'CHEMISTRY_POINTS', role: 'scalar' }),
 });
 
-/**
- * The production entry point for the eligibility key table.
- *
- * The table must be read from EA's live `SBCEligibilityKey` enum on the page
- * through the M1 page bridge. Neither the bridge nor a logged-in FC27 session is
- * available yet, so this throws instead of falling back to the pinned
- * observation table, whose numbers may be incomplete or stale.
- *
- * @returns {object} eligibilityKey -> descriptor, read from the live page enum
- * @throws {Error} always, until the M1 page bridge lands (issue #16)
- */
-export function readEligibilityKeys() {
-  throw new Error(
-    'readEligibilityKeys: the live SBCEligibilityKey enum can only be read from the page ' +
-      'through the M1 page bridge, which does not exist yet (issue #16). Production must ' +
-      'not fall back to the pinned observation table; tests import PINNED_ELIGIBILITY_KEYS ' +
-      'directly.'
+/** A canonical non-negative integer enum key, without leading zeros. */
+const ENUM_NUMBER_KEY = /^(0|[1-9]\d*)$/;
+
+const malformedEnum = (detail) =>
+  new Error(
+    `readEligibilityKeys: ${EA_GLOBALS.eligibilityKeys} is malformed (${detail}); refusing to` +
+      ' build a partial eligibility key table'
   );
+
+const recordEnumMember = (byName, byNumber, name, number) => {
+  const seenNumber = byName.get(name);
+  if (seenNumber !== undefined && seenNumber !== number) {
+    throw malformedEnum(`member ${JSON.stringify(name)} maps to both ${seenNumber} and ${number}`);
+  }
+  const seenName = byNumber.get(number);
+  if (seenName !== undefined && seenName !== name) {
+    throw malformedEnum(
+      `key ${number} maps to both ${JSON.stringify(seenName)} and ${JSON.stringify(name)}`
+    );
+  }
+  byName.set(name, number);
+  byNumber.set(number, name);
+};
+
+/**
+ * Reads the member pairs off an EA enum object. `SBCEligibilityKey` is a
+ * TypeScript-compiled numeric enum, so it carries each member in both
+ * directions (`{ PLAYER_COUNT: 2, 2: 'PLAYER_COUNT' }`); a one-directional
+ * `name -> number` object is accepted too. Every member must resolve to one
+ * unique number and every number to one unique name, and the table must carry
+ * at least one member. Anything else throws instead of yielding a half-table.
+ */
+const readEnumMembers = (enumTable) => {
+  if (enumTable === null || typeof enumTable !== 'object' || Array.isArray(enumTable)) {
+    throw malformedEnum(`expected an enum object, got ${describeValue(enumTable)}`);
+  }
+
+  const byName = new Map();
+  const byNumber = new Map();
+  for (const [key, value] of Object.entries(enumTable)) {
+    if (ENUM_NUMBER_KEY.test(key)) {
+      if (typeof value !== 'string' || value.length === 0) {
+        throw malformedEnum(`member ${JSON.stringify(key)} maps to ${describeValue(value)}`);
+      }
+      recordEnumMember(byName, byNumber, value, Number(key));
+      continue;
+    }
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+      recordEnumMember(byName, byNumber, key, value);
+      continue;
+    }
+    throw malformedEnum(`member ${JSON.stringify(key)} maps to ${describeValue(value)}`);
+  }
+
+  if (byName.size === 0) {
+    throw new Error(
+      `readEligibilityKeys: ${EA_GLOBALS.eligibilityKeys} carries no members; refusing to` +
+        ' resolve an empty eligibility key table'
+    );
+  }
+
+  return [...byName.entries()]
+    .map(([name, number]) => ({ name, number }))
+    .sort((left, right) => left.number - right.number);
+};
+
+/**
+ * The production entry point for the eligibility key table: reads EA's live
+ * `SBCEligibilityKey` enum off the page's `window` and builds the descriptor
+ * table from it plus `ELIGIBILITY_KEY_MODEL`. There is no fallback: a missing
+ * or malformed global throws naming the EA symbol, and a live member the model
+ * cannot name is left out of the table and reported in `unmodelled`.
+ *
+ * No live scope enum is verified in FC27, so `scopes` is `null`: the 0/1/2
+ * scope mapping is an inference and the caller supplies it. Inventing a live
+ * source for it would be a guess.
+ *
+ * @param {object|undefined} pageWindow the page's `window`
+ * @returns {{ keys: object, scopes: null, members: Array<{eligibilityKey: number,
+ *   type: string}>, unmodelled: Array<{eligibilityKey: number, type: string}> }}
+ *   `keys` maps a live `eligibilityKey` number to the same descriptor shape the
+ *   decoder consumes ({ type, kind, role, field? }); `members` is every enum
+ *   member as read, for support reports
+ * @throws {Error} when the global is missing, the enum is empty, or a member
+ *   is malformed or ambiguous
+ */
+export function readEligibilityKeys(pageWindow) {
+  const enumTable = requireEaGlobal(pageWindow, 'eligibilityKeys');
+  const members = readEnumMembers(enumTable);
+
+  const keys = {};
+  const unmodelled = [];
+  for (const { name, number } of members) {
+    const model = ELIGIBILITY_KEY_MODEL[name];
+    if (model === undefined) {
+      unmodelled.push(Object.freeze({ eligibilityKey: number, type: name }));
+      continue;
+    }
+    const descriptor = { type: name, kind: model.kind, role: model.role };
+    if (model.field !== undefined) descriptor.field = model.field;
+    keys[number] = Object.freeze(descriptor);
+  }
+
+  return Object.freeze({
+    keys: Object.freeze(keys),
+    scopes: null,
+    members: Object.freeze(
+      members.map(({ name, number }) => Object.freeze({ eligibilityKey: number, type: name }))
+    ),
+    unmodelled: Object.freeze(unmodelled),
+  });
+}
+
+/**
+ * Compares the table built from the live enum against the pinned observation
+ * set and reports both directions, plus the same number wearing a different
+ * name:
+ *
+ *   added    live has it, our observed table does not. The table
+ *            `readEligibilityKeys` built already carries the descriptor when
+ *            our model names the member, so a new EA key does not have to
+ *            become an unknown eligibilityKey.
+ *   missing  our table models it, the live enum does not. Our model is wrong
+ *            and must be investigated, never silently reconciled.
+ *   renamed  the same number maps to a different name live. That is a
+ *            renumbering or a rename and is surfaced, not reconciled.
+ *
+ * Pure: two plain tables in, plain report out. The pinned table is test data,
+ * so this runs offline without a page.
+ *
+ * @param {object} liveKeys number -> descriptor built from the live enum
+ * @param {object} observedKeys number -> descriptor from the pinned observation
+ *   set
+ * @returns {{ added: Array<{eligibilityKey: number, type: string}>,
+ *   missing: Array<{eligibilityKey: number, type: string}>,
+ *   renamed: Array<{eligibilityKey: number, liveType: string,
+ *   observedType: string}> }} every entry names the number and the EA member
+ *   name(s), so a caller can act on it
+ */
+export function crossCheckEligibilityKeys(liveKeys, observedKeys) {
+  const added = [];
+  const missing = [];
+  const renamed = [];
+
+  for (const [rawKey, live] of Object.entries(liveKeys)) {
+    const eligibilityKey = Number(rawKey);
+    if (!Object.hasOwn(observedKeys, eligibilityKey)) {
+      added.push({ eligibilityKey, type: live.type });
+      continue;
+    }
+    const observed = observedKeys[eligibilityKey];
+    if (observed.type !== live.type) {
+      renamed.push({ eligibilityKey, liveType: live.type, observedType: observed.type });
+    }
+  }
+
+  for (const [rawKey, observed] of Object.entries(observedKeys)) {
+    const eligibilityKey = Number(rawKey);
+    if (!Object.hasOwn(liveKeys, eligibilityKey)) {
+      missing.push({ eligibilityKey, type: observed.type });
+    }
+  }
+
+  return { added, missing, renamed };
+}
+
+const describeEligibilityEntry = (entry) =>
+  entry.liveType === undefined
+    ? `${entry.eligibilityKey}=${entry.type}`
+    : `${entry.eligibilityKey}=${entry.liveType}/${entry.observedType}`;
+
+/**
+ * Renders a `readEligibilityKeys` result as one diagnostic line a support
+ * report can paste: every resolved key, the live members our model cannot
+ * name, the cross-check report when supplied, and the explicit statement that
+ * scopes have no live source. The result never contains a newline.
+ *
+ * @param {{ keys: object, unmodelled: Array<object>, report?: object }} resolved
+ *   the `readEligibilityKeys` result, optionally carrying a `report` from
+ *   `crossCheckEligibilityKeys`
+ * @param {object|null} [report] an explicit report, overriding `resolved.report`
+ * @returns {string}
+ */
+export function formatEligibilityKeysLine(resolved, report = resolved.report ?? null) {
+  const keys = Object.entries(resolved.keys)
+    .sort(([left], [right]) => Number(left) - Number(right))
+    .map(([key, descriptor]) => `${Number(key)}=${descriptor.type}`);
+
+  const parts = [
+    `FUT Squad Lab: ${EA_GLOBALS.eligibilityKeys}: ${keys.length} resolved [${keys.join(', ')}]`,
+    resolved.unmodelled.length === 0
+      ? 'unmodelled: none'
+      : `unmodelled [${resolved.unmodelled.map(describeEligibilityEntry).join(', ')}]`,
+  ];
+  if (report !== null) {
+    parts.push(
+      `cross-check added [${report.added.map(describeEligibilityEntry).join(', ')}],` +
+        ` missing [${report.missing.map(describeEligibilityEntry).join(', ')}],` +
+        ` renamed [${report.renamed.map(describeEligibilityEntry).join(', ')}]`
+    );
+  }
+  parts.push('scopes: no live scope enum, supplied by the caller');
+  return parts.join('; ');
 }
 
 /**

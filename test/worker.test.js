@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { normaliseChemistryProfile, normaliseTeamChemLinks } from '../src/ea/adapter.js';
 import { buildPool, normaliseClub } from '../src/solver/candidates.js';
 import { PROGRESS_STAGES } from '../src/solver/worker-protocol.js';
+import { withEligibility } from './helpers/eligibility.js';
 import clubFixture from './fixtures/club-items.json';
 import linksFixture from './fixtures/chemistry-teamlinks.json';
 import profilesFixture from './fixtures/chemistry-profiles.json';
@@ -27,12 +28,12 @@ const CHEMISTRY_RULE_SET = normaliseChemistryProfile({
   ...profilesFixture,
   mappings: [{ profileId: 4, rarityIds: [0, 69] }],
 });
-const OPTIONS = {
+const OPTIONS = withEligibility({
   seed: 1,
   chemistryRuleSet: CHEMISTRY_RULE_SET,
   clubLinks: linksFixture.teamChemLinks,
   effort: 'fast',
-};
+});
 const CHALLENGE = set16.challenges[3];
 
 beforeEach(() => {

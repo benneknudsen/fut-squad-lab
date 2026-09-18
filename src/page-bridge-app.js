@@ -20,6 +20,8 @@
 import {
   EA_GLOBALS,
   EA_PANEL_HOOK,
+  formatEligibilityKeysLine,
+  readEligibilityKeys,
   resolveChallengeSubject,
   resolveClubItems,
   resolveEaGlobal,
@@ -47,12 +49,41 @@ export function startPageBridge(pageWindow, options = {}) {
   const hookPollMs = options.hookPollMs ?? DEFAULT_HOOK_POLL_MS;
   const hookTimeoutMs = options.hookTimeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS;
 
-  const state = { label: null, controller: null, subject: null, busy: false };
+  const state = {
+    label: null,
+    controller: null,
+    subject: null,
+    busy: false,
+    eligibilityRead: false,
+    eligibility: null,
+  };
 
   const post = (kind, payload = {}) =>
     pageWindow.postMessage({ source: PAGE_SOURCE, kind, ...payload }, '*');
 
   const reportError = (message) => post(PAGE_TO_CONTENT_KINDS.ERROR, { message });
+
+  /**
+   * Resolves EA's live `SBCEligibilityKey` enum once per session and logs one
+   * line a support report can paste. The table is cached on the session state
+   * for the solve wiring to pass in as `options.keys`; the pinned observation
+   * table is test data and production is structurally unable to reach it. A
+   * missing or malformed enum is reported, not thrown: this is a read, and a
+   * renamed EA symbol must stay observable rather than crash the bridge.
+   */
+  const resolveEligibilityOnce = () => {
+    if (state.eligibilityRead) return state.eligibility;
+    state.eligibilityRead = true;
+    const log = pageWindow.console;
+    try {
+      state.eligibility = readEligibilityKeys(pageWindow);
+      log?.info?.(formatEligibilityKeysLine(state.eligibility));
+    } catch (error) {
+      state.eligibility = null;
+      log?.info?.(`FUT Squad Lab: eligibility keys unreadable (${error.message})`);
+    }
+    return state.eligibility;
+  };
 
   const ensureMounted = () => {
     if (state.controller === null || state.label === null) return;
@@ -106,6 +137,7 @@ export function startPageBridge(pageWindow, options = {}) {
   const onPanel = (controller, subject) => {
     state.controller = controller;
     state.subject = subject;
+    resolveEligibilityOnce();
     ensureMounted();
   };
 
