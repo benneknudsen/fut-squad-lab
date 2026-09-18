@@ -9,8 +9,9 @@
  *
  * Two sources exist, and both are always offline-safe:
  *
- *   1. an external price table (fut.gg, fetched by issue #10) passed in by the
- *      caller. Never fetched here — this module is pure.
+ *   1. an external price table supplied by the caller. Nothing fetches it
+ *      today — there is no reachable automated source — and this module never
+ *      fetches it either: it is pure.
  *   2. EA's own values already inside every club item payload. The stable names
  *      `marketAverage` and `discardValue` are read directly; the raw payload
  *      names they translate from live only in `src/ea/adapter.js` and must
@@ -88,7 +89,11 @@
  * propagates the unknown marker instead of adding it, and it throws when the
  * sum of the known contributions is not finite. A total is always either a
  * finite number (the whole cost is known) or `UNKNOWN_CONTRIBUTION` (at least
- * one card is unpriced); a partial sum is never returned.
+ * one card is unpriced); a partial sum is never returned. `costCoverage`
+ * reports the same fact as data — how many cards are priced, how many are not,
+ * and which slots — and the solver carries it beside the total as
+ * `costComplete`, so a caller never has to infer completeness from `cost`
+ * alone.
  *
  * ## External table contract
  *
@@ -456,6 +461,52 @@ export function totalCost(contributions) {
     );
   }
   return total;
+}
+
+/**
+ * The coverage of a set of priced records: how many carry a known price, how
+ * many do not, and which ones do not.
+ *
+ * A cost total is only complete when every card in the squad resolved a price.
+ * `totalCost` propagates `UNKNOWN_CONTRIBUTION` (`null`) as soon as one card is
+ * unpriced, but that marker is silent about cause: a caller holding a total
+ * cannot tell "nothing was priced" from "one card was missing a price", and so
+ * cannot tell a real total from a lower bound. This function makes the missing
+ * cards addressable — each one by the identity the solver already exposes: its
+ * index in the record list (the squad slot, for a solved squad) plus its `id`
+ * and `assetId`.
+ *
+ * Coverage follows the same cost model as `itemCost`, so it can never disagree
+ * with the contributions a total was built from. A known `0` counts as priced;
+ * absence counts as unknown; a concept card has no EA price data, so without
+ * an external table it is always unknown.
+ *
+ * @param {Array<object>} records priced records, e.g. a solved squad's
+ *   `players` array or the output of `mergePrices`
+ * @returns {{ known: number, unknown: number, complete: boolean,
+ *   unknownCards: Array<{ slot: number, id: number, assetId: number }> }}
+ *   `complete` is true exactly when every record carries a known price;
+ *   `unknownCards` lists the others in input order, `slot` being the index in
+ *   this list
+ * @throws {Error} when the list is not a dense array, or a record is not one
+ *   `itemCost` can score
+ */
+export function costCoverage(records) {
+  requireDenseArray(records, 'costCoverage: records');
+  const unknownCards = [];
+  for (let slot = 0; slot < records.length; slot++) {
+    const record = records[slot];
+    if (itemCost(record).contribution === UNKNOWN_CONTRIBUTION) {
+      unknownCards.push({ slot, id: record.id, assetId: record.assetId });
+    }
+  }
+  const unknown = unknownCards.length;
+  return {
+    known: records.length - unknown,
+    unknown,
+    complete: unknown === 0,
+    unknownCards,
+  };
 }
 
 /**
