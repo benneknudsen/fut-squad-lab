@@ -108,8 +108,8 @@ const createFakeWindow = ({ withController = true, withHook = true } = {}) => {
     pageWindow,
     view,
     messages,
-    dispatchMessage(data) {
-      for (const listener of listeners) listener({ data, source: pageWindow });
+    dispatchMessage(data, source = pageWindow) {
+      for (const listener of listeners) listener({ data, source });
     },
   };
 };
@@ -165,6 +165,24 @@ describe('startPageBridge', () => {
     expect(summary.summary).toContain('services.UTSBCRepository.getClubItems');
     expect(summary.challengeStrategy).toBe('panel-argument');
     expect(summary.clubStrategy).toBe('services.UTSBCRepository.getClubItems');
+  });
+
+  it('ignores a copy message posted by a foreign frame', () => {
+    const { pageWindow, view, dispatchMessage } = createFakeWindow();
+    startPageBridge(pageWindow, { hookPollMs: 1 });
+    dispatchMessage(COPY_MESSAGE, {});
+    const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
+    controller.initWithSBCSet(challengeFixture);
+    expect(view.children).toHaveLength(0);
+  });
+
+  it('accepts a copy message from its own window', () => {
+    const { pageWindow, view, dispatchMessage } = createFakeWindow();
+    startPageBridge(pageWindow, { hookPollMs: 1 });
+    dispatchMessage(COPY_MESSAGE, pageWindow);
+    const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
+    controller.initWithSBCSet(challengeFixture);
+    expect(mountedButton(view)?.textContent).toBe('Løs denne udfordring');
   });
 
   it('names the missing panel class after the poll window, without throwing', async () => {
