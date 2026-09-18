@@ -16,6 +16,7 @@ these, not against hand-written guesses.
 | `club-items.json` | `POST /club` | The club item format |
 | `chemistry-profiles.json` | `GET /chemistry/profiles` | FC27 chemistry rules |
 | `chemistry-teamlinks.json` | `GET /chemistry/teamlinks` | Linked clubs (cross-team club counting) |
+| `chemistry-observed-squad.json` | `GET /squad/active` (derived) | **EA's own chemistry numbers** for a real squad — the only ground truth we have for the scoring layer |
 
 ## Sanitisation
 
@@ -35,6 +36,27 @@ Before committing, every payload was stripped of anything account-specific:
 Card `assetId` values were deliberately **kept**. They identify card definitions in
 public game data, not anything belonging to an account, and the solver needs them
 to resolve which card a slot refers to.
+
+### The one exception: `chemistry-observed-squad.json`
+
+Account endpoints were dropped raw, including the active squad. One **derived** form of the
+active squad is committed anyway, because it carries something nothing else does: EA's own
+chemistry numbers, per player and as a squad total. Those cannot be obtained any other way,
+and without them the scoring layer has nothing to be checked against.
+
+What was done to it, beyond the normal pass:
+
+- reduced to the fields the chemistry computation needs — `rating`, `nation`, `leagueId`,
+  `teamid`, `preferredPosition`, `possiblePositions`, `rareflag`, `cardsubtypeid`
+- the persona ID, squad name, squad ID, manager, tactics, kickers and all club vanity items
+  (badges, kits, stadium, tifo, ball, celebrations) were removed
+- item instance IDs were replaced with positional placeholders (`item-000` … ), not hashed:
+  nothing in this fixture needs to join against the club listing, so there is no reason to
+  keep a recoverable identifier at all
+
+EA's chemistry numbers were kept **unmodified** — they are the entire point of the file. A
+scan for the persona ID, the squad name, `personaId`, `squadName` and `managerId` over the
+committed file returns nothing.
 
 ## Rules for adding fixtures
 

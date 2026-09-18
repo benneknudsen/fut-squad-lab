@@ -1,0 +1,490 @@
+{
+  "source": "GET /ut/game/fc27/squad/active, captured 2026-09-17",
+  "note": "Sanitised. Persona id, squad name, manager, tactics and item ids were removed or pseudonymised. EA's own chemistry numbers are unmodified \u2014 they are the point of this fixture.",
+  "formation": "f442",
+  "squadType": "DREAM_SQUAD",
+  "starRating": 80,
+  "eaChemistry": 12,
+  "eaPerPlayerChemistry": [
+    {
+      "index": 0,
+      "chemistry": 1
+    },
+    {
+      "index": 1,
+      "chemistry": 1
+    },
+    {
+      "index": 2,
+      "chemistry": 1
+    },
+    {
+      "index": 3,
+      "chemistry": 1
+    },
+    {
+      "index": 4,
+      "chemistry": 1
+    },
+    {
+      "index": 5,
+      "chemistry": 1
+    },
+    {
+      "index": 6,
+      "chemistry": 1
+    },
+    {
+      "index": 7,
+      "chemistry": 1
+    },
+    {
+      "index": 8,
+      "chemistry": 0
+    },
+    {
+      "index": 9,
+      "chemistry": 2
+    },
+    {
+      "index": 10,
+      "chemistry": 2
+    }
+  ],
+  "slots": [
+    {
+      "index": 0,
+      "chemistry": 1,
+      "loyaltyBonus": 0,
+      "itemId": "item-000",
+      "item": {
+        "rating": 83,
+        "nation": 45,
+        "leagueId": 31,
+        "teamid": 110374,
+        "preferredPosition": "GK",
+        "possiblePositions": [
+          "GK"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 0
+      }
+    },
+    {
+      "index": 1,
+      "chemistry": 1,
+      "loyaltyBonus": 0,
+      "itemId": "item-001",
+      "item": {
+        "rating": 78,
+        "nation": 27,
+        "leagueId": 31,
+        "teamid": 115845,
+        "preferredPosition": "RB",
+        "possiblePositions": [
+          "RB",
+          "RM"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 1
+      }
+    },
+    {
+      "index": 2,
+      "chemistry": 1,
+      "loyaltyBonus": 1,
+      "itemId": "item-002",
+      "item": {
+        "rating": 82,
+        "nation": 18,
+        "leagueId": 2222,
+        "teamid": 116326,
+        "preferredPosition": "CB",
+        "possiblePositions": [
+          "CB"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 1
+      }
+    },
+    {
+      "index": 3,
+      "chemistry": 1,
+      "loyaltyBonus": 0,
+      "itemId": "item-003",
+      "item": {
+        "rating": 81,
+        "nation": 14,
+        "leagueId": 2216,
+        "teamid": 116019,
+        "preferredPosition": "CB",
+        "possiblePositions": [
+          "CB"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 1
+      }
+    },
+    {
+      "index": 4,
+      "chemistry": 1,
+      "loyaltyBonus": 0,
+      "itemId": "item-004",
+      "item": {
+        "rating": 80,
+        "nation": 18,
+        "leagueId": 2215,
+        "teamid": 115998,
+        "preferredPosition": "LB",
+        "possiblePositions": [
+          "LB",
+          "LM"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 1
+      }
+    },
+    {
+      "index": 5,
+      "chemistry": 1,
+      "loyaltyBonus": 0,
+      "itemId": "item-005",
+      "item": {
+        "rating": 73,
+        "nation": 14,
+        "leagueId": 13,
+        "teamid": 1943,
+        "preferredPosition": "RB",
+        "possiblePositions": [
+          "RB",
+          "RM"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 1
+      }
+    },
+    {
+      "index": 6,
+      "chemistry": 1,
+      "loyaltyBonus": 1,
+      "itemId": "item-006",
+      "item": {
+        "rating": 83,
+        "nation": 21,
+        "leagueId": 19,
+        "teamid": 36,
+        "preferredPosition": "CDM",
+        "possiblePositions": [
+          "CDM",
+          "CM"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 2
+      }
+    },
+    {
+      "index": 7,
+      "chemistry": 1,
+      "loyaltyBonus": 1,
+      "itemId": "item-007",
+      "item": {
+        "rating": 83,
+        "nation": 21,
+        "leagueId": 2216,
+        "teamid": 116010,
+        "preferredPosition": "CDM",
+        "possiblePositions": [
+          "CDM",
+          "CM"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 2
+      }
+    },
+    {
+      "index": 8,
+      "chemistry": 0,
+      "loyaltyBonus": 1,
+      "itemId": "item-008",
+      "item": {
+        "rating": 80,
+        "nation": 36,
+        "leagueId": 308,
+        "teamid": 234,
+        "preferredPosition": "LW",
+        "possiblePositions": [
+          "LM",
+          "LW"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 3
+      }
+    },
+    {
+      "index": 9,
+      "chemistry": 2,
+      "loyaltyBonus": 1,
+      "itemId": "item-009",
+      "item": {
+        "rating": 84,
+        "nation": 52,
+        "leagueId": 31,
+        "teamid": 1745,
+        "preferredPosition": "CAM",
+        "possiblePositions": [
+          "CAM",
+          "ST"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 2
+      }
+    },
+    {
+      "index": 10,
+      "chemistry": 2,
+      "loyaltyBonus": 0,
+      "itemId": "item-010",
+      "item": {
+        "rating": 80,
+        "nation": 52,
+        "leagueId": 31,
+        "teamid": 52,
+        "preferredPosition": "CAM",
+        "possiblePositions": [
+          "CAM",
+          "ST"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 2
+      }
+    },
+    {
+      "index": 11,
+      "chemistry": null,
+      "loyaltyBonus": 0,
+      "itemId": "item-011",
+      "item": {
+        "rating": 60,
+        "nation": 21,
+        "leagueId": 2076,
+        "teamid": 110697,
+        "preferredPosition": "GK",
+        "possiblePositions": [
+          "GK"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 0
+      }
+    },
+    {
+      "index": 12,
+      "chemistry": null,
+      "loyaltyBonus": 1,
+      "itemId": "item-012",
+      "item": {
+        "rating": 81,
+        "nation": 136,
+        "leagueId": 16,
+        "teamid": 66,
+        "preferredPosition": "CB",
+        "possiblePositions": [
+          "CB"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 1
+      }
+    },
+    {
+      "index": 13,
+      "chemistry": null,
+      "loyaltyBonus": 0,
+      "itemId": "item-013",
+      "item": {
+        "rating": 73,
+        "nation": 21,
+        "leagueId": 19,
+        "teamid": 169,
+        "preferredPosition": "CB",
+        "possiblePositions": [
+          "CB"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 1
+      }
+    },
+    {
+      "index": 14,
+      "chemistry": null,
+      "loyaltyBonus": 1,
+      "itemId": "item-014",
+      "item": {
+        "rating": 83,
+        "nation": 13,
+        "leagueId": 53,
+        "teamid": 240,
+        "preferredPosition": "CDM",
+        "possiblePositions": [
+          "CDM",
+          "CM"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 2
+      }
+    },
+    {
+      "index": 15,
+      "chemistry": null,
+      "loyaltyBonus": 1,
+      "itemId": "item-015",
+      "item": {
+        "rating": 82,
+        "nation": 21,
+        "leagueId": 10,
+        "teamid": 245,
+        "preferredPosition": "CAM",
+        "possiblePositions": [
+          "CDM",
+          "CM",
+          "CAM"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 2
+      }
+    },
+    {
+      "index": 16,
+      "chemistry": null,
+      "loyaltyBonus": 0,
+      "itemId": "item-016",
+      "item": {
+        "rating": 80,
+        "nation": 95,
+        "leagueId": 2221,
+        "teamid": 116310,
+        "preferredPosition": "LM",
+        "possiblePositions": [
+          "LM",
+          "CAM",
+          "ST",
+          "LW"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 2
+      }
+    },
+    {
+      "index": 17,
+      "chemistry": null,
+      "loyaltyBonus": 0,
+      "itemId": "item-017",
+      "item": {
+        "rating": 78,
+        "nation": 34,
+        "leagueId": 13,
+        "teamid": 5,
+        "preferredPosition": "ST",
+        "possiblePositions": [
+          "ST"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 3
+      }
+    },
+    {
+      "index": 18,
+      "chemistry": null,
+      "loyaltyBonus": 0,
+      "itemId": "item-018",
+      "item": {
+        "rating": 72,
+        "nation": 21,
+        "leagueId": 19,
+        "teamid": 31,
+        "preferredPosition": "CB",
+        "possiblePositions": [
+          "CB"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 1
+      }
+    },
+    {
+      "index": 19,
+      "chemistry": null,
+      "loyaltyBonus": 0,
+      "itemId": "item-019",
+      "item": {
+        "rating": 71,
+        "nation": 119,
+        "leagueId": 31,
+        "teamid": 111974,
+        "preferredPosition": "CB",
+        "possiblePositions": [
+          "CB",
+          "LB",
+          "LM"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 1
+      }
+    },
+    {
+      "index": 20,
+      "chemistry": null,
+      "loyaltyBonus": 1,
+      "itemId": "item-020",
+      "item": {
+        "rating": 82,
+        "nation": 103,
+        "leagueId": 31,
+        "teamid": 48,
+        "preferredPosition": "CM",
+        "possiblePositions": [
+          "CM",
+          "CAM"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 2
+      }
+    },
+    {
+      "index": 21,
+      "chemistry": null,
+      "loyaltyBonus": 1,
+      "itemId": "item-021",
+      "item": {
+        "rating": 81,
+        "nation": 14,
+        "leagueId": 13,
+        "teamid": 7,
+        "preferredPosition": "CAM",
+        "possiblePositions": [
+          "CDM",
+          "CM",
+          "CAM"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 2
+      }
+    },
+    {
+      "index": 22,
+      "chemistry": null,
+      "loyaltyBonus": 0,
+      "itemId": "item-022",
+      "item": {
+        "rating": 74,
+        "nation": 136,
+        "leagueId": 2218,
+        "teamid": 132861,
+        "preferredPosition": "ST",
+        "possiblePositions": [
+          "CAM",
+          "ST"
+        ],
+        "rareflag": 0,
+        "cardsubtypeid": 3
+      }
+    }
+  ]
+}
