@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import club from './fixtures/club-items.json';
 import { normaliseClubItem } from '../src/ea/adapter.js';
 import { buildPool, normaliseClub } from '../src/solver/candidates.js';
+import { mergePrices } from '../src/solver/prices.js';
 
 // These tests exercise the club-to-pool path. The captured fixture is the
 // ground truth for the raw record shape, but three of its properties are
@@ -104,6 +105,18 @@ const stRivals = () =>
       discardValue: step * 100,
     })
   );
+
+// Three unmerged records where raw market value and weighted contribution
+// disagree: the tradeable card is the cheapest raw card (300), while the
+// untradeable duplicate contributes only 0.20 * 1000 = 200. Unmerged records
+// prove the trimmer's own state weighting; the merged path is proven below
+// with an external price table.
+const weightedRivals = () =>
+  normaliseClub([
+    raw({ id: 1, assetId: 11, untradeable: false, marketAverage: 300, discardValue: 300 }),
+    raw({ id: 2, assetId: 12, untradeable: true, marketAverage: 1000, discardValue: 1000 }),
+    raw({ id: 3, assetId: 12, untradeable: true, marketAverage: 1000, discardValue: 1000 }),
+  ]);
 
 describe('normaliseClub over the captured club fixture', () => {
   const records = normaliseClub(fixtureRawItems);
@@ -716,6 +729,107 @@ describe('buildPool', () => {
     expect(pool.map((record) => record.id)).toEqual([2]);
   });
 
+  it('trims by state-aware weighted contribution, not by raw market value', () => {
+    const pool = buildPool(weightedRivals(), { groupSize: 1 });
+
+    expect(pool.map((record) => record.id)).toEqual([3]);
+  });
+
+  it('ranks merged records by their resolved external price, not their raw EA market value', () => {
+    const records = mergePrices(
+      normaliseClub([
+        raw({ id: 1, assetId: 11, untradeable: true, marketAverage: 100, discardValue: 100 }),
+        raw({ id: 2, assetId: 12, untradeable: true, marketAverage: 9000, discardValue: 9000 }),
+      ]),
+      { 11: 9000, 12: 100 }
+    );
+
+    const pool = buildPool(records, { groupSize: 1 });
+
+    expect(pool.map((record) => record.id)).toEqual([2]);
+  });
+
+  it('lets options.weights decide which weighted card survives', () => {
+    const pool = buildPool(weightedRivals(), {
+      groupSize: 1,
+      weights: { untradeableDuplicate: 1 },
+    });
+
+    expect(pool.map((record) => record.id)).toEqual([1]);
+  });
+
+  it('lets options.weights change the winner among merged records with external prices', () => {
+    const records = mergePrices(
+      normaliseClub([
+        raw({ id: 1, assetId: 11, untradeable: true, marketAverage: 100, discardValue: 100 }),
+        raw({ id: 2, assetId: 11, untradeable: true, marketAverage: 100, discardValue: 100 }),
+        raw({ id: 3, assetId: 12, untradeable: false, marketAverage: 9000, discardValue: 9000 }),
+      ]),
+      { 11: 1000, 12: 300 }
+    );
+
+    // Record 2 is the untradeable duplicate: 0.20 * 1000 = 200 beats the
+    // tradeable card's 1.00 * 300 = 300. Raising the duplicate weight flips it.
+    // Both the external prices and the weights must be used: a raw-price
+    // fallback would keep record 2 (0.20 * 100 against 9000) either way.
+    const defaults = buildPool(records, { groupSize: 1 });
+    const overridden = buildPool(records, {
+      groupSize: 1,
+      weights: { untradeableDuplicate: 1 },
+    });
+
+    expect(defaults.map((record) => record.id)).toEqual([2]);
+    expect(overridden.map((record) => record.id)).toEqual([3]);
+  });
+
+  it.each(['cardState', 'price', 'priceSource'])(
+    'treats an own, undefined %s as a merged record instead of falling back to raw prices',
+    (field) => {
+      const [record] = normaliseClub([
+        raw({ marketAverage: 100, discardValue: 100 }),
+      ]);
+      const halfMerged = { ...record, [field]: undefined };
+
+      expect(Object.hasOwn(halfMerged, field)).toBe(true);
+      expect(() => buildPool([halfMerged], { groupSize: 1 })).toThrow(/prices:/);
+    }
+  );
+
+  it('ranks a merged unknown price last without throwing, even after JSON transport', () => {
+    const unpriced = {
+      marketAverage: null,
+      marketDataMinPrice: null,
+      marketDataMaxPrice: null,
+      discardValue: null,
+    };
+    const rawItems = [
+      raw({ id: 1, assetId: 11, ...unpriced }),
+      raw({ id: 2, assetId: 12, ...unpriced }),
+    ];
+    const records = JSON.parse(
+      JSON.stringify(mergePrices(normaliseClub(rawItems), { 12: 9000 }))
+    );
+
+    // Without the merged metadata both raw prices are unknown, so the earlier
+    // record would win; only the merged external price can rank record 2 first.
+    expect(buildPool(normaliseClub(rawItems), { groupSize: 1 }).map((record) => record.id)).toEqual(
+      [1]
+    );
+    expect(records[0].price).toBeNull();
+    expect(records[1].price).toBe(9000);
+    expect(buildPool(records, { groupSize: 1 }).map((record) => record.id)).toEqual([2]);
+  });
+
+  it('rejects an unmerged tradeable record with no duplicate flag instead of guessing', () => {
+    const records = normaliseClub([raw({ untradeable: false })]).map((record) => {
+      const copy = { ...record };
+      delete copy.duplicate;
+      return copy;
+    });
+
+    expect(() => buildPool(records)).toThrow(/duplicate/);
+  });
+
   it('preserves input order and is deterministic for the same input', () => {
     const records = pricedClub();
 
@@ -760,6 +874,7 @@ describe('buildPool', () => {
     ['groupSize', { groupSize: 2.5 }, /groupSize/],
     ['ratingBandWidth', { ratingBandWidth: 0 }, /ratingBandWidth/],
     ['priceLookup', { priceLookup: 'cheap' }, /priceLookup/],
+    ['weights', { weights: new Map([['tradeable', 5]]) }, /weights/],
   ])('rejects an invalid %s option', (_label, options, message) => {
     expect(() => buildPool(pricedClub(), options)).toThrow(message);
   });
