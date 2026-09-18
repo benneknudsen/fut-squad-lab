@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import copyDa from '../design/copy.da.json';
 import copyEn from '../design/copy.en.json';
-import { bridgeModuleMessage, injectStylesheets, loadCopyMessage } from '../src/content-app.js';
+import { bridgeModuleMessage, injectStylesheets, loadCopyMessage, startContentApp } from '../src/content-app.js';
 
 const fakeChrome = () => ({
   runtime: { getURL: (path) => `chrome-extension://abc/${path}` },
@@ -87,5 +87,75 @@ describe('injectStylesheets', () => {
       'chrome-extension://abc/design/tokens.css',
       'chrome-extension://abc/src/ui/styles.css',
     ]);
+  });
+});
+
+const createFakeContentWindow = () => {
+  const messages = [];
+  const listeners = [];
+  const window = {
+    postMessage(message) {
+      messages.push(message);
+    },
+    addEventListener(type, handler) {
+      if (type === 'message') listeners.push(handler);
+    },
+  };
+  const document = {
+    createElement: () => ({ rel: '', href: '' }),
+    head: { appendChild: () => {} },
+  };
+  return {
+    window,
+    document,
+    messages,
+    dispatchMessage(data, source = window) {
+      for (const listener of listeners) listener({ data, source });
+    },
+  };
+};
+
+const startFakeContentApp = () => {
+  const fake = createFakeContentWindow();
+  const fakeConsole = { log: vi.fn(), warn: vi.fn() };
+  startContentApp({
+    window: fake.window,
+    document: fake.document,
+    chrome: fakeChrome(),
+    navigator: { language: 'en-GB' },
+    fetch: fetched(copyEn),
+    console: fakeConsole,
+  });
+  return { ...fake, fakeConsole };
+};
+
+describe('startContentApp message listener', () => {
+  it('ignores a summary and a bridge hello posted by a foreign frame', () => {
+    const { dispatchMessage, messages, fakeConsole } = startFakeContentApp();
+    dispatchMessage(
+      {
+        source: 'fsl-page',
+        kind: 'summary',
+        summary: '42 club items via services.UTSBCRepository.getClubItems',
+      },
+      {}
+    );
+    dispatchMessage({ source: 'fsl-page', kind: 'bridge-hello' }, {});
+    expect(fakeConsole.log).not.toHaveBeenCalled();
+    expect(messages.filter((message) => message.kind === 'bridge-module')).toHaveLength(1);
+  });
+
+  it('accepts a summary and a bridge hello from its own window', () => {
+    const { dispatchMessage, messages, fakeConsole } = startFakeContentApp();
+    dispatchMessage({ source: 'fsl-page', kind: 'bridge-hello' });
+    dispatchMessage({
+      source: 'fsl-page',
+      kind: 'summary',
+      summary: '42 club items via services.UTSBCRepository.getClubItems',
+    });
+    expect(messages.filter((message) => message.kind === 'bridge-module')).toHaveLength(2);
+    expect(fakeConsole.log).toHaveBeenCalledWith(
+      '[FUT Squad Lab] 42 club items via services.UTSBCRepository.getClubItems'
+    );
   });
 });
