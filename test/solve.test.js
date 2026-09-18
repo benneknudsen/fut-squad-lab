@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   FORMATION_SLOTS,
-  PINNED_ELIGIBILITY_KEYS,
-  SCOPE_VALUES,
   normaliseChemistryProfile,
   normaliseFormation,
   normaliseTeamChemLinks,
@@ -13,6 +11,7 @@ import { buildClubIndex } from '../src/solver/chemistry.js';
 import { orderConstraints, reevaluate, solve } from '../src/solver/solve.js';
 import { validateSquad } from '../src/solver/validate.js';
 import { normaliseRequirements } from '../src/solver/requirements.js';
+import { PINNED_ELIGIBILITY_KEYS, SCOPE_VALUES, withEligibility } from './helpers/eligibility.js';
 import clubFixture from './fixtures/club-items.json';
 import linksFixture from './fixtures/chemistry-teamlinks.json';
 import profilesFixture from './fixtures/chemistry-profiles.json';
@@ -47,12 +46,13 @@ const CHEMISTRY_RULE_SET = normaliseChemistryProfile({
   mappings: [{ profileId: 4, rarityIds: [0, 69] }],
 });
 
-const options = (overrides = {}) => ({
-  seed: 1,
-  chemistryRuleSet: CHEMISTRY_RULE_SET,
-  clubLinks: linksFixture.teamChemLinks,
-  ...overrides,
-});
+const options = (overrides = {}) =>
+  withEligibility({
+    seed: 1,
+    chemistryRuleSet: CHEMISTRY_RULE_SET,
+    clubLinks: linksFixture.teamChemLinks,
+    ...overrides,
+  });
 
 const validate = (result, challenge) =>
   validateSquad(result.squad, decode(challenge), VALIDATOR_OPTIONS);
@@ -285,7 +285,7 @@ describe('solve', () => {
     );
     const challenge = { formation: 'f442', elgReq: [], elgOperation: 'AND' };
 
-    const result = solve(challenge, buildPool(normaliseClub(rawItems)), { seed: 1 });
+    const result = solve(challenge, buildPool(normaliseClub(rawItems)), withEligibility({ seed: 1 }));
 
     expect(result.valid).toBe(true);
     expect(result.cost).toBeNull();
@@ -435,7 +435,7 @@ describe('unfillable pools degrade honestly', () => {
     poolFrom(['GK', 'LB', 'CB', 'RB', 'LM', 'CM', 'CM', 'RM', 'ST', 'ST']);
 
   it('solve returns invalid for a pool with no goalkeeper instead of throwing', () => {
-    const result = solve(challenge, poolWithoutGoalkeeper(), { seed: 1 });
+    const result = solve(challenge, poolWithoutGoalkeeper(), withEligibility({ seed: 1 }));
 
     expect(result.valid).toBe(false);
     expect(result.failures).toEqual([]);
@@ -443,7 +443,7 @@ describe('unfillable pools degrade honestly', () => {
   });
 
   it('solve returns invalid when a slot list is exhausted mid-run instead of throwing', () => {
-    const result = solve(challenge, poolWithOneCentreBack(), { seed: 1 });
+    const result = solve(challenge, poolWithOneCentreBack(), withEligibility({ seed: 1 }));
 
     expect(result.valid).toBe(false);
     expect(result.failures).toEqual([]);
@@ -454,6 +454,7 @@ describe('unfillable pools degrade honestly', () => {
     const result = reevaluate({ players: [] }, [], poolWithoutGoalkeeper(), {
       challenge,
       seed: 1,
+      ...withEligibility(),
     });
 
     expect(result.valid).toBe(false);
@@ -465,6 +466,7 @@ describe('unfillable pools degrade honestly', () => {
     const result = reevaluate({ players: [] }, [], poolWithOneCentreBack(), {
       challenge,
       seed: 1,
+      ...withEligibility(),
     });
 
     expect(result.valid).toBe(false);
@@ -517,7 +519,7 @@ describe('reevaluate', () => {
     const first = solve(challenge, POOL, options());
     const incomplete = { players: first.squad.players.slice(0, 4) };
 
-    const result = reevaluate(incomplete, [0, 1, 2, 3], [], { challenge });
+    const result = reevaluate(incomplete, [0, 1, 2, 3], [], withEligibility({ challenge }));
 
     expect(result.squad.players).toHaveLength(4);
     expect(result.valid).toBe(false);

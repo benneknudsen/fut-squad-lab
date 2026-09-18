@@ -7,11 +7,8 @@ import club from './fixtures/club-items.json';
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import set16 from './fixtures/sbs-set-16-challenges.json';
 import teamlinks from './fixtures/chemistry-teamlinks.json';
-import {
-  PINNED_ELIGIBILITY_KEYS,
-  SCOPE_VALUES,
-  normaliseClubItem,
-} from '../src/ea/adapter.js';
+import { PINNED_ELIGIBILITY_KEYS, SCOPE_VALUES } from './helpers/eligibility.js';
+import { normaliseClubItem } from '../src/ea/adapter.js';
 import { normaliseRequirements } from '../src/solver/requirements.js';
 import { buildClubIndex, squadChemistry } from '../src/solver/chemistry.js';
 import { MEASURES, validateSquad } from '../src/solver/validate.js';

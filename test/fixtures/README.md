@@ -18,6 +18,13 @@ these, not against hand-written guesses.
 | `chemistry-teamlinks.json` | `GET /chemistry/teamlinks` | Linked clubs (cross-team club counting) |
 | `chemistry-observed-squad.json` | `GET /squad/active` (derived) | **EA's own chemistry numbers** for a real squad — the only ground truth we have for the scoring layer |
 
+`eligibility-observation.js` is not a payload capture: it is the observation table
+derived from the `elgReq[]` payloads above — the `eligibilityKey` numbers, the
+descriptor each key decodes to, and the inferred `eligibilityValue` scope mapping.
+Issue #16 removed it from `src/` so that the solver core cannot fall back to it;
+production must read the numbers from EA's live `SBCEligibilityKey` enum instead.
+`test/helpers/eligibility.js` is the one place tests re-supply it.
+
 ## Sanitisation
 
 Before committing, every payload was stripped of anything account-specific:

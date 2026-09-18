@@ -10,8 +10,11 @@
  * stable. One slot describes exactly one requirement.
  *
  * This module knows no EA key numbers or type names. The caller supplies two
- * lookup tables that carry all EA-specific knowledge — `src/ea/adapter.js` is the
- * one file that owns them:
+ * lookup tables that carry all EA-specific knowledge. In production the browser
+ * half resolves them from the live page (`readEligibilityKeys` in
+ * `src/ea/adapter.js`, the one file that owns EA naming); tests supply the
+ * pinned observation tables that ship as test data beside the captured
+ * fixtures.
  *
  *   keys    eligibilityKey -> { type, kind, role, field? }
  *             type           the payload's `type` string for that key. Used only
@@ -33,8 +36,8 @@
  * A scope entry is not a constraint of its own: it is the comparison operator
  * for whichever requirement shares its slot. The comparison semantics
  * (`GREATER` means the measured quantity must be >= the value, `LOWER` <=,
- * `EXACT` ===) and the provenance of the scope numbers are documented next to
- * `SCOPE_VALUES` in `src/ea/adapter.js`.
+ * `EXACT` ===) and the provenance of the scope numbers are documented beside
+ * the pinned scope table in the test data.
  *
  * `PLAYER_QUALITY` is passed through as opaque scoped data: the constraint
  * carries `kind`, `value` and `scope` faithfully, and this module assumes no
@@ -245,8 +248,9 @@ const decodeSlot = (slot, entries, scopes) => {
 /**
  * @param {Array<{type: string, eligibilitySlot: number, eligibilityKey: number, eligibilityValue: number}>} elgReq
  * @param {{ operation?: string, keys: object, scopes: object }} options
- *   `keys` and `scopes` are required lookup tables from `src/ea/adapter.js`;
- *   `operation` defaults to 'AND' and any other `elgOperation` is rejected.
+ *   `keys` and `scopes` are required lookup tables supplied by the caller (the
+ *   live-resolved tables in production); `operation` defaults to 'AND' and any
+ *   other `elgOperation` is rejected.
  *   Constraint `kind`s are the adapter's stable internal vocabulary, never the
  *   payload's `type` strings.
  * @returns {{ constraints: Array<object>, operation: string }}
