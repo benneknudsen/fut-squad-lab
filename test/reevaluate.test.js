@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  PINNED_ELIGIBILITY_KEYS,
-  SCOPE_VALUES,
   normaliseChemistryProfile,
   normaliseFormation,
   normaliseTeamChemLinks,
@@ -18,6 +16,7 @@ import {
 import { normaliseRequirements } from '../src/solver/requirements.js';
 import { reevaluate, solve } from '../src/solver/solve.js';
 import { validateSquad } from '../src/solver/validate.js';
+import { PINNED_ELIGIBILITY_KEYS, SCOPE_VALUES, withEligibility } from './helpers/eligibility.js';
 import clubFixture from './fixtures/club-items.json';
 import linksFixture from './fixtures/chemistry-teamlinks.json';
 import profilesFixture from './fixtures/chemistry-profiles.json';
@@ -46,12 +45,13 @@ const CHEMISTRY_RULE_SET = normaliseChemistryProfile({
   mappings: [{ profileId: 4, rarityIds: [0, 69] }],
 });
 
-const options = (overrides = {}) => ({
-  seed: 1,
-  chemistryRuleSet: CHEMISTRY_RULE_SET,
-  clubLinks: linksFixture.teamChemLinks,
-  ...overrides,
-});
+const options = (overrides = {}) =>
+  withEligibility({
+    seed: 1,
+    chemistryRuleSet: CHEMISTRY_RULE_SET,
+    clubLinks: linksFixture.teamChemLinks,
+    ...overrides,
+  });
 
 const validate = (result, challenge) =>
   validateSquad(result.squad, decode(challenge), VALIDATOR_OPTIONS);
@@ -242,7 +242,7 @@ describe('reevaluate', () => {
     };
     const clubThreeGoalkeeper = pool.find((record) => record.clubId === 300);
 
-    const solved = solve(clubCountChallenge, pool, { seed: 1 });
+    const solved = solve(clubCountChallenge, pool, withEligibility({ seed: 1 }));
     expect(solved.valid, 'the unlocked solve must be valid for this test to mean anything').toBe(
       true
     );
@@ -254,7 +254,7 @@ describe('reevaluate', () => {
       { players, chemistry: solved.squad.chemistry },
       [0],
       pool,
-      { challenge: clubCountChallenge, seed: 1 }
+      withEligibility({ challenge: clubCountChallenge, seed: 1 })
     );
 
     expect(result.valid).toBe(false);
@@ -375,14 +375,16 @@ describe('reevaluate', () => {
     );
     const bareChallenge = { formation: 'f442', elgOperation: 'AND', elgReq: [] };
 
-    const solved = solve(bareChallenge, unpricedPool, { seed: 1 });
+    const solved = solve(bareChallenge, unpricedPool, withEligibility({ seed: 1 }));
     expect(solved.valid).toBe(true);
     expect(solved.cost).toBeNull();
 
-    const result = reevaluate(solved.squad, [], unpricedPool, {
-      challenge: bareChallenge,
-      seed: 1,
-    });
+    const result = reevaluate(
+      solved.squad,
+      [],
+      unpricedPool,
+      withEligibility({ challenge: bareChallenge, seed: 1 })
+    );
     const populated = result.alternatives.filter((list) => list.length > 0);
     expect(populated.length).toBeGreaterThan(0);
     for (const list of populated) {

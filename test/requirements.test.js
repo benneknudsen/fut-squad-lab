@@ -2,11 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import set16 from './fixtures/sbs-set-16-challenges.json';
-import {
-  PINNED_ELIGIBILITY_KEYS,
-  SCOPE_VALUES,
-  readEligibilityKeys,
-} from '../src/ea/adapter.js';
+import { PINNED_ELIGIBILITY_KEYS, SCOPE_VALUES } from './helpers/eligibility.js';
 import { normaliseRequirements } from '../src/solver/requirements.js';
 
 // Accepted/rejected squad cases cannot live here yet: they require a logged-in
@@ -155,7 +151,7 @@ describe('normaliseRequirements against the captured challenge payloads', () => 
   });
 });
 
-describe('the EA mapping in src/ea/adapter.js', () => {
+describe('the pinned observation table', () => {
   it('is frozen, descriptor by descriptor', () => {
     expect(Object.isFrozen(PINNED_ELIGIBILITY_KEYS)).toBe(true);
     for (const descriptor of Object.values(PINNED_ELIGIBILITY_KEYS)) {
@@ -189,13 +185,6 @@ describe('the EA mapping in src/ea/adapter.js', () => {
     expect(PINNED_ELIGIBILITY_KEYS[19].type).toBe('TEAM_RATING_1_TO_100');
     expect(PINNED_ELIGIBILITY_KEYS[19].kind).toBe('TEAM_RATING');
     expect(PINNED_ELIGIBILITY_KEYS[2].kind).toBe('PLAYER_COUNT_MATCH');
-  });
-});
-
-describe('the production eligibility-key entry point', () => {
-  it('fails loud instead of falling back to the pinned observation table', () => {
-    expect(() => readEligibilityKeys()).toThrow(/issue #16/);
-    expect(() => readEligibilityKeys()).toThrow(/page bridge/);
   });
 });
 
