@@ -360,6 +360,75 @@ export function crossCheckEligibilityKeys(liveKeys, observedKeys) {
   return { added, missing, renamed };
 }
 
+/**
+ * The live-enum half of the #16 cross-check, built for the one-session
+ * diagnostic report (#40). It answers three questions a pinned offline
+ * cross-check cannot answer on its own:
+ *
+ *   pinned   how many names `ELIGIBILITY_KEY_MODEL` pins are present in the
+ *            live enum (`presentNames`), and which of them are missing live.
+ *            Only the names are pinned in `src/`; the numbers are live, so a
+ *            renamed member cannot be detected from the model alone.
+ *   unknown  live members our model cannot name, already collected as
+ *            `unmodelled` by `readEligibilityKeys`.
+ *   renamed  the live enum's number wearing a different name than the
+ *            challenge payload uses for it. The payload's `(eligibilityKey,
+ *            type)` pairs are EA's own live assertion for that number — the
+ *            captured observation model, expressed live — so this detects the
+ *            renumbering the decoder would otherwise only report as a stage-5
+ *            failure. `undecodable` lists payload keys the live-built table
+ *            cannot decode at all.
+ *
+ * Pure: plain data in, plain report out. Never substitutes the pinned table
+ * for the live one; a caller with no live enum must report the read failure.
+ *
+ * @param {{ keys: object, members: Array<object>, unmodelled: Array<object> }}
+ *   resolved the `readEligibilityKeys` result
+ * @param {Array<object>} [elgReq] the challenge payload's requirement entries
+ * @returns {{ pinned: { present: number, presentNames: Array<string>,
+ *   missing: Array<string> }, unknown: Array<object>,
+ *   renamed: Array<object>, undecodable: Array<object> }}
+ */
+export function crossCheckEligibilityModel(resolved, elgReq = []) {
+  const members = Array.isArray(resolved?.members) ? resolved.members : [];
+  const rawKeys = resolved !== null && typeof resolved === 'object' ? resolved.keys : null;
+  const keys =
+    rawKeys !== null && typeof rawKeys === 'object' && !Array.isArray(rawKeys) ? rawKeys : {};
+  const liveNames = new Set(members.map((member) => member.type));
+  const modelNames = Object.keys(ELIGIBILITY_KEY_MODEL);
+  const presentNames = modelNames.filter((name) => liveNames.has(name));
+
+  const payloadKeys = {};
+  if (Array.isArray(elgReq)) {
+    for (const entry of elgReq) {
+      if (
+        entry !== null &&
+        typeof entry === 'object' &&
+        !Array.isArray(entry) &&
+        Number.isInteger(entry.eligibilityKey) &&
+        typeof entry.type === 'string' &&
+        entry.type.length > 0
+      ) {
+        payloadKeys[entry.eligibilityKey] = { type: entry.type };
+      }
+    }
+  }
+  const drift = crossCheckEligibilityKeys(keys, payloadKeys);
+
+  return {
+    pinned: {
+      present: presentNames.length,
+      presentNames,
+      missing: modelNames.filter((name) => !liveNames.has(name)),
+    },
+    unknown: members
+      .filter((member) => ELIGIBILITY_KEY_MODEL[member.type] === undefined)
+      .map((member) => ({ eligibilityKey: member.eligibilityKey, type: member.type })),
+    renamed: drift.renamed,
+    undecodable: drift.missing,
+  };
+}
+
 const describeEligibilityEntry = (entry) =>
   entry.liveType === undefined
     ? `${entry.eligibilityKey}=${entry.type}`
