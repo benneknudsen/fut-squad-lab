@@ -77,24 +77,39 @@
  *
  * ## Price model
  *
- * "Cheapest" uses EA's own offline price data when nothing better is supplied.
- * The default lookup reads `marketAverage`, falls back to `discardValue`, and
- * returns `null` when neither is known. A missing price means unknown, never
- * free: unknown sorts after every known price, and a group made only of
- * unknown prices keeps its earliest records in input order.
+ * "Cheapest" means the state-aware weighted contribution from `prices.js`, not
+ * the raw market value. A card's contribution is its resolved price multiplied
+ * by the weight of the state the solver would spend, so an untradeable
+ * duplicate priced at 1000 coins contributes 0.20 * 1000 = 200 and must outrank
+ * a tradeable card priced at 300. The trimmer is the first consumer of the
+ * cost model; a group can only be capped correctly if the ranking uses it.
  *
- * EXTENSION POINT (live prices, #10): pass `options.priceLookup`, a
- * `(record) => number | null` function, to price records from the fut.gg
- * client. The trimmer itself does not change; #6 supplies the lookup.
+ * A record that has been through `mergePrices` carries `cardState`, `price` and
+ * `priceSource`, and is scored by `itemCost`: its resolved price (an external
+ * table price included), its source and its state are all used as-is.
+ * `options.weights` overrides the design defaults exactly as it does for
+ * `itemCost`. `mergePrices` is the canonical price path — live fut.gg prices
+ * belong in its external table. `options.priceLookup` remains for callers that
+ * hand `buildPool` records which have not been merged; it resolves the raw
+ * `marketAverage` -> `discardValue` -> unknown chain for those records only,
+ * and is never consulted for a merged record.
+ *
+ * A missing price means unknown, never free: an unknown contribution is
+ * `UNKNOWN_CONTRIBUTION` (`null`), which sorts after every known contribution,
+ * and a group made only of unknown prices keeps its earliest records in input
+ * order. A non-finite contribution is rejected rather than ranked, so the
+ * `Infinity` that a JSON boundary would turn into `null` can never re-enter
+ * the pool as an unknown price.
  *
  * ## Determinism and input
  *
  * The pool keeps the surviving records in input order, so the same input
  * always yields the same output — the union over groups is collected as a set
  * of input indexes and re-emitted by filtering the input, so it cannot depend
- * on group iteration order. Within a group, records are ranked by price
- * ascending with unknown prices last; equal prices break by the record's
- * position in the input, earlier first. Input records are never mutated.
+ * on group iteration order. Within a group, records are ranked by contribution
+ * ascending with unknown contributions last; equal contributions break by the
+ * record's position in the input, earlier first. Input records are never
+ * mutated.
  *
  * EXTENSION POINT (concept players): concept players are not part of the club
  * payload and are out of scope here. When the milestone that reads them lands,
@@ -106,6 +121,14 @@
  */
 
 import { normaliseClubItem } from '../ea/adapter.js';
+import {
+  UNKNOWN_CONTRIBUTION,
+  classifyCardState,
+  compareContributions,
+  contributionFor,
+  itemCost,
+  resolveWeights,
+} from './prices.js';
 
 const DEFAULT_GROUP_SIZE = 5;
 const DEFAULT_SCOPE = 'both';
@@ -116,9 +139,21 @@ const SCOPES = Object.freeze(['untradeable', 'tradeable', 'both']);
 /**
  * EA's offline price signal: `marketAverage` when present, else
  * `discardValue`, else unknown (`null`). `??` is deliberate — a known 0 stays
- * 0, only `null`/absent becomes unknown.
+ * 0, only `null`/absent becomes unknown. Used only for records that have not
+ * been through `mergePrices`; a merged record's resolved price always wins.
  */
 const defaultPriceLookup = (record) => record.marketAverage ?? record.discardValue ?? null;
+
+/**
+ * A record has been through `mergePrices` when it owns its resolved cost
+ * fields. Any one of the three marks the merged shape, and property presence is
+ * what counts, not the value: a half-merged record with an own `priceSource:
+ * undefined` must be handed to `itemCost` and rejected there, never treated as
+ * an unmerged record and priced from its raw EA fields.
+ */
+const MERGED_COST_FIELDS = Object.freeze(['cardState', 'price', 'priceSource']);
+
+const hasMergedCost = (record) => MERGED_COST_FIELDS.some((field) => Object.hasOwn(record, field));
 
 const fail = (message) => {
   throw new Error(`candidates: ${message}`);
@@ -182,7 +217,7 @@ const resolveOptions = (options) => {
   if (typeof priceLookup !== 'function') {
     fail('buildPool: options.priceLookup must be a function');
   }
-  return { groupSize, scope, ratingBandWidth, priceLookup };
+  return { groupSize, scope, ratingBandWidth, priceLookup, weights: options.weights };
 };
 
 const requireRecord = (record, index) => {
@@ -254,33 +289,61 @@ const resolvePrice = (record, priceLookup, index) => {
   return price;
 };
 
-const orderablePrice = (price) => (price === null ? Number.POSITIVE_INFINITY : price);
+/**
+ * The ranking cost of one record: `UNKNOWN_CONTRIBUTION` (`null`) for a price
+ * that is not known, otherwise a finite, non-negative weighted contribution.
+ *
+ * A merged record is scored by `itemCost`, so its resolved price (external
+ * table included) and state weight are used as-is. An unmerged record is
+ * classified from its own flags and priced by `priceLookup`, then weighted with
+ * the same rules. A contribution that is neither `null` nor finite is a bug in
+ * that path and throws, so a known price can never arrive as `Infinity` after
+ * a JSON boundary and be ranked like an unknown one.
+ */
+const resolveContribution = (record, index, { priceLookup, resolvedWeights }) => {
+  const contribution = hasMergedCost(record)
+    ? itemCost(record, resolvedWeights).contribution
+    : contributionFor(
+        resolvePrice(record, priceLookup, index),
+        resolvedWeights[classifyCardState(record)]
+      );
+  if (contribution === UNKNOWN_CONTRIBUTION) return contribution;
+  if (!Number.isFinite(contribution) || contribution < 0) {
+    fail(
+      `buildPool: records[${index}] contribution must be null or a finite, non-negative number;` +
+        ' an unknown price must not arrive as a non-finite number'
+    );
+  }
+  return contribution;
+};
 
 /**
- * Rank by known price ascending, unknown prices last; equal prices break by
- * input position, earlier first. The explicit comparison avoids the
- * `Infinity - Infinity` NaN trap that would skip the tie-break.
+ * Rank by known contribution ascending, unknown contributions last; equal
+ * contributions break by input position, earlier first. `compareContributions`
+ * keeps the null-last rule in one place, shared with the rest of the cost
+ * model.
  */
-const compareByPriceThenInputOrder = (left, right) => {
-  const leftPrice = orderablePrice(left.price);
-  const rightPrice = orderablePrice(right.price);
-  if (leftPrice !== rightPrice) return leftPrice < rightPrice ? -1 : 1;
+const compareByContributionThenInputOrder = (left, right) => {
+  const byContribution = compareContributions(left.contribution, right.contribution);
+  if (byContribution !== 0) return byContribution;
   return left.index - right.index;
 };
 
 /**
  * Trim stable records down to the candidate pool: at most `options.groupSize`
- * records per (slot position, rating band) group, cheapest first, with the rest
- * of the rules in the header.
+ * records per (slot position, rating band) group, cheapest by weighted
+ * contribution first, with the rest of the rules in the header.
  *
- * @param {Array<object>} records output of `normaliseClub`
+ * @param {Array<object>} records output of `normaliseClub`, optionally merged
+ *   through `mergePrices`
  * @param {{ groupSize?: number, scope?: string, ratingBandWidth?: number,
- *   priceLookup?: Function }} [options]
+ *   priceLookup?: Function, weights?: object }} [options]
  * @returns {Array<object>} the surviving records, in input order
  */
 export function buildPool(records, options = {}) {
   requireDenseArray(records, 'buildPool: records');
-  const { groupSize, scope, ratingBandWidth, priceLookup } = resolveOptions(options);
+  const { groupSize, scope, ratingBandWidth, priceLookup, weights } = resolveOptions(options);
+  const resolvedWeights = resolveWeights(weights);
 
   const groups = new Map();
   records.forEach((record, index) => {
@@ -289,7 +352,10 @@ export function buildPool(records, options = {}) {
     if (!isInScope(record, scope)) return;
 
     const band = Math.floor(record.rating / ratingBandWidth);
-    const entry = { index, price: resolvePrice(record, priceLookup, index) };
+    const entry = {
+      index,
+      contribution: resolveContribution(record, index, { priceLookup, resolvedWeights }),
+    };
     for (const position of positions) {
       const key = `${position}\u0000${band}`;
       const group = groups.get(key);
@@ -300,7 +366,7 @@ export function buildPool(records, options = {}) {
 
   const keptIndexes = new Set();
   for (const group of groups.values()) {
-    group.sort(compareByPriceThenInputOrder);
+    group.sort(compareByContributionThenInputOrder);
     for (const entry of group.slice(0, groupSize)) {
       keptIndexes.add(entry.index);
     }
