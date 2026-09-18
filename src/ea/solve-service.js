@@ -9,6 +9,12 @@
  *   challenge -> club -> challenge squad -> eligibility (once per session)
  *   -> runSolve -> applySolution -> writeSolution
  *
+ * Every stage records an outcome as data on the returned `stages` list, as
+ * `{ id, ok, reason, detail }`, so the page bridge can render one staged
+ * diagnostic report (#40) without any stage work of its own. A failure at one
+ * stage leaves the later stages unrecorded; `completeStages` in
+ * `src/ea/summary.js` fills those with an explicit not-reached outcome.
+ *
  * Every stage is injectable through `steps`, so the glue is unit-testable with
  * fakes for the readers, the solver and the writer; production defaults to the
  * real modules. The eligibility key table is resolved once and cached for the
@@ -16,16 +22,22 @@
  * fails naming that global and is never replaced by a static table (#16).
  *
  * `solve` never throws for an expected environment failure. It returns
- * `{ ok: false, stage, error, read }` so the bridge can always print the read
- * summary and a loud, specific reason. A solution the validator rejected is a
- * normal `{ ok: true, valid: false }` outcome and is not written: writing a
+ * `{ ok: false, stage, error, read, stages }` so the bridge can always print the
+ * read summary and a loud, specific reason. A solution the validator rejected is
+ * a normal `{ ok: true, valid: false }` outcome and is not written: writing a
  * squad that violates the challenge would be worse than reporting it.
+ *
+ * Observability only: the write goes through the same `applySolution` payload
+ * and the same `writeSolution` chain as before. `planSquadWrite` is called
+ * additionally for its `placed`/`preserved`/`unplaced` report, which the
+ * payload stage surfaces; it is pure and performs the same validation.
  */
 
 import {
   CLUB_ITEM_ID_FIELD,
   EA_GLOBALS,
   SCOPE_VALUES,
+  crossCheckEligibilityModel,
   readEligibilityKeys,
   resolveChallengeSquad,
   resolveChallengeSubject,
@@ -34,8 +46,8 @@ import {
 import { readChallenge } from './challenge-reader.js';
 import { readClubItems } from './club-reader.js';
 import { runSolve } from './solve-runner.js';
-import { applySolution, writeSolution } from './squad-writer.js';
-import { buildReadSummary } from './summary.js';
+import { applySolution, planSquadWrite, writeSolution } from './squad-writer.js';
+import { buildReadSummary, countConstraints, summarizeWritePlan } from './summary.js';
 
 const fail = (message) => {
   throw new Error(`solve-service: ${message}`);
@@ -49,6 +61,12 @@ const describeAttempts = (attempts) =>
   attempts.length === 0
     ? 'no candidate was tried'
     : attempts.map((attempt) => `${attempt.id}: ${attempt.reason}`).join('; ');
+
+const summarizeCostCoverage = (coverage) => ({
+  known: Number.isFinite(coverage?.known) ? coverage.known : 0,
+  unknown: Number.isFinite(coverage?.unknown) ? coverage.unknown : 0,
+  complete: coverage?.complete === true,
+});
 
 /**
  * @param {{ pageWindow: object, requestSolve: Function, steps?: object }} options
@@ -72,6 +90,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
   const resolveSquad = steps.resolveChallengeSquad ?? resolveChallengeSquad;
   const readKeys = steps.readEligibilityKeys ?? (() => readEligibilityKeys(pageWindow));
   const runSolveFn = steps.runSolve ?? runSolve;
+  const planSquadWriteFn = steps.planSquadWrite ?? planSquadWrite;
   const applySolutionFn = steps.applySolution ?? applySolution;
   const writeSolutionFn = steps.writeSolution ?? writeSolution;
   const externalPrices = steps.externalPrices ?? null;
@@ -84,6 +103,8 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
    * too, so a later solve reports the same reason instead of silently retrying
    * into a fallback. The table is validated here, before any solve work is
    * dispatched: an empty table is a failed read, not a solvable challenge.
+   * The full resolved object is kept beside the keys so the diagnostic stage
+   * can report the live members and the model cross-check (#40).
    */
   const resolveEligibilityOnce = () => {
     if (eligibility !== null) return eligibility;
@@ -96,7 +117,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
             ' fall back to a static table'
         );
       }
-      eligibility = { keys };
+      eligibility = { keys, resolved };
     } catch (error) {
       eligibility = { error: toError(error) };
     }
@@ -105,7 +126,22 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
 
   return {
     async solve(subject) {
+      const stages = [];
+      const record = (id, ok, reason = null, detail = null) => {
+        stages.push({ id, ok, reason, detail });
+      };
+      const finish = (outcome) => ({ ...outcome, stages: [...stages] });
+
       const subjectResult = resolveSubject(subject);
+      record(
+        'bridge',
+        subjectResult.ok === true,
+        subjectResult.ok === true
+          ? null
+          : 'the panel argument carried no challenge payload; the panel shape may have changed',
+        { strategy: subjectResult.strategy, attempts: subjectResult.attempts }
+      );
+
       let challenge = null;
       let challengeError = null;
       if (subjectResult.ok) {
@@ -114,10 +150,36 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
         } catch (error) {
           challengeError = toError(error);
         }
+        record(
+          'challenge',
+          challengeError === null,
+          challengeError === null ? null : challengeError.message,
+          challenge === null
+            ? null
+            : {
+                challengeId: challenge.challengeId,
+                name: challenge.name,
+                formation: challenge.formation,
+                constraints: countConstraints(challenge),
+              }
+        );
       }
 
       const clubResult = await resolveClub(pageWindow);
       const clubRecords = clubResult.ok ? readClubItemsFn(clubResult.items) : [];
+      record(
+        'club',
+        clubResult.ok === true,
+        clubResult.ok === true
+          ? null
+          : `the club read failed; tried ${describeAttempts(clubResult.attempts)}`,
+        {
+          items: clubRecords.length,
+          strategy: clubResult.strategy ?? null,
+          attempts: clubResult.attempts,
+        }
+      );
+
       const read = {
         summary: buildReadSummary({
           challenge,
@@ -130,40 +192,56 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
       };
 
       if (subjectResult.ok !== true || challengeError !== null) {
-        return {
+        return finish({
           ok: false,
           stage: 'challenge',
           read,
           error:
             challengeError ??
             new Error('the panel argument carried no challenge payload; the panel shape may have changed'),
-        };
+        });
       }
       if (!clubResult.ok) {
-        return {
+        return finish({
           ok: false,
           stage: 'club',
           read,
           error: new Error(`the club read failed; tried ${describeAttempts(clubResult.attempts)}`),
-        };
+        });
       }
 
       const squadResult = resolveSquad(subject);
+      record(
+        'squad',
+        squadResult.ok === true,
+        squadResult.ok === true
+          ? null
+          : `the challenge squad payload is unreadable; tried ${describeAttempts(squadResult.attempts)}`,
+        { strategy: squadResult.strategy ?? null, attempts: squadResult.attempts }
+      );
       if (!squadResult.ok) {
-        return {
+        return finish({
           ok: false,
           stage: 'squad',
           read,
           error: new Error(
             `the challenge squad payload is unreadable; tried ${describeAttempts(squadResult.attempts)}`
           ),
-        };
+        });
       }
 
       const table = resolveEligibilityOnce();
       if (table.error !== undefined) {
-        return { ok: false, stage: 'eligibility', read, error: table.error };
+        record('eligibility', false, table.error.message, null);
+        return finish({ ok: false, stage: 'eligibility', read, error: table.error });
       }
+      record('eligibility', true, null, {
+        resolved: Object.keys(table.keys).length,
+        members: table.resolved?.members ?? [],
+        unmodelled: table.resolved?.unmodelled ?? [],
+        scopes: 'caller-supplied; no live scope enum',
+        crossCheck: crossCheckEligibilityModel(table.resolved, challenge.elgReq),
+      });
 
       let solved;
       try {
@@ -176,27 +254,58 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
           requestSolve,
         });
       } catch (error) {
-        return { ok: false, stage: 'solve', read, error: toError(error) };
+        record('solve', false, toError(error).message, null);
+        return finish({ ok: false, stage: 'solve', read, error: toError(error) });
       }
+      record('solve', true, null, {
+        cost: solved.cost ?? null,
+        costComplete: solved.costComplete === true,
+        costCoverage: summarizeCostCoverage(solved.costCoverage),
+        valid: solved.valid === true,
+        unverified: Array.isArray(solved.unverified) ? solved.unverified.length : 0,
+        failures: Array.isArray(solved.failures) ? solved.failures.length : 0,
+      });
 
       const base = { ok: true, read, challenge, ...solved };
       if (solved.valid !== true) {
-        return {
-          ...base,
-          write: null,
-          writeSkipped: 'the solution is not valid; refusing to write it',
-        };
+        const reason = 'the solution is not valid; refusing to write it';
+        record('payload', false, reason, null);
+        return finish({ ...base, write: null, writeSkipped: reason });
       }
 
+      const clubIndex = new Map(
+        clubResult.items.map((item) => [item?.[CLUB_ITEM_ID_FIELD], item])
+      );
+      let plan;
+      let payload;
       try {
-        const clubIndex = new Map(
-          clubResult.items.map((item) => [item?.[CLUB_ITEM_ID_FIELD], item])
-        );
-        const payload = applySolutionFn(squadResult.payload, solved, clubIndex);
-        const write = await writeSolutionFn(pageWindow, payload);
-        return { ...base, write };
+        plan = planSquadWriteFn(squadResult.payload, solved, clubIndex);
+        payload = applySolutionFn(squadResult.payload, solved, clubIndex);
       } catch (error) {
-        return { ok: false, stage: 'write', read, error: toError(error) };
+        const wrapped = toError(error);
+        record('payload', false, wrapped.message, null);
+        record('write', false, 'the payload could not be built', null);
+        return finish({ ok: false, stage: 'write', read, error: wrapped });
+      }
+      record('payload', true, null, summarizeWritePlan(plan));
+
+      try {
+        const write = await writeSolutionFn(pageWindow, payload);
+        record(
+          'write',
+          write.ok === true,
+          write.ok === true ? null : 'no write candidate answered',
+          {
+            strategy: write.strategy ?? null,
+            slotStrategy: write.slotStrategy ?? null,
+            attempts: write.attempts,
+          }
+        );
+        return finish({ ...base, write });
+      } catch (error) {
+        const wrapped = toError(error);
+        record('write', false, wrapped.message, null);
+        return finish({ ok: false, stage: 'write', read, error: wrapped });
       }
     },
   };

@@ -28,7 +28,7 @@ import {
 } from './ea/adapter.js';
 import { createSolveService } from './ea/solve-service.js';
 import { createSolveTransport } from './ea/solve-transport.js';
-import { buildSolveSummary } from './ea/summary.js';
+import { buildDiagnosticsReport, buildSolveSummary, formatDiagnosticsBlock } from './ea/summary.js';
 import { CONTENT_SOURCE, CONTENT_TO_PAGE_KINDS, PAGE_SOURCE, PAGE_TO_CONTENT_KINDS } from './ui/messages.js';
 import { findPanelMount } from './ui/panel-mount.js';
 import { mountSolveButton } from './ui/solve-button.js';
@@ -57,6 +57,7 @@ export function startPageBridge(pageWindow, options = {}) {
     eligibilityRead: false,
     eligibility: null,
     eligibilityError: null,
+    diagnostics: null,
   };
 
   const post = (kind, payload = {}) =>
@@ -81,6 +82,18 @@ export function startPageBridge(pageWindow, options = {}) {
       },
     },
   });
+
+  /**
+   * The extension's one diagnostic global, namespaced to avoid colliding with
+   * anything EA owns. It returns the staged report of the most recent Solve —
+   * counts, ids, stage outcomes and reason strings only, never item-level club
+   * contents, player names, prices, account identifiers or session data — or
+   * null before the first Solve, so it is always safe to paste into a support
+   * report. Re-dump it with:
+   *
+   *   copy(JSON.stringify(window.__FSL_DIAGNOSE__(), null, 2))
+   */
+  pageWindow.__FSL_DIAGNOSE__ = () => state.diagnostics;
 
   /**
    * Resolves EA's live `SBCEligibilityKey` enum once per session and logs one
@@ -135,6 +148,9 @@ export function startPageBridge(pageWindow, options = {}) {
     state.busy = true;
     try {
       const outcome = await service.solve(state.subject);
+      const diagnostics = buildDiagnosticsReport(outcome.stages);
+      state.diagnostics = diagnostics;
+      pageWindow.console?.log?.(formatDiagnosticsBlock(diagnostics));
       post(PAGE_TO_CONTENT_KINDS.SUMMARY, {
         summary: outcome.read.summary,
         challengeStrategy: outcome.read.challengeStrategy,
