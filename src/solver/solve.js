@@ -103,6 +103,62 @@ import { validateSquad } from './validate.js';
 const MAX_ATTEMPTS = 32;
 const RESTART_WINDOW = 3;
 
+const DEFAULT_EFFORT_LEVEL = 3;
+
+/**
+ * The one effort table: every search cap the UI's "Solver effort" control
+ * implies, keyed by integer level 1..5. It is exported so the panel can render
+ * the `options.effort.hint` copy ("up to {lineups} lineups") from the same
+ * numbers the search enforces, and so the mapping is testable without running
+ * a search.
+ *
+ * `maxLineups` caps the number of complete candidate squads that passed through
+ * `validateSquad`; `maxIterations` caps the improvement rounds (one accepted
+ * move per round); `timeBudgetMs` is the wall-clock stop the level implies,
+ * overridable per call with `options.improvementTimeBudgetMs`. The caps rise
+ * with the level so `thorough` provably does at least as much work as `fast`.
+ */
+export const EFFORT_LEVELS = Object.freeze({
+  1: Object.freeze({ level: 1, maxLineups: 32, maxIterations: 1, timeBudgetMs: 250 }),
+  2: Object.freeze({ level: 2, maxLineups: 96, maxIterations: 2, timeBudgetMs: 500 }),
+  3: Object.freeze({ level: 3, maxLineups: 256, maxIterations: 4, timeBudgetMs: 1000 }),
+  4: Object.freeze({ level: 4, maxLineups: 640, maxIterations: 8, timeBudgetMs: 2000 }),
+  5: Object.freeze({ level: 5, maxLineups: 1536, maxIterations: 16, timeBudgetMs: 4000 }),
+});
+
+/** The named tiers from `design/copy.en.json` -> `options.effort`. */
+const EFFORT_TIERS = Object.freeze({ fast: 1, balanced: 3, thorough: 5 });
+
+/**
+ * Resolves the effort control to its cap table entry. `undefined` is the
+ * documented default, level 3 (balanced). Named tiers map to 1, 3 and 5. Any
+ * other string, a non-integer or a level outside 1..5 throws: a silently
+ * clamped effort would make the panel's copy lie about the search that ran.
+ *
+ * @param {number|'fast'|'balanced'|'thorough'} [effort]
+ * @returns {{ level: number, maxLineups: number, maxIterations: number,
+ *   timeBudgetMs: number }}
+ * @throws {Error} when the level is not an integer 1..5 or an unknown tier name
+ */
+export function resolveEffort(effort) {
+  if (effort === undefined) return EFFORT_LEVELS[DEFAULT_EFFORT_LEVEL];
+  if (typeof effort === 'string') {
+    if (!Object.hasOwn(EFFORT_TIERS, effort)) {
+      fail(
+        `options.effort ${JSON.stringify(effort)} names no tier; expected one of` +
+          ` ${Object.keys(EFFORT_TIERS).join(', ')}`
+      );
+    }
+    return EFFORT_LEVELS[EFFORT_TIERS[effort]];
+  }
+  if (!Number.isInteger(effort) || !Object.hasOwn(EFFORT_LEVELS, effort)) {
+    fail(`options.effort must be an integer 1..5 when supplied; got ${JSON.stringify(effort)}`);
+  }
+  return EFFORT_LEVELS[effort];
+}
+
+const noImprovements = () => ({ acceptedMoves: 0, lineups: 0, iterations: 0, elapsedMs: 0 });
+
 /**
  * Priority classes for the greedy pass, lowest first. The restrictive
  * group-composition requirements come before the softer distinct-count and
@@ -739,18 +795,26 @@ const buildBestAttempt = ({
  *   `elgReq` and `elgOperation` are read
  * @param {Array<object>} pool output of `buildPool`
  * @param {{ timeBudgetMs?: number, seed?: number|string, lockedSlots?: Array<number>,
- *   weights?: object, clubLinks?: Array<object>, chemistryRuleSet?: object }} [options]
+ *   weights?: object, clubLinks?: Array<object>, chemistryRuleSet?: object,
+ *   effort?: number|'fast'|'balanced'|'thorough', improvementTimeBudgetMs?: number }} [options]
  *   `timeBudgetMs` bounds the shuffled restarts (attempt 0 always runs);
  *   `seed` seeds the restarts; `weights` overrides the cost-model weights;
  *   `clubLinks` is the raw `/chemistry/teamlinks` payload, normalised through
  *   the adapter; `chemistryRuleSet` is the adapter's normalised profile rule
  *   set. `lockedSlots` is accepted from day one per docs/PLAN.md §2.6 but is
  *   unused in the greedy seed — `reevaluate` is the entry point that honours it.
+ *   `effort` opts into the swap-based improvement pass on the winning squad
+ *   (see `improve`) and names the search caps; `improvementTimeBudgetMs`
+ *   overrides the level's wall-clock budget. Omitting `effort` keeps the
+ *   pre-local-search behaviour and reports a zeroed `improvements`.
  * @returns {{ squad: { players: Array<object>, chemistry: object },
  *   cost: number|null, valid: boolean, failures: Array<object>,
- *   unverified: Array<object> }} `failures` and `unverified` are the
- *   validator's own structured arrays; `cost` is `null` when any card's price
- *   is unknown, never `0` for an unknown card
+ *   unverified: Array<object>, improvements: { acceptedMoves: number,
+ *   lineups: number, iterations: number, elapsedMs: number } }} `failures` and
+ *   `unverified` are the validator's own structured arrays; `cost` is `null`
+ *   when any card's price is unknown, never `0` for an unknown card;
+ *   `improvements` reports the local-search runtime, and is all zeros when no
+ *   improvement pass ran
  * @throws {Error} when the challenge has no known formation, or a requirement
  *   cannot be decoded
  */
@@ -765,7 +829,7 @@ export function solve(challenge, pool, options) {
   const weights = resolveWeights(resolved.weights);
   const pricedPool = pricePool(pool);
 
-  return buildBestAttempt({
+  const best = buildBestAttempt({
     pool: pricedPool,
     positions,
     orderedConstraints: constraints,
@@ -776,7 +840,383 @@ export function solve(challenge, pool, options) {
     timeBudgetMs: resolved.timeBudgetMs,
     initialPlayers: new Array(positions.length).fill(null),
   });
+
+  if (resolved.effort === undefined || !best.valid) {
+    return { ...best, improvements: noImprovements() };
+  }
+  return improve(best.squad, pricedPool, { ...resolved, challenge });
 }
+
+const requireImproveSquad = (squad) => {
+  if (squad === null || typeof squad !== 'object' || !Array.isArray(squad.players)) {
+    fail('improve: squad must be an object carrying a players array');
+  }
+  return squad.players;
+};
+
+const hasUniqueIds = (players) => new Set(players.map(({ id }) => id)).size === players.length;
+
+/**
+ * How a targeted repair must move one failing measure. This is a search
+ * direction only — `validateSquad` remains the gate — so an unverified or
+ * unrecognised kind is allowed through rather than guessed at. The kind
+ * readers are shared with the greedy feasibility bounds.
+ */
+const targetsFailure = (record, failure, currentRecord, players, clubIndex) => {
+  if (failure.kind === 'PLAYER_COUNT_MATCH') {
+    const [field] = Object.keys(failure.match);
+    const read = MATCH_FIELD_READERS[field];
+    return read !== undefined && failure.match[field].includes(read(record));
+  }
+  if (Object.hasOwn(COUNT_READERS, failure.kind)) {
+    const read = COUNT_READERS[failure.kind];
+    const alreadyPresent = players.map(read).includes(read(record));
+    // Too many distinct values: reuse one that is already there. Too few: add
+    // one that is not.
+    return failure.actual > failure.required ? alreadyPresent : !alreadyPresent;
+  }
+  if (Object.hasOwn(GROUP_READERS, failure.kind)) {
+    const read = (player) => GROUP_READERS[failure.kind](player, clubIndex);
+    const group = read(record);
+    const count = players.filter((player) => read(player) === group).length;
+    return count < failure.required;
+  }
+  if (failure.kind === 'TEAM_RATING') {
+    return failure.actual < failure.required
+      ? record.rating > currentRecord.rating
+      : record.rating < currentRecord.rating;
+  }
+  return true;
+};
+
+/**
+ * The swap-based local search behind `improve`. It takes a valid squad and
+ * descends to a no-more-expensive one, or returns the input unchanged.
+ *
+ * ## Move types, in order
+ *
+ * 1. k-for-k with k = 1, 2, 3: replace k starters with k unused records that
+ *    play the same slot positions. The issue text asks for "2-for-1 swaps —
+ *    replace two expensive players with three cheap ones (or the reverse)",
+ *    and that cannot be implemented literally: a squad is exactly eleven
+ *    formation slots, so replacing two players with three produces twelve.
+ *    The intent is that rating constraints are sometimes satisfied more
+ *    cheaply by several mid-rated cards than by fewer high-rated ones, which
+ *    needs several players exchanged at once; k-for-k with k up to 3 is that
+ *    exchange. No variable-size squad is invented to force the literal
+ *    wording.
+ * 2. Targeted repair: a candidate k-for-k swap that leaves exactly one
+ *    requirement failing is remembered, and when no k-for-k swap works the
+ *    pass spends its remaining budget on one more swap that specifically
+ *    moves that failing measure in the needed direction (`targetsFailure`)
+ *    instead of continuing the cost-ordered enumeration. The combined move
+ *    still goes through `validateSquad` before acceptance.
+ *
+ * Within every move type the enumeration is cheapest-first: per-slot candidate
+ * lists are sorted by weighted contribution with unknown contributions last,
+ * nested candidate loops are pruned as soon as the partial sum cannot beat the
+ * replaced contribution, and slot combinations are visited in formation order.
+ *
+ * ## Acceptance is strict
+ *
+ * A move is applied only when all of these hold: every replaced and added
+ * contribution is a known finite number (`UNKNOWN_CONTRIBUTION` is never
+ * treated as free or as a saving), the added contributions are strictly below
+ * the replaced ones (ties never improve and would break termination), the
+ * resulting eleven players carry unique ids, and the full squad passes
+ * `validateSquad` with its real chemistry. Moving the unknown-total case is
+ * therefore impossible by construction: a `null` total has no comparable
+ * saving and the pass returns the input unchanged. The returned result is what
+ * the pass observed — it can never be more expensive than the input.
+ *
+ * ## Stop conditions and determinism
+ *
+ * The pass stops when no improving move exists, when the effort level's
+ * lineups or iteration cap is reached, or when the time budget is exhausted.
+ * The lineups/iteration caps are deterministic; the time budget is wall clock,
+ * so a result produced with a binding budget may vary between runs. With a
+ * generous budget (or `options.improvementTimeBudgetMs`) the search depends
+ * only on the input data: no `Math.random`, no clock reads in any decision.
+ * `improvements.elapsedMs` is measured and reported, but never compared.
+ *
+ * @param {{ players: Array<object> }} squad a valid squad, players in slot
+ *   order
+ * @param {Array<object>} pool the candidate pool `solve` takes
+ * @param {{ challenge: object, effort?: number|'fast'|'balanced'|'thorough',
+ *   improvementTimeBudgetMs?: number, weights?: object, clubLinks?: Array<object>,
+ *   chemistryRuleSet?: object, seed?: number|string }} options `challenge` is
+ *   required, exactly as for `reevaluate`; `effort` defaults to level 3
+ *   (balanced); `improvementTimeBudgetMs` overrides the level's budget
+ * @returns {{ squad: { players: Array<object>, chemistry: object },
+ *   cost: number|null, valid: boolean, failures: Array<object>,
+ *   unverified: Array<object>, improvements: { acceptedMoves: number,
+ *   lineups: number, iterations: number, elapsedMs: number } }} an invalid
+ *   input squad is returned unchanged with `acceptedMoves: 0` and the
+ *   validator's real failures; `elapsedMs` is wall clock and never feeds a
+ *   search decision
+ * @throws {Error} when `squad` is not a squad object, `pool` is not an array,
+ *   `options.challenge` is missing or malformed, or `options.effort`/
+ *   `options.improvementTimeBudgetMs` is malformed
+ */
+export function improve(squad, pool, options) {
+  const inputPlayers = requireImproveSquad(squad);
+  const resolved = resolveSolveOptions(options);
+  requireChallenge(resolved.challenge);
+  requirePool(pool);
+
+  const { positions } = normaliseFormation(resolved.challenge.formation);
+  const constraints = decodeConstraints(resolved.challenge);
+  const clubIndex = buildClubIndexFor(resolved);
+  const weights = resolveWeights(resolved.weights);
+  const chemistryRuleSet = resolved.chemistryRuleSet ?? null;
+  const pricedPool = pricePool(pool);
+
+  if (inputPlayers.length !== positions.length || !hasUniqueIds(inputPlayers)) {
+    // Not a squad any swap search can reason about. There is nothing to
+    // validate and no honest failure to report, but the input must be handed
+    // back untouched rather than patched into looking acceptable.
+    return {
+      squad,
+      cost: null,
+      valid: false,
+      failures: [],
+      unverified: [],
+      improvements: noImprovements(),
+    };
+  }
+
+  const finalisePlayers = (candidatePlayers) =>
+    finalise(candidatePlayers, { constraints, clubIndex, chemistryRuleSet, weights });
+
+  const pricedInput = inputPlayers.map(priceRecord);
+  const base = finalisePlayers(pricedInput);
+
+  if (!base.valid) {
+    return {
+      squad,
+      cost: base.cost,
+      valid: false,
+      failures: base.failures,
+      unverified: base.unverified,
+      improvements: noImprovements(),
+    };
+  }
+
+  if (base.cost === UNKNOWN_CONTRIBUTION) {
+    // An unknown total is never a free squad, and there is no saving to prove
+    // against it, so the pass declines to touch it.
+    return { ...base, improvements: noImprovements() };
+  }
+
+  const effort = resolveEffort(resolved.effort);
+  const { improvementTimeBudgetMs } = resolved;
+  if (
+    improvementTimeBudgetMs !== undefined &&
+    (!Number.isFinite(improvementTimeBudgetMs) || improvementTimeBudgetMs <= 0)
+  ) {
+    fail('options.improvementTimeBudgetMs must be a positive finite number when supplied');
+  }
+  const timeBudgetMs = improvementTimeBudgetMs ?? effort.timeBudgetMs;
+  const startedAt = Date.now();
+
+  let players = pricedInput;
+  let bestResult = base;
+  let lineups = 0;
+  let iterations = 0;
+  let acceptedMoves = 0;
+
+  const deadlineExceeded = () => Date.now() - startedAt >= timeBudgetMs;
+  const budgetExhausted = () => lineups >= effort.maxLineups || deadlineExceeded();
+
+  /**
+   * Candidate lists and current contributions for the observed squad. The
+   * lists come from the same builder the greedy pass uses, filtered to the
+   * records the squad has not already used.
+   */
+  const buildView = () => {
+    const used = new Set(players.map(({ id }) => id));
+    const lists = new Map();
+    for (const [position, candidates] of buildCandidateLists(pricedPool, positions, weights)) {
+      lists.set(
+        position,
+        candidates.filter(({ record }) => !used.has(record.id))
+      );
+    }
+    return {
+      contributions: players.map((player) => itemCost(player, weights).contribution),
+      lists,
+    };
+  };
+
+  /**
+   * Full evaluation of one candidate move. Cost is checked before validation,
+   * and an unknown contribution on either side rejects the move outright.
+   * `lineups` counts only complete squads that reach `validateSquad`.
+   */
+  const evaluateMove = (view, slots, records) => {
+    if (budgetExhausted()) return null;
+    let removed = 0;
+    let added = 0;
+    for (let index = 0; index < slots.length; index++) {
+      const currentContribution = view.contributions[slots[index]];
+      const candidateContribution = records[index].contribution;
+      if (
+        currentContribution === UNKNOWN_CONTRIBUTION ||
+        candidateContribution === UNKNOWN_CONTRIBUTION
+      ) {
+        return null;
+      }
+      removed += currentContribution;
+      added += candidateContribution;
+    }
+    if (!(added < removed)) return null;
+    const candidatePlayers = players.slice();
+    slots.forEach((slot, index) => {
+      candidatePlayers[slot] = records[index].record;
+    });
+    lineups += 1;
+    const result = finalisePlayers(candidatePlayers);
+    return { result, saving: removed - added, players: candidatePlayers };
+  };
+
+  const slotCombinations = new Map();
+  for (const size of [1, 2, 3]) {
+    const combinations = [];
+    const chosen = [];
+    const walk = (start) => {
+      if (chosen.length === size) {
+        combinations.push(chosen.slice());
+        return;
+      }
+      for (let slot = start; slot < positions.length; slot++) {
+        chosen.push(slot);
+        walk(slot + 1);
+        chosen.pop();
+      }
+    };
+    walk(0);
+    slotCombinations.set(size, combinations);
+  }
+
+  const rememberFailure = (failures, slots, records, evaluation) => {
+    const failure = evaluation.result.failures[0];
+    const key = `${failure.kind}:${JSON.stringify(failure.match ?? failure.scope)}`;
+    const previous = failures.get(key);
+    if (previous === undefined || evaluation.saving > previous.saving) {
+      failures.set(key, { slots: slots.slice(), records, failure, saving: evaluation.saving });
+    }
+  };
+
+  /** Cheapest-first enumeration of every k-for-k move over one slot combo. */
+  const searchSize = (view, slots, lists, size, failures) => {
+    let best = null;
+    let stopped = false;
+    const chosen = [];
+    const removedTotal = slots.reduce((sum, slot) => sum + view.contributions[slot], 0);
+
+    const walk = (depth, added) => {
+      if (stopped) return;
+      if (depth === size) {
+        const evaluation = evaluateMove(view, slots, chosen);
+        if (evaluation !== null) {
+          if (evaluation.result.valid) {
+            if (best === null || evaluation.saving > best.saving) best = evaluation;
+          } else if (evaluation.result.failures.length === 1) {
+            rememberFailure(failures, slots, chosen.slice(), evaluation);
+          }
+        }
+        if (budgetExhausted()) stopped = true;
+        return;
+      }
+      for (const candidate of lists[depth]) {
+        if (stopped) return;
+        if (candidate.contribution === UNKNOWN_CONTRIBUTION) break;
+        if (added + candidate.contribution >= removedTotal) break;
+        if (chosen.some((other) => other.record.id === candidate.record.id)) continue;
+        chosen.push(candidate);
+        walk(depth + 1, added + candidate.contribution);
+        chosen.pop();
+      }
+    };
+
+    walk(0, 0);
+    return best;
+  };
+
+  /** Move type 4: one directed companion swap for a single-failure candidate. */
+  const searchRepair = (view, failures) => {
+    let best = null;
+    const ranked = [...failures.values()].sort((left, right) => right.saving - left.saving);
+
+    for (const failed of ranked) {
+      if (budgetExhausted()) break;
+      for (let slot = 0; slot < positions.length; slot++) {
+        if (failed.slots.includes(slot)) continue;
+        for (const candidate of view.lists.get(positions[slot])) {
+          if (budgetExhausted()) return best;
+          if (candidate.contribution === UNKNOWN_CONTRIBUTION) break;
+          if (failed.records.some(({ record }) => record.id === candidate.record.id)) continue;
+          if (
+            !targetsFailure(candidate.record, failed.failure, players[slot], players, clubIndex)
+          ) {
+            continue;
+          }
+          const evaluation = evaluateMove(
+            view,
+            [...failed.slots, slot],
+            [...failed.records, candidate]
+          );
+          if (evaluation !== null && evaluation.result.valid) {
+            if (best === null || evaluation.saving > best.saving) best = evaluation;
+          }
+        }
+      }
+    }
+
+    return best;
+  };
+
+  while (iterations < effort.maxIterations && !deadlineExceeded()) {
+    iterations += 1;
+    const view = buildView();
+    const failures = new Map();
+    let best = null;
+
+    for (const [size, combinations] of slotCombinations) {
+      if (budgetExhausted()) break;
+      for (const slots of combinations) {
+        if (budgetExhausted()) break;
+        if (slots.some((slot) => view.contributions[slot] === UNKNOWN_CONTRIBUTION)) continue;
+        const lists = slots.map((slot) => view.lists.get(positions[slot]));
+        if (lists.some((list) => list.length === 0)) continue;
+        const candidate = searchSize(view, slots, lists, size, failures);
+        if (candidate !== null) {
+          best = candidate;
+          break;
+        }
+      }
+      if (best !== null) break;
+    }
+
+    if (best === null) best = searchRepair(view, failures);
+    if (best === null) break;
+
+    players = best.players;
+    bestResult = best.result;
+    acceptedMoves += 1;
+  }
+
+  return {
+    ...bestResult,
+    improvements: {
+      acceptedMoves,
+      lineups,
+      iterations,
+      elapsedMs: Date.now() - startedAt,
+    },
+  };
+}
+
 
 const requireLockedSlots = (lockedSlots, squadSize) => {
   if (lockedSlots === undefined) return [];
