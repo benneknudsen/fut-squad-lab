@@ -706,10 +706,14 @@ const finalise = (players, { constraints, clubIndex, chemistryRuleSet, weights }
   const validation = validateSquad(squad, constraints, {
     clubLinks: (clubId) => clubIndex.groupOf(clubId),
   });
-  const cost = totalCost(players.map((player) => itemCost(player, weights).contribution));
+  const contributions = players.map((player) => itemCost(player, weights).contribution);
+  const cost = totalCost(contributions);
   return {
     squad,
     cost,
+    // Explicit beside the total, so a caller can tell a real total from a
+    // lower bound without walking the card list.
+    costComplete: cost !== UNKNOWN_CONTRIBUTION,
     valid: validation.valid,
     failures: validation.failures,
     unverified: validation.unverified,
@@ -779,6 +783,7 @@ const buildBestAttempt = ({
         chemistry: computeChemistry(players, chemistryRuleSet, clubIndex),
       },
       cost: null,
+      costComplete: false,
       valid: false,
       failures: [],
       unverified: [],
@@ -808,11 +813,13 @@ const buildBestAttempt = ({
  *   overrides the level's wall-clock budget. Omitting `effort` keeps the
  *   pre-local-search behaviour and reports a zeroed `improvements`.
  * @returns {{ squad: { players: Array<object>, chemistry: object },
- *   cost: number|null, valid: boolean, failures: Array<object>,
- *   unverified: Array<object>, improvements: { acceptedMoves: number,
- *   lineups: number, iterations: number, elapsedMs: number } }} `failures` and
- *   `unverified` are the validator's own structured arrays; `cost` is `null`
- *   when any card's price is unknown, never `0` for an unknown card;
+ *   cost: number|null, costComplete: boolean, valid: boolean,
+ *   failures: Array<object>, unverified: Array<object>,
+ *   improvements: { acceptedMoves: number, lineups: number, iterations: number,
+ *   elapsedMs: number } }} `failures` and `unverified` are the validator's own
+ *   structured arrays; `cost` is `null` when any card's price is unknown, never
+ *   `0` for an unknown card; `costComplete` is false exactly then, so a caller
+ *   can tell a real total from a lower bound without walking the card list;
  *   `improvements` reports the local-search runtime, and is all zeros when no
  *   improvement pass ran
  * @throws {Error} when the challenge has no known formation, or a requirement
@@ -948,12 +955,13 @@ const targetsFailure = (record, failure, currentRecord, players, clubIndex) => {
  *   required, exactly as for `reevaluate`; `effort` defaults to level 3
  *   (balanced); `improvementTimeBudgetMs` overrides the level's budget
  * @returns {{ squad: { players: Array<object>, chemistry: object },
- *   cost: number|null, valid: boolean, failures: Array<object>,
- *   unverified: Array<object>, improvements: { acceptedMoves: number,
- *   lineups: number, iterations: number, elapsedMs: number } }} an invalid
- *   input squad is returned unchanged with `acceptedMoves: 0` and the
- *   validator's real failures; `elapsedMs` is wall clock and never feeds a
- *   search decision
+ *   cost: number|null, costComplete: boolean, valid: boolean,
+ *   failures: Array<object>, unverified: Array<object>,
+ *   improvements: { acceptedMoves: number, lineups: number, iterations: number,
+ *   elapsedMs: number } }} an invalid input squad is returned unchanged with
+ *   `acceptedMoves: 0` and the validator's real failures; `costComplete` is
+ *   false when any player's price is unknown; `elapsedMs` is wall clock and
+ *   never feeds a search decision
  * @throws {Error} when `squad` is not a squad object, `pool` is not an array,
  *   `options.challenge` is missing or malformed, or `options.effort`/
  *   `options.improvementTimeBudgetMs` is malformed
@@ -978,6 +986,7 @@ export function improve(squad, pool, options) {
     return {
       squad,
       cost: null,
+      costComplete: false,
       valid: false,
       failures: [],
       unverified: [],
@@ -995,6 +1004,7 @@ export function improve(squad, pool, options) {
     return {
       squad,
       cost: base.cost,
+      costComplete: base.costComplete,
       valid: false,
       failures: base.failures,
       unverified: base.unverified,
@@ -1483,11 +1493,13 @@ const buildAlternatives = ({
  * @param {{ challenge: object, seed?: number|string, timeBudgetMs?: number,
  *   weights?: object, clubLinks?: Array<object>, chemistryRuleSet?: object }} options
  * @returns {{ squad: { players: Array<object>, chemistry: object },
- *   cost: number|null, valid: boolean, failures: Array<object>,
- *   unverified: Array<object>, alternatives: Array<Array<{ record: object,
- *   costDelta: number|null, reasons: Array<{ key: string, params?: object }> }>> }}
+ *   cost: number|null, costComplete: boolean, valid: boolean,
+ *   failures: Array<object>, unverified: Array<object>,
+ *   alternatives: Array<Array<{ record: object, costDelta: number|null,
+ *   reasons: Array<{ key: string, params?: object }> }>> }}
  *   `alternatives[slot]` is empty for locked slots and for an incomplete squad;
- *   `costDelta` is `null` when either contribution is unknown
+ *   `costDelta` is `null` when either contribution is unknown; `costComplete`
+ *   is false when any starter's price is unknown
  * @throws {Error} when `lockedSlots` names a slot outside the formation, a
  *   duplicate slot, `squad` is not a squad object, `options.challenge` is
  *   missing or malformed, or `pool` is not an array
