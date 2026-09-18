@@ -1,0 +1,48 @@
+/* ============================================================================
+   FUT Squad Lab — injected component styles (M1: the Solve button).
+
+   Values come from `design/components.md`; colour, type, space, radii and
+   motion come from `design/tokens.css`, which is the single source of truth.
+   There is no literal colour, size or duration in this file.
+   Everything is scoped under `.fsl-root`; no host selector is touched.
+   ========================================================================== */
+
+.fsl-root .fsl-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--fsl-sp-4) var(--fsl-sp-5);
+  border-bottom: 1px solid var(--fsl-border);
+}
+
+.fsl-root .fsl-btn-primary {
+  height: var(--fsl-ctl);
+  padding: 0 var(--fsl-sp-5);
+  border: 0;
+  border-radius: var(--fsl-r-2);
+  background: var(--fsl-accent);
+  color: var(--fsl-accent-fg);
+  font-family: var(--fsl-font-ui);
+  font-size: var(--fsl-fs-12);
+  font-weight: var(--fsl-w-semibold);
+  cursor: pointer;
+  transition: background var(--fsl-dur-1) var(--fsl-ease-out);
+}
+
+.fsl-root .fsl-btn-primary:hover {
+  background: color-mix(in oklch, var(--fsl-accent) 88%, black);
+}
+
+.fsl-root .fsl-btn-primary:focus-visible {
+  outline: 2px solid var(--fsl-accent);
+  outline-offset: 2px;
+}
+
+.fsl-root .fsl-btn-primary:active {
+  transform: translateY(1px);
+}
+
+.fsl-root .fsl-btn-primary[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}

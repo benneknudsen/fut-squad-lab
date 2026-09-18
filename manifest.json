@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "FUT Squad Lab | FC27 SBC Solver",
+  "version": "0.1.0",
+  "description": "Solves one EA SPORTS FC 27 Ultimate Team Squad Building Challenge at a time from your own club, locally.",
+  "minimum_chrome_version": "111",
+  "icons": {
+    "16": "design/assets/icons/icon-16.png",
+    "32": "design/assets/icons/icon-32.png",
+    "48": "design/assets/icons/icon-48.png",
+    "128": "design/assets/icons/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.ea.com/*"],
+      "js": ["src/content.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.ea.com/*"],
+      "js": ["src/page-bridge.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "design/tokens.css",
+        "design/copy.en.json",
+        "design/copy.da.json",
+        "src/ui/styles.css",
+        "src/content-app.js",
+        "src/page-bridge-app.js",
+        "src/ea/adapter.js",
+        "src/ea/challenge-reader.js",
+        "src/ea/club-reader.js",
+        "src/ea/summary.js",
+        "src/ui/copy.js",
+        "src/ui/messages.js",
+        "src/ui/panel-mount.js",
+        "src/ui/solve-button.js",
+        "src/solver/candidates.js",
+        "src/solver/prices.js"
+      ],
+      "matches": ["https://www.ea.com/*"]
+    }
+  ]
+}
