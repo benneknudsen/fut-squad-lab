@@ -1,8 +1,8 @@
 /**
  * The one file that knows EA SPORTS FC 27 SBC class names, eligibility key
- * numbers, enum values and the raw `/club` item payload shape. Every other
- * module imports EA-specific naming from here, so that when EA renames
- * something exactly one file changes.
+ * numbers, enum values and the raw `/club` item and `/chemistry/teamlinks`
+ * payload shapes. Every other module imports EA-specific naming from here, so
+ * that when EA renames something exactly one file changes.
  *
  * `normaliseClubItem` at the bottom is the club-payload half of that boundary:
  * it translates raw items into the stable solver schema, and the solver core
@@ -182,12 +182,14 @@ const isBoolean = (value) => typeof value === 'boolean';
  * `['ST', , 'CAM']` would pass an element check vacuously and spread an
  * `undefined` into the stable record. Reject holes before checking elements.
  */
-const isDenseArray = (value) => {
+const findHoleIndex = (value) => {
   for (let index = 0; index < value.length; index++) {
-    if (!Object.hasOwn(value, index)) return false;
+    if (!Object.hasOwn(value, index)) return index;
   }
-  return true;
+  return -1;
 };
+
+const isDenseArray = (value) => findHoleIndex(value) === -1;
 
 const isStringArray = (value) =>
   Array.isArray(value) && isDenseArray(value) && value.every(isNonEmptyString);
@@ -317,4 +319,59 @@ export function normaliseClubItem(rawItem) {
     marketMax: rawItem.marketDataMaxPrice ?? null,
     discardValue: rawItem.discardValue ?? null,
   };
+}
+
+/**
+ * The one translation from a raw `/chemistry/teamlinks` entry list to the
+ * stable link schema the solver core codes against:
+ *
+ *   { clubId, linkedClubIds }
+ *
+ * The raw payload names the same two numbers `teamId` and `linkedTeams`; this
+ * is the only place that may know that. Each entry must carry a finite club id
+ * and a dense list of finite linked club ids, so a malformed entry throws with
+ * the raw field name instead of emitting an `undefined` that would silently
+ * split an equivalence group. A repeated linked club id is passed through
+ * unchanged: deduplication is not part of the translation, and the solver's
+ * index ignores duplicates anyway. The input is never mutated.
+ *
+ * @param {Array<object>} rawLinks the `teamChemLinks` array from the payload
+ * @returns {Array<{ clubId: number, linkedClubIds: Array<number> }>}
+ * @throws {Error} when the raw links are not a dense array, or an entry lacks
+ *   one of the fields or carries the wrong type
+ */
+export function normaliseTeamChemLinks(rawLinks) {
+  if (!Array.isArray(rawLinks)) {
+    throw new Error(
+      'normaliseTeamChemLinks: raw links must be an array; the /chemistry/teamlinks payload' +
+        ' shape may have changed'
+    );
+  }
+  const holeIndex = findHoleIndex(rawLinks);
+  if (holeIndex !== -1) {
+    throw new Error(
+      `normaliseTeamChemLinks: raw links must not contain holes (index ${holeIndex} is missing)`
+    );
+  }
+  return rawLinks.map((rawLink, index) => {
+    if (rawLink === null || typeof rawLink !== 'object' || Array.isArray(rawLink)) {
+      throw new Error(
+        `normaliseTeamChemLinks: raw link at index ${index} must be an object; the` +
+          ' /chemistry/teamlinks payload shape may have changed'
+      );
+    }
+    if (!Number.isFinite(rawLink.teamId)) {
+      throw new Error(
+        `normaliseTeamChemLinks: raw link at index ${index} must carry a finite teamId; the` +
+          ' /chemistry/teamlinks payload shape may have changed'
+      );
+    }
+    if (!isFiniteNumberArray(rawLink.linkedTeams)) {
+      throw new Error(
+        `normaliseTeamChemLinks: raw link at index ${index} must carry linkedTeams as a dense` +
+          ' array of finite numbers; the /chemistry/teamlinks payload shape may have changed'
+      );
+    }
+    return { clubId: rawLink.teamId, linkedClubIds: [...rawLink.linkedTeams] };
+  });
 }
