@@ -701,3 +701,324 @@ export function normaliseChemistryProfile(rawProfile) {
 
   return { mappings, profiles };
 }
+
+/**
+ * The verified FC27 page globals from `docs/PLAN.md` section 1.1, keyed by a
+ * stable internal name. `src/page-bridge.js` and the readers never spell an EA
+ * class name themselves; they ask this table for it.
+ */
+export const EA_GLOBALS = Object.freeze({
+  sbcService: 'UTSBCService',
+  sbcRepository: 'UTSBCRepository',
+  challengeEntity: 'UTSBCChallengeEntity',
+  setEntity: 'UTSBCSetEntity',
+  factory: 'UTSBCFactory',
+  challengeDao: 'UTSquadBuildingChallengeDAO',
+  squadDetailPanel: 'UTSBCSquadDetailPanelViewController',
+  squadDetailPanelView: 'UTSBCSquadDetailPanelView',
+  squadOverview: 'UTSBCSquadOverviewViewController',
+  sbcHub: 'UTSBCHubViewController',
+  challengesView: 'UTSBCChallengesViewController',
+  confirmSubmissionPopup: 'UTSBCConfirmSubmissionPopupViewController',
+  squadStatsView: 'UTSBCSquadStatsView',
+  squadEntity: 'UTSquadEntity',
+  eligibilityKeys: 'SBCEligibilityKey',
+  services: 'services',
+});
+
+/**
+ * The one method on `UTSBCSquadDetailPanelViewController` the M1 bridge patches,
+ * per `docs/PLAN.md` section 1.1. It is the entry point through which the panel
+ * receives its challenge, so patching it is how the button learns which
+ * challenge is on screen.
+ */
+export const EA_PANEL_HOOK = Object.freeze({
+  entry: 'initWithSBCSet',
+});
+
+/** The verified endpoint paths from `docs/PLAN.md` section 1.2. */
+export const EA_ENDPOINTS = Object.freeze({
+  sets: '/sbs/sets',
+  setChallenges: '/sbs/setId/{setId}/challenges',
+  challengeSquad: '/sbs/challenge/{challengeId}',
+  challengeSquadRead: '/sbs/challenge/{challengeId}/squad',
+  club: '/club',
+  purchasedItems: '/purchased/items',
+  squadActive: '/squad/active',
+  squadList: '/squad/list',
+  squad: '/squad/{squadId}',
+  chemistryProfiles: '/chemistry/profiles',
+  chemistryTeamLinks: '/chemistry/teamlinks',
+  userMassInfo: '/usermassinfo',
+});
+
+/**
+ * Raw field names on a challenge payload that the challenge reader consumes.
+ * The live entity classes wrap this same payload; the readers see it through
+ * `resolveChallengeSubject`.
+ */
+export const CHALLENGE_FIELDS = Object.freeze({
+  challengeId: 'challengeId',
+  name: 'name',
+  formation: 'formation',
+  operation: 'elgOperation',
+  requirements: 'elgReq',
+  setId: 'setId',
+});
+
+/** The raw `/club` response field that carries the item array. */
+export const CLUB_ITEM_ARRAY_FIELD = 'itemData';
+
+const readPageWindow = (pageWindow, name) => {
+  if (pageWindow === null || pageWindow === undefined) return undefined;
+  return pageWindow[name];
+};
+
+/**
+ * Reads a named global off the page's `window`.
+ *
+ * This never touches a global `window`: the caller passes the page window in,
+ * because the adapter is imported by the pure solver and must stay importable
+ * in Node. A missing global returns `null` so the caller can decide between a
+ * feature-detect and a hard requirement.
+ *
+ * @param {object|undefined} pageWindow the page's `window`
+ * @param {string} key a key of `EA_GLOBALS`
+ * @returns {*} the global's value, or `null` when absent
+ * @throws {Error} when `key` is not in `EA_GLOBALS` (a caller bug, not a
+ *   renamed EA global)
+ */
+export function resolveEaGlobal(pageWindow, key) {
+  if (!Object.hasOwn(EA_GLOBALS, key)) {
+    throw new Error(
+      `resolveEaGlobal: ${JSON.stringify(key)} is not an EA global name; add it to EA_GLOBALS` +
+        ' in src/ea/adapter.js instead of spelling it at the call site'
+    );
+  }
+  const value = readPageWindow(pageWindow, EA_GLOBALS[key]);
+  return value === undefined ? null : value;
+}
+
+/**
+ * The hard requirement variant of `resolveEaGlobal`: a missing global throws an
+ * `Error` that names the expected EA symbol, so a rename between game versions
+ * reports `UTSBCSquadDetailPanelViewController`, not a bare `TypeError` from a
+ * call on `undefined`.
+ *
+ * @param {object|undefined} pageWindow the page's `window`
+ * @param {string} key a key of `EA_GLOBALS`
+ * @returns {*} the global's value
+ * @throws {Error} when the global is missing, naming the expected symbol
+ */
+export function requireEaGlobal(pageWindow, key) {
+  const value = resolveEaGlobal(pageWindow, key);
+  if (value === null) {
+    throw new Error(
+      `EA global ${EA_GLOBALS[key]} is missing from the page window; the FC27 web app may have` +
+        ' renamed it (see EA_GLOBALS in src/ea/adapter.js)'
+    );
+  }
+  return value;
+}
+
+/**
+ * Feature-detects a set of globals without throwing: the caller gets both the
+ * resolved values and the names that were missing, which is what the page
+ * bridge reports when the app has changed.
+ *
+ * @param {object|undefined} pageWindow the page's `window`
+ * @param {Array<string>} [keys] keys of `EA_GLOBALS`; defaults to all of them
+ * @returns {{ resolved: object, missing: Array<string> }} `missing` holds the
+ *   expected EA symbol names, not the internal keys
+ */
+export function resolveEaGlobals(pageWindow, keys = Object.keys(EA_GLOBALS)) {
+  const resolved = {};
+  const missing = [];
+  for (const key of keys) {
+    const value = resolveEaGlobal(pageWindow, key);
+    if (value === null) missing.push(EA_GLOBALS[key]);
+    else resolved[key] = value;
+  }
+  return { resolved, missing };
+}
+
+/**
+ * True when a value is one of the two shapes a club read may return: the
+ * documented `{ itemData: [...] }` envelope, or a bare item array.
+ */
+export function isClubPayload(value) {
+  if (Array.isArray(value)) return true;
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    Array.isArray(value[CLUB_ITEM_ARRAY_FIELD])
+  );
+}
+
+const describeValue = (value) => {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  if (typeof value === 'object') return `an object (${Object.keys(value).join(', ') || 'no keys'})`;
+  return typeof value;
+};
+
+/**
+ * The ordered club-read strategies this bridge tries, most likely first.
+ *
+ * EA documents the `/club` endpoint but not the page method that calls it, so
+ * the bridge does not guess a single name. It tries each combination in order,
+ * records which one answered and records why the others did not, and reports
+ * that whole list when none do. Nothing here invents a club size.
+ */
+export const CLUB_ITEM_STRATEGIES = Object.freeze([
+  Object.freeze({ id: 'services.UTSBCRepository.getClubItems', container: 'services', target: 'sbcRepository', method: 'getClubItems' }),
+  Object.freeze({ id: 'services.UTSBCRepository.getClub', container: 'services', target: 'sbcRepository', method: 'getClub' }),
+  Object.freeze({ id: 'services.UTSBCRepository.getClubPlayers', container: 'services', target: 'sbcRepository', method: 'getClubPlayers' }),
+  Object.freeze({ id: 'services.UTSBCRepository.searchClub', container: 'services', target: 'sbcRepository', method: 'searchClub' }),
+  Object.freeze({ id: 'services.UTSBCService.getClubItems', container: 'services', target: 'sbcService', method: 'getClubItems' }),
+  Object.freeze({ id: 'services.UTSBCService.getClub', container: 'services', target: 'sbcService', method: 'getClub' }),
+  Object.freeze({ id: 'services.UTSBCService.getClubPlayers', container: 'services', target: 'sbcService', method: 'getClubPlayers' }),
+  Object.freeze({ id: 'services.UTSBCService.searchClub', container: 'services', target: 'sbcService', method: 'searchClub' }),
+  Object.freeze({ id: 'services.getClubItems', container: 'services', target: 'services', method: 'getClubItems' }),
+  Object.freeze({ id: 'services.getClub', container: 'services', target: 'services', method: 'getClub' }),
+  Object.freeze({ id: 'window.UTSBCRepository.getClubItems', container: 'window', target: 'sbcRepository', method: 'getClubItems' }),
+  Object.freeze({ id: 'window.UTSBCRepository.getClub', container: 'window', target: 'sbcRepository', method: 'getClub' }),
+  Object.freeze({ id: 'window.UTSBCService.getClubItems', container: 'window', target: 'sbcService', method: 'getClubItems' }),
+  Object.freeze({ id: 'window.UTSBCService.getClub', container: 'window', target: 'sbcService', method: 'getClub' }),
+]);
+
+const resolveStrategyBase = (pageWindow, strategy) => {
+  if (strategy.container !== 'services') {
+    const name = EA_GLOBALS[strategy.target];
+    const value = resolveEaGlobal(pageWindow, strategy.target);
+    if (value === null) {
+      return { ok: false, reason: `page window has no ${name}` };
+    }
+    return { ok: true, value, name };
+  }
+  const services = resolveEaGlobal(pageWindow, 'services');
+  if (services === null || typeof services !== 'object') {
+    return { ok: false, reason: 'page window has no services object' };
+  }
+  if (strategy.target === 'services') {
+    return { ok: true, value: services, name: EA_GLOBALS.services };
+  }
+  const name = EA_GLOBALS[strategy.target];
+  const value = services[name];
+  if (value === null || value === undefined) {
+    return { ok: false, reason: `services has no ${name} instance` };
+  }
+  return { ok: true, value, name };
+};
+
+/**
+ * Tries every club-read strategy in order and returns the first payload that
+ * looks like club items.
+ *
+ * The result carries the winning strategy id and an attempt record for every
+ * candidate tried, in order: `{ id, ok, reason }`. When nothing succeeds,
+ * `items` is an empty array — never a guessed count — and every attempt's
+ * reason names what was missing or wrong.
+ *
+ * @param {object|undefined} pageWindow the page's `window`
+ * @returns {Promise<{ ok: boolean, items: Array<object>, strategy: string|null,
+ *   attempts: Array<{id: string, ok: boolean, reason: string|null}> }>}
+ */
+export async function resolveClubItems(pageWindow) {
+  const attempts = [];
+  for (const strategy of CLUB_ITEM_STRATEGIES) {
+    const attempt = { id: strategy.id, ok: false, reason: null };
+    attempts.push(attempt);
+    const base = resolveStrategyBase(pageWindow, strategy);
+    if (!base.ok) {
+      attempt.reason = base.reason;
+      continue;
+    }
+    const method = base.value[strategy.method];
+    if (typeof method !== 'function') {
+      attempt.reason = `${base.name} has no ${strategy.method} method`;
+      continue;
+    }
+    let result;
+    try {
+      result = await method.call(base.value);
+    } catch (error) {
+      const message = error !== null && typeof error === 'object' ? error.message : String(error);
+      attempt.reason = `threw: ${message}`;
+      continue;
+    }
+    if (!isClubPayload(result)) {
+      attempt.reason = `returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeValue(result)})`;
+      continue;
+    }
+    attempt.ok = true;
+    return {
+      ok: true,
+      items: Array.isArray(result) ? result : result[CLUB_ITEM_ARRAY_FIELD],
+      strategy: strategy.id,
+      attempts,
+    };
+  }
+  return { ok: false, items: [], strategy: null, attempts };
+}
+
+/**
+ * Ordered strategies for reading the challenge payload out of the argument the
+ * SBC detail panel receives. The entry point is `initWithSBCSet`, but whether
+ * the argument is the challenge itself, an entity wrapping `.data`, or a set
+ * carrying `.challenge` is not documented, so the bridge feature-detects each
+ * shape and records which one carried an `elgReq` array.
+ */
+export const CHALLENGE_SUBJECT_STRATEGIES = Object.freeze([
+  Object.freeze({ id: 'panel-argument.data', path: ['data'] }),
+  Object.freeze({ id: 'panel-argument', path: [] }),
+  Object.freeze({ id: 'panel-argument.challenge', path: ['challenge'] }),
+  Object.freeze({ id: 'panel-argument.sbcChallenge', path: ['sbcChallenge'] }),
+]);
+
+const readPath = (subject, path) => {
+  let value = subject;
+  for (const segment of path) {
+    if (value === null || value === undefined) return undefined;
+    value = value[segment];
+  }
+  return value;
+};
+
+/**
+ * Reads the challenge payload out of the SBC detail panel argument.
+ *
+ * @param {*} subject the argument passed to `initWithSBCSet`
+ * @returns {{ ok: boolean, payload: object|null, strategy: string|null,
+ *   attempts: Array<{id: string, ok: boolean, reason: string|null}> }}
+ */
+export function resolveChallengeSubject(subject) {
+  const attempts = [];
+  const describeSubject = () =>
+    subject === null
+      ? 'null'
+      : Array.isArray(subject)
+        ? 'an array'
+        : typeof subject;
+  for (const strategy of CHALLENGE_SUBJECT_STRATEGIES) {
+    const attempt = { id: strategy.id, ok: false, reason: null };
+    attempts.push(attempt);
+    const label = strategy.id.replace('panel-argument', 'panel argument');
+    const value = readPath(subject, strategy.path);
+    if (value === null || value === undefined) {
+      attempt.reason = `${label} carries no ${strategy.path.at(-1) ?? 'value'} (got ${describeSubject()})`;
+      continue;
+    }
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      attempt.reason = `${label} is not an object (got ${describeSubject()})`;
+      continue;
+    }
+    if (!Array.isArray(value[CHALLENGE_FIELDS.requirements])) {
+      attempt.reason = `${label} has no ${CHALLENGE_FIELDS.requirements} array`;
+      continue;
+    }
+    attempt.ok = true;
+    return { ok: true, payload: value, strategy: strategy.id, attempts };
+  }
+  return { ok: false, payload: null, strategy: null, attempts };
+}
