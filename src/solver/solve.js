@@ -64,6 +64,22 @@
  * that `validateSquad` never measures while `verified` is false.
  *
  * This module is pure: no DOM, no chrome APIs, no network.
+ *
+ * ## The interactive re-solve
+ *
+ * `reevaluate(squad, lockedSlots, pool, options)` re-runs the greedy attempt
+ * with the locked slots pre-filled, then derives the ranked `alternatives` for
+ * every unlocked slot. It is not local search; that is a later milestone.
+ * Locked players are ordinary inputs to every feasibility and validation step,
+ * and a lock is never silently undone. `options.challenge` is required.
+ *
+ * ## Alternatives are structured data
+ *
+ * Every alternative carries the pool record, a signed `costDelta` (`null` when
+ * either side is unpriced) and `reasons` — key/params entries from the closed
+ * vocabulary in the design contract. The solver never emits English; the UI
+ * owns the copy. Only swaps that `validateSquad` approves are emitted, so
+ * every clickable alternative keeps the squad valid.
  */
 
 import {
@@ -72,8 +88,9 @@ import {
   normaliseFormation,
   normaliseTeamChemLinks,
 } from '../ea/adapter.js';
-import { buildClubIndex, resolveProfile, squadChemistry } from './chemistry.js';
+import { buildClubIndex, countLinks, resolveProfile, squadChemistry } from './chemistry.js';
 import {
+  UNKNOWN_CONTRIBUTION,
   compareContributions,
   itemCost,
   mergePrices,
@@ -228,7 +245,8 @@ const resolveSolveOptions = (options) => {
   }
   // options.lockedSlots is accepted from day one because docs/PLAN.md §2.6
   // requires the interactive re-solve API to carry it. The greedy seed does not
-  // use it; `reevaluate` is the entry point that does.
+  // use it; `reevaluate` is the entry point that does. `reevaluate` also
+  // requires options.challenge, which it validates itself.
   return options;
 };
 
@@ -582,6 +600,25 @@ const unverifiedChemistry = () => ({
 });
 
 /**
+ * Resolves the single chemistry profile that applies to every player, or
+ * `null` when no one profile can score the squad. Isolated from `scoreSquad`
+ * so `reevaluate` can tell a real computed number from the zero placeholder
+ * without re-implementing the resolution rules.
+ */
+const resolveSquadProfile = (players, chemistryRuleSet) => {
+  if (chemistryRuleSet === undefined || chemistryRuleSet === null || players.length === 0) {
+    return null;
+  }
+
+  const profiles = players.map((player) => resolveProfile(player.rarity, chemistryRuleSet));
+  if (profiles.some((profile) => profile === null)) return null;
+
+  const [first] = profiles;
+  if (profiles.some((profile) => profile.id !== first.id)) return null;
+  return first;
+};
+
+/**
  * The chemistry result object for the eleven starters. When the rule set cannot
  * resolve a profile for every starter, or when starters resolve to different
  * profiles, no single profile can score the squad; the result then carries the
@@ -589,17 +626,20 @@ const unverifiedChemistry = () => ({
  * measures that placeholder while `verified` is false, so the marker is
  * honest rather than a claimed score.
  */
-const computeChemistry = (players, chemistryRuleSet, clubIndex) => {
-  if (chemistryRuleSet === undefined || chemistryRuleSet === null || players.length === 0) {
-    return unverifiedChemistry();
-  }
+const computeChemistry = (players, chemistryRuleSet, clubIndex) =>
+  scoreSquad(players, chemistryRuleSet, clubIndex).chemistry;
 
-  const profiles = players.map((player) => resolveProfile(player.rarity, chemistryRuleSet));
-  if (profiles.some((profile) => profile === null)) return unverifiedChemistry();
-
-  const [first] = profiles;
-  if (profiles.some((profile) => profile.id !== first.id)) return unverifiedChemistry();
-  return squadChemistry(players, first, clubIndex);
+/**
+ * The chemistry object and the computed total for one arrangement. `score` is
+ * `null` when no single profile resolves, exactly when the object is the
+ * unverified placeholder; `reevaluate` compares scores only when both sides are
+ * real numbers, so a placeholder `0` is never mistaken for a chemistry tier.
+ */
+const scoreSquad = (players, chemistryRuleSet, clubIndex) => {
+  const profile = resolveSquadProfile(players, chemistryRuleSet);
+  if (profile === null) return { chemistry: unverifiedChemistry(), score: null };
+  const chemistry = squadChemistry(players, profile, clubIndex);
+  return { chemistry, score: chemistry.chemistry };
 };
 
 const finalise = (players, { constraints, clubIndex, chemistryRuleSet, weights }) => {
@@ -764,84 +804,266 @@ const suppliedPlayers = (squad) => {
 };
 
 /**
+ * The closed reason vocabulary fixed by the design contract
+ * (`design/copy.en.json` -> `alts.reason`, and its Danish twin). The solver
+ * emits these structured keys — never English sentences — and the UI joins
+ * them to translated copy. A key outside this list has no copy to render, so
+ * the list is closed and the tests assert membership against it.
+ *
+ * This deliberately replaces the "short reason string" wording in the issue
+ * text: the project's design contract requires structured diagnostics and the
+ * UI owns the copy.
+ */
+const ALTERNATIVE_REASON_KEYS = Object.freeze([
+  'sameLeague',
+  'sameNation',
+  'sameClub',
+  'keepsChemistry',
+  'oneRatingDown',
+  'twoRatingDown',
+  'breaksLink',
+  'keepsLinks',
+  'fromClubPool',
+  'positionMatch',
+  'outOfPosition',
+]);
+
+const REASON_KEY_SET = new Set(ALTERNATIVE_REASON_KEYS);
+
+/**
+ * How many nation/league/club links the current pick has to the rest of the
+ * squad that the candidate would not have: a partner counts one per dimension,
+ * the same unit `countLinks` reports for chemistry.
+ */
+const brokenLinkCount = (current, candidate, others, clubIndex) => {
+  let broken = 0;
+  for (const other of others) {
+    if (current.nationId === other.nationId && candidate.nationId !== other.nationId) broken += 1;
+    if (current.leagueId === other.leagueId && candidate.leagueId !== other.leagueId) broken += 1;
+    if (
+      clubIndex.sameClub(current.clubId, other.clubId) &&
+      !clubIndex.sameClub(candidate.clubId, other.clubId)
+    ) {
+      broken += 1;
+    }
+  }
+  return broken;
+};
+
+const totalLinks = (player, others, clubIndex) => {
+  const links = countLinks(player, others, clubIndex);
+  return links.nation + links.league + links.club;
+};
+
+/**
+ * Builds one alternative's structured reasons from the actual swap. Every
+ * reason must be true of that candidate in that squad: a guessed reason is a
+ * lie the panel would render. `baseScore` and `candidateScore` are the computed
+ * chemistry totals; `keepsChemistry` is only emitted when both are real
+ * computed numbers and the swap does not lower the total, so the placeholder
+ * `0` of an unresolved profile is never compared.
+ */
+const buildAlternativeReasons = ({
+  candidate,
+  current,
+  others,
+  slotPosition,
+  formation,
+  clubIndex,
+  baseScore,
+  candidateScore,
+  keptLinks,
+}) => {
+  const reasons = [];
+  const push = (key, params) => reasons.push(params === undefined ? { key } : { key, params });
+
+  if (others.some((player) => player.leagueId === candidate.leagueId)) push('sameLeague');
+  if (others.some((player) => player.nationId === candidate.nationId)) push('sameNation');
+  if (others.some((player) => clubIndex.sameClub(player.clubId, candidate.clubId))) {
+    push('sameClub');
+  }
+
+  if (baseScore !== null && candidateScore !== null && candidateScore >= baseScore) {
+    push('keepsChemistry');
+  }
+
+  const ratingDrop = current.rating - candidate.rating;
+  if (ratingDrop === 1) push('oneRatingDown');
+  else if (ratingDrop === 2) push('twoRatingDown');
+
+  const broken = brokenLinkCount(current, candidate, others, clubIndex);
+  if (broken > 0) push('breaksLink', { count: broken });
+  else if (keptLinks > 0) push('keepsLinks');
+
+  if (candidate.cardState !== 'concept') push('fromClubPool');
+
+  if (candidate.preferredPosition === slotPosition) {
+    push('positionMatch', { formation });
+  } else {
+    push('outOfPosition');
+  }
+
+  for (const reason of reasons) {
+    if (!REASON_KEY_SET.has(reason.key)) {
+      fail(`alternative reason ${JSON.stringify(reason.key)} is not in the design vocabulary`);
+    }
+  }
+  return reasons;
+};
+
+/**
+ * The interactive feature: for every unlocked slot, the candidates that can
+ * play it and keep the whole squad valid when swapped in, ranked by fodder
+ * contribution ascending with unknown contributions last, the current pick
+ * excluded. Locked slots get an empty array; an incomplete squad (a fill that
+ * could not complete) gets empty arrays everywhere, because no swap can be
+ * validated.
+ *
+ * `record` is the solver-priced pool record itself — the same stable shape
+ * `solve` returns, carrying `cardState`, `price`, `priceSource` — so the UI can
+ * render identity, rating and position. `costDelta` is the `itemCost`
+ * contribution difference versus the pick currently in the slot: negative when
+ * the candidate is cheaper, and `UNKNOWN_CONTRIBUTION` (`null`) when either
+ * side is unpriced, because an unknown price is never treated as 0. `reasons`
+ * is structured key/params data, never prose (see the vocabulary above).
+ *
+ * A candidate must fit the slot position, the same rule the greedy placement
+ * uses, so every alternative is placeable; `positionMatch` and
+ * `outOfPosition` describe whether it fits at its natural position. Only swaps
+ * that `validateSquad` approves are emitted, so a returned alternative can
+ * never invalidate the squad.
+ *
+ * Bounded by construction: one pass over the pool builds the per-position
+ * candidate lists, each unlocked slot then filters its own list, and there are
+ * no clock reads, so the result stays deterministic. The interactive latency
+ * therefore comes from the pool size, and `options.timeBudgetMs` keeps bounding
+ * the restart search rather than this pass.
+ */
+const buildAlternatives = ({
+  squad,
+  positions,
+  pool,
+  constraints,
+  clubIndex,
+  chemistryRuleSet,
+  weights,
+  lockedSet,
+  formation,
+}) => {
+  const alternatives = positions.map(() => []);
+  const players = squad.players;
+  if (players.length !== positions.length) return alternatives;
+
+  // The same position-fit filter and cost sort the greedy pass uses, built once
+  // here instead of once per unlocked slot.
+  const candidateLists = buildCandidateLists(pool, positions, weights);
+  const usedIds = new Set(players.map(({ id }) => id));
+  const baseScore = scoreSquad(players, chemistryRuleSet, clubIndex).score;
+
+  for (let slot = 0; slot < positions.length; slot++) {
+    if (lockedSet.has(slot)) continue;
+
+    const current = players[slot];
+    const currentContribution = itemCost(current, weights).contribution;
+    const position = positions[slot];
+    const others = players.filter((_, index) => index !== slot);
+    const keptLinks = totalLinks(current, others, clubIndex);
+
+    const candidates = candidateLists
+      .get(position)
+      .filter(({ record }) => !usedIds.has(record.id));
+
+    for (const candidate of candidates) {
+      const swapped = players.slice();
+      swapped[slot] = candidate.record;
+      const scored = scoreSquad(swapped, chemistryRuleSet, clubIndex);
+      const validation = validateSquad(
+        { players: swapped, chemistry: scored.chemistry },
+        constraints,
+        { clubLinks: (clubId) => clubIndex.groupOf(clubId) }
+      );
+      if (!validation.valid) continue;
+
+      const costDelta =
+        candidate.contribution === UNKNOWN_CONTRIBUTION ||
+        currentContribution === UNKNOWN_CONTRIBUTION
+          ? UNKNOWN_CONTRIBUTION
+          : candidate.contribution - currentContribution;
+
+      alternatives[slot].push({
+        record: candidate.record,
+        costDelta,
+        reasons: buildAlternativeReasons({
+          candidate: candidate.record,
+          current,
+          others,
+          slotPosition: position,
+          formation,
+          clubIndex,
+          baseScore,
+          candidateScore: scored.score,
+          keptLinks,
+        }),
+      });
+    }
+  }
+
+  return alternatives;
+};
+
+/**
  * The interactive re-solve entry point from `docs/PLAN.md` §2.6: keep every
- * player whose slot is locked and fill the remaining slots greedily, returning
- * the same shape as `solve`.
+ * player whose slot is locked, re-run the greedy seed and the seeded restarts
+ * over the unlocked slots only, and return the ranked `alternatives` for every
+ * unlocked slot alongside the solve result.
  *
  * This is not local search. Full local search — swapping players in and out
- * until cost stops improving — is a later milestone; this function only
- * re-validates and re-runs the greedy seed around the locked players. It does
- * not pretend otherwise.
+ * until cost stops improving — is a later milestone; this function re-runs the
+ * greedy seed around the locked players and does not pretend otherwise.
  *
- * `context` carries the solver state the UI keeps between solves:
+ * Locked players are ordinary inputs to every constraint calculation: they
+ * count towards league/nation/club and chemistry exactly as any other starter.
+ * A lock is never silently undone: when the locked players make the challenge
+ * infeasible, the result is `valid: false` with the validator's real failures.
+ * An incomplete squad is normal here (it is an in-progress squad), so this
+ * function never throws merely because fewer than eleven players are present:
+ * locked slots without a player are simply not pinned and get filled. A locked
+ * record that does not fit its slot position is kept anyway — the lock is the
+ * user's instruction — and the validator reports the resulting failures.
  *
- *   { challenge, pool, options }
- *
- * `challenge` is the raw challenge payload and `options` is the same object
- * `solve` accepts. An incomplete squad is normal here (it is an in-progress
- * squad), so this function never throws merely because fewer than eleven
- * players are present: locked slots without a player are simply not pinned and
- * get filled. A locked record that does not fit its slot position is kept
- * anyway — the lock is the user's instruction — and the validator reports the
- * resulting requirement failures.
- *
- * Without a pool there is nothing to fill from. The function then re-validates
- * a complete eleven when it has `context.constraints` (or `context.challenge`)
- * and otherwise returns the supplied squad unchanged with `valid: false` and an
- * empty `failures` array: no verdict, because none can be computed.
+ * `pool` is the same candidate pool `solve` takes and `options.challenge` is
+ * required so the constraints are decoded by the same path `solve` uses;
+ * `options` accepts everything `solve` accepts (`seed`, `timeBudgetMs`,
+ * `weights`, `clubLinks`, `chemistryRuleSet`).
  *
  * @param {{ players: Array<object>, chemistry?: object }} squad the current
  *   squad, players in slot order; may be incomplete
  * @param {Array<number>} lockedSlots slot indexes to keep, 0..10
- * @param {{ challenge?: object, constraints?: Array<object>, pool?: Array<object>,
- *   options?: object }} [context]
+ * @param {Array<object>} pool the candidate pool `solve` takes
+ * @param {{ challenge: object, seed?: number|string, timeBudgetMs?: number,
+ *   weights?: object, clubLinks?: Array<object>, chemistryRuleSet?: object }} options
  * @returns {{ squad: { players: Array<object>, chemistry: object },
  *   cost: number|null, valid: boolean, failures: Array<object>,
- *   unverified: Array<object> }}
+ *   unverified: Array<object>, alternatives: Array<Array<{ record: object,
+ *   costDelta: number|null, reasons: Array<{ key: string, params?: object }> }>> }}
+ *   `alternatives[slot]` is empty for locked slots and for an incomplete squad;
+ *   `costDelta` is `null` when either contribution is unknown
  * @throws {Error} when `lockedSlots` names a slot outside the formation, a
- *   duplicate slot, or `squad` is not a squad object
+ *   duplicate slot, `squad` is not a squad object, `options.challenge` is
+ *   missing or malformed, or `pool` is not an array
  */
-export function reevaluate(squad, lockedSlots, context = {}) {
-  if (context === null || typeof context !== 'object' || Array.isArray(context)) {
-    fail('reevaluate: context must be an object when supplied');
-  }
+export function reevaluate(squad, lockedSlots, pool, options) {
   const players = suppliedPlayers(squad);
-  const positions = context.challenge
-    ? normaliseFormation(context.challenge.formation).positions
-    : new Array(11).fill(null);
+  const resolved = resolveSolveOptions(options);
+  requireChallenge(resolved.challenge);
+  const { positions } = normaliseFormation(resolved.challenge.formation);
   const locked = requireLockedSlots(lockedSlots, positions.length);
+  requirePool(pool);
 
-  if (context.pool === undefined || context.challenge === undefined) {
-    const constraints = context.challenge
-      ? decodeConstraints(context.challenge)
-      : context.constraints;
-    const clubIndex = buildClubIndexFor(context.options);
-    if (players.length === positions.length && Array.isArray(constraints)) {
-      const result = finalise(pricePool(players), {
-        constraints,
-        clubIndex,
-        chemistryRuleSet: context.options?.chemistryRuleSet ?? null,
-        weights: resolveWeights(context.options?.weights),
-      });
-      return result;
-    }
-    return {
-      squad: {
-        players: [...players],
-        chemistry: computeChemistry(players, context.options?.chemistryRuleSet ?? null, clubIndex),
-      },
-      cost: null,
-      valid: false,
-      failures: [],
-      unverified: [],
-    };
-  }
-
-  const resolved = resolveSolveOptions(context.options);
-  const constraints = decodeConstraints(context.challenge);
+  const constraints = decodeConstraints(resolved.challenge);
   const clubIndex = buildClubIndexFor(resolved);
   const weights = resolveWeights(resolved.weights);
-  const pricedPool = pricePool(context.pool);
+  const pricedPool = pricePool(pool);
 
   const initialPlayers = new Array(positions.length).fill(null);
   for (const slot of locked) {
@@ -849,7 +1071,7 @@ export function reevaluate(squad, lockedSlots, context = {}) {
     initialPlayers[slot] = priceRecord(players[slot]);
   }
 
-  return buildBestAttempt({
+  const best = buildBestAttempt({
     pool: pricedPool,
     positions,
     orderedConstraints: constraints,
@@ -860,4 +1082,19 @@ export function reevaluate(squad, lockedSlots, context = {}) {
     timeBudgetMs: resolved.timeBudgetMs,
     initialPlayers,
   });
+
+  return {
+    ...best,
+    alternatives: buildAlternatives({
+      squad: best.squad,
+      positions,
+      pool: pricedPool,
+      constraints,
+      clubIndex,
+      chemistryRuleSet: resolved.chemistryRuleSet ?? null,
+      weights,
+      lockedSet: new Set(locked),
+      formation: resolved.challenge.formation,
+    }),
+  };
 }

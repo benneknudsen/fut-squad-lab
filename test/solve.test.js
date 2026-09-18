@@ -451,10 +451,9 @@ describe('unfillable pools degrade honestly', () => {
   });
 
   it('reevaluate returns invalid for a pool with no goalkeeper instead of throwing', () => {
-    const result = reevaluate({ players: [] }, [], {
+    const result = reevaluate({ players: [] }, [], poolWithoutGoalkeeper(), {
       challenge,
-      pool: poolWithoutGoalkeeper(),
-      options: { seed: 1 },
+      seed: 1,
     });
 
     expect(result.valid).toBe(false);
@@ -463,10 +462,9 @@ describe('unfillable pools degrade honestly', () => {
   });
 
   it('reevaluate returns invalid when a slot list is exhausted mid-run instead of throwing', () => {
-    const result = reevaluate({ players: [] }, [], {
+    const result = reevaluate({ players: [] }, [], poolWithOneCentreBack(), {
       challenge,
-      pool: poolWithOneCentreBack(),
-      options: { seed: 1 },
+      seed: 1,
     });
 
     expect(result.valid).toBe(false);
@@ -477,14 +475,14 @@ describe('unfillable pools degrade honestly', () => {
 
 describe('reevaluate', () => {
   const challenge = set16.challenges[3];
-  const context = () => ({ challenge, pool: POOL, options: options() });
+  const context = () => options({ challenge });
 
   it('keeps every locked slot player and refills the rest validly', () => {
     const first = solve(challenge, POOL, options());
     const lockedSlots = [0, 5];
     const lockedIds = lockedSlots.map((slot) => first.squad.players[slot].id);
 
-    const result = reevaluate(first.squad, lockedSlots, context());
+    const result = reevaluate(first.squad, lockedSlots, POOL, context());
 
     expect(result.squad.players).toHaveLength(11);
     expect(lockedSlots.map((slot) => result.squad.players[slot].id)).toEqual(lockedIds);
@@ -499,7 +497,7 @@ describe('reevaluate', () => {
       chemistry: first.squad.chemistry,
     };
 
-    const result = reevaluate(incomplete, [0, 3], context());
+    const result = reevaluate(incomplete, [0, 3], POOL, context());
 
     expect(result.squad.players).toHaveLength(11);
     expect(result.squad.players[0].id).toBe(incomplete.players[0].id);
@@ -510,16 +508,16 @@ describe('reevaluate', () => {
   it('rejects a locked slot outside the formation', () => {
     const first = solve(challenge, POOL, options());
 
-    expect(() => reevaluate(first.squad, [11], context())).toThrow(/locked slot/);
-    expect(() => reevaluate(first.squad, [1.5], context())).toThrow(/locked slot/);
-    expect(() => reevaluate(first.squad, [1, 1], context())).toThrow(/locked slot/);
+    expect(() => reevaluate(first.squad, [11], POOL, context())).toThrow(/locked slot/);
+    expect(() => reevaluate(first.squad, [1.5], POOL, context())).toThrow(/locked slot/);
+    expect(() => reevaluate(first.squad, [1, 1], POOL, context())).toThrow(/locked slot/);
   });
 
-  it('degrades honestly without solver context instead of inventing a verdict', () => {
+  it('degrades honestly without a usable pool instead of inventing a verdict', () => {
     const first = solve(challenge, POOL, options());
     const incomplete = { players: first.squad.players.slice(0, 4) };
 
-    const result = reevaluate(incomplete, [0]);
+    const result = reevaluate(incomplete, [0, 1, 2, 3], [], { challenge });
 
     expect(result.squad.players).toHaveLength(4);
     expect(result.valid).toBe(false);
