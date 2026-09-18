@@ -169,6 +169,31 @@ export const ELIGIBILITY_KEY_MODEL = Object.freeze({
   CHEMISTRY_POINTS: Object.freeze({ kind: 'CHEMISTRY_POINTS', role: 'scalar' }),
 });
 
+/**
+ * The pinned model of EA's scope enum: the `eligibilityValue` of a `SCOPE`
+ * entry mapped to the comparison operator it means for the requirement sharing
+ * its slot.
+ *
+ * This is deliberately *not* an observation table read off the fixtures, and it
+ * is *not* a fallback in the sense issue #16 removed: FC27 exposes no live scope
+ * enum, so there is no live read this could be masking. The comparison semantics
+ * (`GREATER` means the measured quantity must be >= the required value, `LOWER`
+ * <=, `EXACT` ===) are documented by EA's client bundle, but EA does not expose
+ * the numbers, so 0/1/2 is a model this project owns and pins. The capture
+ * cross-check that supports it lives beside the pinned key observation in
+ * `test/fixtures/eligibility-observation.js`.
+ *
+ * The browser half supplies this table as `options.scopes`; the solver has no
+ * fallback and refuses to run without a caller-supplied table. It sits here
+ * rather than in the fixtures because it is EA semantics, and EA semantics
+ * belong in this one file.
+ */
+export const SCOPE_VALUES = Object.freeze({
+  0: 'GREATER',
+  1: 'LOWER',
+  2: 'EXACT',
+});
+
 /** A canonical non-negative integer enum key, without leading zeros. */
 const ENUM_NUMBER_KEY = /^(0|[1-9]\d*)$/;
 
@@ -939,6 +964,115 @@ export const CHALLENGE_FIELDS = Object.freeze({
 /** The raw `/club` response field that carries the item array. */
 export const CLUB_ITEM_ARRAY_FIELD = 'itemData';
 
+/**
+ * The raw `/club` item field that identifies one owned card. It is the same
+ * `id` the solver's stable records carry and the one a solved player is looked
+ * up by when the squad writer places real item records.
+ */
+export const CLUB_ITEM_ID_FIELD = 'id';
+
+/**
+ * Raw field names on the challenge-squad payload (`POST /sbs/challenge/{id}`,
+ * the shape captured in `test/fixtures/sbs-challenge-25-squad.json`) that the
+ * squad writer consumes and produces. The payload wraps a `squad` object whose
+ * `players` array carries one entry per formation slot, each entry holding its
+ * formation slot index and the real `itemData` record. `index` is the formation
+ * slot index, not the entry's position in the array; the two happen to agree in
+ * the captured empty template and must not be conflated.
+ */
+export const CHALLENGE_SQUAD_FIELDS = Object.freeze({
+  challengeId: 'challengeId',
+  squad: 'squad',
+  id: 'id',
+  formation: 'formation',
+  rating: 'rating',
+  chemistry: 'chemistry',
+  manager: 'manager',
+  players: 'players',
+  index: 'index',
+  itemData: 'itemData',
+});
+
+/**
+ * The `id` every captured empty challenge-squad slot carries: the template item
+ * for a formation slot is a zero-id `itemState: 'invalid'` placeholder. The
+ * writer treats only this observed marker as "empty"; any other entry shape is
+ * left alone rather than guessed at, because overwriting a player is not
+ * recoverable.
+ */
+export const EMPTY_SLOT_ITEM_ID = 0;
+
+/**
+ * Candidate method names on a squad *slot* object, in the order the writer tries
+ * them for the slot-level fallback. The recon captured `UTSquadEntity`'s
+ * `getSlot`/`getSlots` readers but no slot-object methods at all, so this list
+ * is the set of names worth probing, not verified vocabulary. The writer reports
+ * which one answered, or why none did.
+ */
+export const SQUAD_SLOT_WRITE_METHODS = Object.freeze(['setItemData', 'setItem', 'setPlayer']);
+
+/**
+ * The ordered squad-write candidates, most likely first. `saveChallenge` on the
+ * challenge DAO is EA's own save path for a challenge squad and comes first;
+ * the squad entity's `save` is the next named path; the `getSlots+save` entries
+ * are the slot-level fallback, which requires one of
+ * `SQUAD_SLOT_WRITE_METHODS` on every slot object.
+ *
+ * Every entry is a candidate to *feature-detect*, not a verified signature. The
+ * writer calls each in order, records the outcome, and never forges an HTTP
+ * request: if none answers, it reports that plainly. `submitChallenge` is
+ * deliberately absent and must never be added here.
+ *
+ * `requireArgument` marks a candidate whose named method must declare at least
+ * one parameter before the writer will hand it a payload. A bare `save()` that
+ * declares none persists whatever state its entity already holds, which is not
+ * the solution; the writer records that reason and falls through to the
+ * slot-level candidates, which apply the solution to the entity's own slot
+ * objects first.
+ */
+export const SQUAD_WRITE_STRATEGIES = Object.freeze([
+  Object.freeze({
+    id: 'services.UTSquadBuildingChallengeDAO.saveChallenge',
+    container: 'services',
+    target: 'challengeDao',
+    method: 'saveChallenge',
+  }),
+  Object.freeze({
+    id: 'window.UTSquadBuildingChallengeDAO.saveChallenge',
+    container: 'window',
+    target: 'challengeDao',
+    method: 'saveChallenge',
+  }),
+  Object.freeze({
+    id: 'services.UTSquadEntity.save',
+    container: 'services',
+    target: 'squadEntity',
+    method: 'save',
+    requireArgument: true,
+  }),
+  Object.freeze({
+    id: 'window.UTSquadEntity.save',
+    container: 'window',
+    target: 'squadEntity',
+    method: 'save',
+    requireArgument: true,
+  }),
+  Object.freeze({
+    id: 'services.UTSquadEntity.getSlots+save',
+    container: 'services',
+    target: 'squadEntity',
+    method: 'save',
+    slotMethods: SQUAD_SLOT_WRITE_METHODS,
+  }),
+  Object.freeze({
+    id: 'window.UTSquadEntity.getSlots+save',
+    container: 'window',
+    target: 'squadEntity',
+    method: 'save',
+    slotMethods: SQUAD_SLOT_WRITE_METHODS,
+  }),
+]);
+
 const readPageWindow = (pageWindow, name) => {
   if (pageWindow === null || pageWindow === undefined) return undefined;
   return pageWindow[name];
@@ -1057,7 +1191,18 @@ export const CLUB_ITEM_STRATEGIES = Object.freeze([
   Object.freeze({ id: 'window.UTSBCService.getClub', container: 'window', target: 'sbcService', method: 'getClub' }),
 ]);
 
-const resolveStrategyBase = (pageWindow, strategy) => {
+/**
+ * Resolves the container and instance a read or write strategy entry names:
+ * for a `window` container the named EA global itself, for a `services`
+ * container the instance inside the page's service locator. Shared with
+ * `src/ea/squad-writer.js`, which feature-detects write candidates the same way
+ * the club reader detects read candidates.
+ *
+ * @param {object|undefined} pageWindow the page's `window`
+ * @param {{ container: string, target: string }} strategy a strategy entry
+ * @returns {{ ok: boolean, value?: object, name?: string, reason?: string }}
+ */
+export const resolveStrategyBase = (pageWindow, strategy) => {
   if (strategy.container !== 'services') {
     const name = EA_GLOBALS[strategy.target];
     const value = resolveEaGlobal(pageWindow, strategy.target);
@@ -1185,6 +1330,68 @@ export function resolveChallengeSubject(subject) {
     }
     if (!Array.isArray(value[CHALLENGE_FIELDS.requirements])) {
       attempt.reason = `${label} has no ${CHALLENGE_FIELDS.requirements} array`;
+      continue;
+    }
+    attempt.ok = true;
+    return { ok: true, payload: value, strategy: strategy.id, attempts };
+  }
+  return { ok: false, payload: null, strategy: null, attempts };
+}
+
+/**
+ * Ordered strategies for reading the challenge *squad* payload out of the
+ * argument the SBC detail panel receives. The challenge definition and the
+ * squad state may arrive on the same subject (the challenge read already
+ * feature-detects `elgReq`), so this reader independently looks for the
+ * `{ challengeId, squad: { players: [...] } }` wrapper the writer consumes. The
+ * captured fixture `test/fixtures/sbs-challenge-25-squad.json` is that shape.
+ */
+export const CHALLENGE_SQUAD_STRATEGIES = Object.freeze([
+  Object.freeze({ id: 'panel-argument', path: [] }),
+  Object.freeze({ id: 'panel-argument.data', path: ['data'] }),
+  Object.freeze({ id: 'panel-argument.challenge', path: ['challenge'] }),
+  Object.freeze({ id: 'panel-argument.sbcChallenge', path: ['sbcChallenge'] }),
+]);
+
+const carriesChallengeSquad = (value) => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const squad = value[CHALLENGE_SQUAD_FIELDS.squad];
+  return (
+    squad !== null &&
+    typeof squad === 'object' &&
+    Array.isArray(squad[CHALLENGE_SQUAD_FIELDS.players])
+  );
+};
+
+/**
+ * Reads the challenge squad out of the SBC detail panel argument. Mirrors
+ * `resolveChallengeSubject`: it never guesses, returns the winning strategy id
+ * and an attempt record with a reason for every candidate tried, and returns a
+ * null payload when no candidate carries a `squad.players` array.
+ *
+ * @param {*} subject the argument passed to `initWithSBCSet`
+ * @returns {{ ok: boolean, payload: object|null, strategy: string|null,
+ *   attempts: Array<{id: string, ok: boolean, reason: string|null}> }}
+ */
+export function resolveChallengeSquad(subject) {
+  const attempts = [];
+  const describeSubject = () =>
+    subject === null
+      ? 'null'
+      : Array.isArray(subject)
+        ? 'an array'
+        : typeof subject;
+  for (const strategy of CHALLENGE_SQUAD_STRATEGIES) {
+    const attempt = { id: strategy.id, ok: false, reason: null };
+    attempts.push(attempt);
+    const label = strategy.id.replace('panel-argument', 'panel argument');
+    const value = readPath(subject, strategy.path);
+    if (value === null || value === undefined) {
+      attempt.reason = `${label} carries no value (got ${describeSubject()})`;
+      continue;
+    }
+    if (!carriesChallengeSquad(value)) {
+      attempt.reason = `${label} has no ${CHALLENGE_SQUAD_FIELDS.squad}.${CHALLENGE_SQUAD_FIELDS.players} array`;
       continue;
     }
     attempt.ok = true;

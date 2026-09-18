@@ -28,16 +28,19 @@
  * so `kind` names the measured dimension only: a LOWER-scoped same-league count
  * is not a "min" requirement, it is a cap.
  *
- * `SCOPE_VALUES` maps `eligibilityValue` to a comparison operator name.
+ * `SCOPE_VALUES` maps `eligibilityValue` to a comparison operator name. The
+ * mapping itself is a pinned EA-semantics model and lives in
+ * `src/ea/adapter.js` now, where the browser half reads it from; this file
+ * re-exports it so the test helpers keep one import path.
  *
  * Provenance of `SCOPE_VALUES`: EA's client bundle documents the comparison
  * semantics (`GREATER ? n<=r : LOWER ? r<=n : r===n`) but does not expose the
- * enum numbers. The 0/1/2 mapping below is an inference supported by the
- * captured fixtures and their challenge descriptions, not a direct reading of an
- * EA enum. Fixture cross-check: set 10 challenge 25 is titled
- * "3 Leagues & 2 Nations" and its payload carries key 8 value 3 with scope 2,
- * key 7 value 2 with scope 2, key 5 value 6 with scope 1 and key 4 value 6 with
- * scope 1 — that title is only reachable if 2 is EXACT and 1 is LOWER.
+ * enum numbers. The 0/1/2 mapping is an inference supported by the captured
+ * fixtures and their challenge descriptions, not a direct reading of an EA enum.
+ * Fixture cross-check: set 10 challenge 25 is titled "3 Leagues & 2 Nations" and
+ * its payload carries key 8 value 3 with scope 2, key 7 value 2 with scope 2,
+ * key 5 value 6 with scope 1 and key 4 value 6 with scope 1 — that title is
+ * only reachable if 2 is EXACT and 1 is LOWER.
  *
  * `PLAYER_QUALITY` (key 3) is an opaque integer. The fixtures only ever observe
  * values 1, 2 and 3, but that is an observation, not a verified complete enum,
@@ -46,11 +49,7 @@
  * here. See `src/solver/requirements.js` and issues #2 and #16.
  */
 
-export const SCOPE_VALUES = Object.freeze({
-  0: 'GREATER',
-  1: 'LOWER',
-  2: 'EXACT',
-});
+export { SCOPE_VALUES } from '../../src/ea/adapter.js';
 
 export const PINNED_ELIGIBILITY_KEYS = Object.freeze({
   2: Object.freeze({ type: 'PLAYER_COUNT', kind: 'PLAYER_COUNT_MATCH', role: 'count' }),
