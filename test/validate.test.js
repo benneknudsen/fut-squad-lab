@@ -13,6 +13,7 @@ import {
   normaliseClubItem,
 } from '../src/ea/adapter.js';
 import { normaliseRequirements } from '../src/solver/requirements.js';
+import { buildClubIndex, squadChemistry } from '../src/solver/chemistry.js';
 import { MEASURES, validateSquad } from '../src/solver/validate.js';
 
 // These tests exercise the referee over the sanitised club fixture. The squad
@@ -30,6 +31,7 @@ import { MEASURES, validateSquad } from '../src/solver/validate.js';
 const QUALITY_REASON = 'player-quality-aggregation-unverified';
 const RATING_REASON = 'team-rating-formula-unverified';
 const LEVEL_REASON = 'player-level-field-unverified';
+const CHEMISTRY_REASON = 'chemistry-formula-unverified';
 
 const BASE_ASSETS = [
   277846, 262093, 250959, 244669, 236403, 267212, 205452, 227236, 212194, 265849, 262330,
@@ -45,6 +47,23 @@ const squadOf = (assetIds, chemistry = 31) => ({
 });
 
 const baseSquad = (chemistry = 31) => squadOf(BASE_ASSETS, chemistry);
+
+// A squad whose chemistry came from the real `squadChemistry`: the result
+// object, not a bare number, so the validator can see the formula is
+// unverified. The object shape matches `src/solver/chemistry.js` exactly.
+const computedSquad = (chemistry) => ({
+  ...baseSquad(chemistry),
+  chemistry: { chemistry, verified: false, reason: CHEMISTRY_REASON },
+});
+
+// A hand-built stable profile in the adapter's schema, so the real
+// `squadChemistry` can run without the chemistry fixtures.
+const STABLE_PROFILE = Object.freeze({
+  id: 4,
+  fullChemistryAtPreferredPosition: false,
+  overrides: { base: true, icon: false, hero: false },
+  rules: [{ dimension: 'nation', calculation: 'normal', value: 1 }],
+});
 
 // Two fixture items whose clubIds are a linked pair in the captured
 // teamChemLinks payload (5 and 116010), with the rest of the base squad
@@ -173,6 +192,181 @@ describe('validateSquad over the captured club fixture', () => {
       diagnostic: { id: 'missing-chemistry', params: { points: 1 } },
     });
     expect(result.failures[0].match).toBeUndefined();
+  });
+
+  it('keeps a bare squad.chemistry number on the verified path', () => {
+    // Issue #13 supplies EA's own number as a bare number; it must behave
+    // exactly as before the computed-chemistry marker existed.
+    const result = validateSquad(baseSquad(29), [
+      { kind: 'CHEMISTRY_POINTS', value: 30, scope: 'GREATER' },
+    ]);
+
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatchObject({ actual: 29, unverified: false });
+    expect(result.unverified).toEqual([]);
+  });
+
+  it('reports computed chemistry as unverified instead of approving or failing the requirement', () => {
+    const result = validateSquad(computedSquad(29), [
+      { kind: 'CHEMISTRY_POINTS', value: 30, scope: 'GREATER' },
+    ]);
+
+    expect(result.valid).toBe(true);
+    expect(result.failures).toEqual([]);
+    expect(result.unverified).toEqual([
+      {
+        kind: 'CHEMISTRY_POINTS',
+        required: 30,
+        scope: 'GREATER',
+        reason: CHEMISTRY_REASON,
+        diagnostic: { id: 'chemistry-formula-unverified', params: {} },
+      },
+    ]);
+  });
+
+  it('ignores the computed number entirely: 0 and 29 land in the same unverified entry', () => {
+    const constraint = [{ kind: 'CHEMISTRY_POINTS', value: 30, scope: 'GREATER' }];
+    const zero = validateSquad(computedSquad(0), constraint);
+    const almost = validateSquad(computedSquad(29), constraint);
+
+    expect(zero.failures).toEqual([]);
+    expect(almost.failures).toEqual([]);
+    expect(zero.unverified.map((entry) => entry.diagnostic.id)).toEqual([
+      'chemistry-formula-unverified',
+    ]);
+    expect(almost.unverified.map((entry) => entry.diagnostic.id)).toEqual([
+      'chemistry-formula-unverified',
+    ]);
+  });
+
+  it('treats an explicitly verified chemistry object as a verified number', () => {
+    const result = validateSquad(
+      { ...baseSquad(), chemistry: { chemistry: 31, verified: true, reason: null } },
+      [{ kind: 'CHEMISTRY_POINTS', value: 30, scope: 'GREATER' }]
+    );
+
+    expect(result.valid).toBe(true);
+    expect(result.failures).toEqual([]);
+    expect(result.unverified).toEqual([]);
+  });
+
+  it('lets a caller-supplied measure take responsibility for computed chemistry', () => {
+    const result = validateSquad(
+      computedSquad(29),
+      [{ kind: 'CHEMISTRY_POINTS', value: 30, scope: 'GREATER' }],
+      { measures: { CHEMISTRY_POINTS: (squad) => squad.chemistry.chemistry } }
+    );
+
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatchObject({ actual: 29, unverified: false });
+    expect(result.unverified).toEqual([]);
+  });
+
+  it('refuses to measure an unverified chemistry object through the raw measure table', () => {
+    expect(() =>
+      MEASURES.CHEMISTRY_POINTS(computedSquad(29), {
+        kind: 'CHEMISTRY_POINTS',
+        value: 30,
+        scope: 'GREATER',
+      })
+    ).toThrow(/computed and unverified/);
+  });
+
+  it('binds the real squadChemistry reason to the chemistry unverified diagnostic', () => {
+    // End-to-end bind of producer and consumer: if chemistry.js ever renames
+    // its reason, the validator throws on it and this test fails, so the two
+    // modules cannot drift apart silently.
+    const players = baseSquad().players.map((player) => ({ ...player, nationId: 55 }));
+    const chemistry = squadChemistry(players, STABLE_PROFILE, buildClubIndex([]));
+    const result = validateSquad({ ...baseSquad(), players, chemistry }, [
+      { kind: 'CHEMISTRY_POINTS', value: 30, scope: 'GREATER' },
+    ]);
+
+    expect(chemistry.verified).toBe(false);
+    expect(result.valid).toBe(true);
+    expect(result.failures).toEqual([]);
+    expect(result.unverified).toEqual([
+      {
+        kind: 'CHEMISTRY_POINTS',
+        required: 30,
+        scope: 'GREATER',
+        reason: chemistry.reason,
+        diagnostic: { id: 'chemistry-formula-unverified', params: {} },
+      },
+    ]);
+  });
+
+  it('binds the missing-position-flag reason to the chemistry unverified diagnostic', () => {
+    const players = baseSquad().players.map((player) => ({ ...player, nationId: 55 }));
+    const chemistry = squadChemistry(
+      players,
+      { ...STABLE_PROFILE, fullChemistryAtPreferredPosition: null },
+      buildClubIndex([])
+    );
+    const result = validateSquad({ ...baseSquad(), players, chemistry }, [
+      { kind: 'CHEMISTRY_POINTS', value: 30, scope: 'GREATER' },
+    ]);
+
+    expect(chemistry.reason).toBe('chemistry-position-flag-missing');
+    expect(result.valid).toBe(true);
+    expect(result.failures).toEqual([]);
+    expect(result.unverified).toEqual([
+      {
+        kind: 'CHEMISTRY_POINTS',
+        required: 30,
+        scope: 'GREATER',
+        reason: 'chemistry-position-flag-missing',
+        diagnostic: { id: 'chemistry-formula-unverified', params: {} },
+      },
+    ]);
+  });
+
+  it('reads the computed chemistry status once, so a proxy cannot answer differently for the reason check and the measure', () => {
+    // `squad.chemistry` has the same TOCTOU shape as the `options.measures`
+    // proxy fixed for issue #2: `readChemistryStatus` runs for the reason
+    // decision and `MEASURES.CHEMISTRY_POINTS` reads the value again for the
+    // measurement. A proxy that answers 0 on the first read and 100 on the
+    // second would let a failing total satisfy the constraint. One snapshot
+    // must feed both steps.
+    let statusReads = 0;
+    const descriptor = (value) => ({
+      value,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+    });
+    const chemistry = new Proxy(
+      {},
+      {
+        ownKeys() {
+          statusReads += 1;
+          return ['chemistry', 'verified', 'reason'];
+        },
+        getOwnPropertyDescriptor(target, key) {
+          if (key === 'chemistry') return descriptor(statusReads === 1 ? 0 : 100);
+          if (key === 'verified') return descriptor(true);
+          return descriptor(null);
+        },
+      }
+    );
+
+    const result = validateSquad({ ...baseSquad(), chemistry }, [
+      { kind: 'CHEMISTRY_POINTS', value: 50, scope: 'GREATER' },
+    ]);
+
+    expect(statusReads).toBe(1);
+    expect(result.valid).toBe(false);
+    expect(result.unverified).toEqual([]);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatchObject({
+      kind: 'CHEMISTRY_POINTS',
+      required: 50,
+      actual: 0,
+      shortfall: 50,
+      scope: 'GREATER',
+      unverified: false,
+      diagnostic: { id: 'missing-chemistry', params: { points: 50 } },
+    });
   });
 
   it('reports only the league failure when the squad has too few leagues', () => {
@@ -685,6 +879,70 @@ describe('validateSquad fails loud on malformed input', () => {
     ).toThrow(/squad.chemistry must be a finite number to check CHEMISTRY_POINTS/);
   });
 
+  it('throws when a computed chemistry object carries no finite chemistry number', () => {
+    expect(() =>
+      validateSquad(
+        { ...baseSquad(), chemistry: { chemistry: NaN, verified: false, reason: CHEMISTRY_REASON } },
+        [constraint('CHEMISTRY_POINTS', { value: 30 })]
+      )
+    ).toThrow(/squad\.chemistry\.chemistry must be a finite number/);
+  });
+
+  it('throws when a computed chemistry object carries no boolean verified flag', () => {
+    expect(() =>
+      validateSquad(
+        { ...baseSquad(), chemistry: { chemistry: 31, verified: 'yes' } },
+        [constraint('CHEMISTRY_POINTS', { value: 30 })]
+      )
+    ).toThrow(/squad\.chemistry\.verified must be a boolean/);
+  });
+
+  it('throws when an unverified chemistry object carries no reason', () => {
+    expect(() =>
+      validateSquad(
+        { ...baseSquad(), chemistry: { chemistry: 31, verified: false } },
+        [constraint('CHEMISTRY_POINTS', { value: 30 })]
+      )
+    ).toThrow(/squad\.chemistry\.reason must be a non-empty string/);
+  });
+
+  it('throws on a chemistry reason this module cannot translate to a diagnostic', () => {
+    expect(() =>
+      validateSquad(
+        { ...baseSquad(), chemistry: { chemistry: 31, verified: false, reason: 'made-up' } },
+        [constraint('CHEMISTRY_POINTS', { value: 30 })]
+      )
+    ).toThrow(/is not a known unverified reason/);
+  });
+
+  it('rejects a chemistry object whose fields are inherited instead of owned', () => {
+    const inherited = Object.create({ chemistry: 31, verified: true, reason: null });
+
+    expect(() =>
+      validateSquad({ ...baseSquad(), chemistry: inherited }, [
+        constraint('CHEMISTRY_POINTS', { value: 30 }),
+      ])
+    ).toThrow(/must carry its own finite chemistry field/);
+  });
+
+  it('rejects a verified chemistry object whose reason is not null', () => {
+    expect(() =>
+      validateSquad(
+        { ...baseSquad(), chemistry: { chemistry: 31, verified: true, reason: 'made-up' } },
+        [constraint('CHEMISTRY_POINTS', { value: 30 })]
+      )
+    ).toThrow(/squad\.chemistry\.reason must be null when verified is true/);
+  });
+
+  it('rejects a known reason code that does not belong to chemistry', () => {
+    expect(() =>
+      validateSquad(
+        { ...baseSquad(), chemistry: { chemistry: 31, verified: false, reason: RATING_REASON } },
+        [constraint('CHEMISTRY_POINTS', { value: 30 })]
+      )
+    ).toThrow(/cannot map for CHEMISTRY_POINTS/);
+  });
+
   it('does not require squad.chemistry when no constraint needs it', () => {
     const result = validateSquad({ players: baseSquad().players }, [
       { kind: 'LEAGUE_COUNT', value: 7, scope: 'EXACT' },
@@ -1048,6 +1306,7 @@ describe('validateSquad rejects sparse arrays', () => {
 
 describe('structured diagnostics', () => {
   const DOCUMENTED_IDS = [
+    'chemistry-formula-unverified',
     'missing-chemistry',
     'missing-clubs',
     'missing-leagues',
@@ -1076,6 +1335,14 @@ describe('structured diagnostics', () => {
   const diagnosticsOf = (result) =>
     [...result.failures, ...result.unverified].map((entry) => entry.diagnostic);
 
+  // The unverified-chemistry diagnostic can never coexist with the
+  // missing-chemistry failure in one result, so it is probed with its own
+  // squad rather than by the shared scenario table above.
+  const computedChemistryDiagnostics = () =>
+    diagnosticsOf(
+      validateSquad(computedSquad(31), [{ kind: 'CHEMISTRY_POINTS', value: 33, scope: 'GREATER' }])
+    );
+
   it('reports a chemistry shortfall as an id and the shortfall number', () => {
     const result = validateSquad(baseSquad(18), [
       { kind: 'CHEMISTRY_POINTS', value: 30, scope: 'GREATER' },
@@ -1088,7 +1355,10 @@ describe('structured diagnostics', () => {
   });
 
   it('covers every documented diagnostic id with an id and a params object', () => {
-    const diagnostics = diagnosticsOf(validateSquad(baseSquad(31), ALL_ID_SCENARIOS));
+    const diagnostics = [
+      ...diagnosticsOf(validateSquad(baseSquad(31), ALL_ID_SCENARIOS)),
+      ...computedChemistryDiagnostics(),
+    ];
 
     expect(new Set(diagnostics.map(({ id }) => id)).size).toBe(DOCUMENTED_IDS.length);
     expect(diagnostics.map(({ id }) => id).sort()).toEqual(DOCUMENTED_IDS);
@@ -1124,7 +1394,10 @@ describe('structured diagnostics', () => {
   });
 
   it('keeps every diagnostic id and param free of prose', () => {
-    const diagnostics = diagnosticsOf(validateSquad(baseSquad(31), ALL_ID_SCENARIOS));
+    const diagnostics = [
+      ...diagnosticsOf(validateSquad(baseSquad(31), ALL_ID_SCENARIOS)),
+      ...computedChemistryDiagnostics(),
+    ];
 
     for (const { id, params } of diagnostics) {
       expect(id).toMatch(/^[a-z]+(-[a-z]+)*$/);
