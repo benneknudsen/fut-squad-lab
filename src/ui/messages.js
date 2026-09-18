@@ -19,6 +19,9 @@ export const CONTENT_SOURCE = 'fsl-content';
 export const CONTENT_TO_PAGE_KINDS = Object.freeze({
   COPY: 'copy',
   BRIDGE_MODULE: 'bridge-module',
+  SOLVE_PROGRESS: 'solve-progress',
+  SOLVE_RESPONSE: 'solve-response',
+  SOLVE_ERROR: 'solve-error',
 });
 
 /** Kinds the isolated relay accepts from the main-world bridge. */
@@ -28,10 +31,15 @@ export const PAGE_TO_CONTENT_KINDS = Object.freeze({
   MOUNTED: 'mounted',
   SUMMARY: 'summary',
   ERROR: 'error',
+  SOLVE_REQUEST: 'solve-request',
+  SOLVE_CANCEL: 'solve-cancel',
 });
 
 /** The bridge module the classic MAIN-world loader dynamically imports. */
 export const BRIDGE_MODULE_FILE = 'src/page-bridge-app.js';
+
+/** The solver worker the isolated relay spawns, once per page session. */
+export const WORKER_MODULE_FILE = 'src/solver/worker.js';
 
 /**
  * True only for a `chrome-extension://` URL whose path is exactly the bridge
