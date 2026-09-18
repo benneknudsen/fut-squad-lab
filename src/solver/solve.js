@@ -14,13 +14,13 @@
  *
  * ## Where the EA knowledge lives
  *
- * The formation table, the eligibility key numbers and the scope numbers are EA
- * payload vocabulary and live in `src/ea/adapter.js`; this module imports
- * `normaliseFormation` and the pinned lookup tables and never sees a raw field
- * name. The pinned tables are the observation-based development data recorded
- * there: production must eventually read EA's live `SBCEligibilityKey` enum
- * through the page bridge (issue #16), and until that lands the solver uses the
- * pinned snapshot the same way the tests do.
+ * The formation table is EA payload vocabulary and lives in `src/ea/adapter.js`;
+ * this module imports `normaliseFormation` and never sees a raw field name. The
+ * eligibility key and scope tables are not owned here: the browser half reads
+ * EA's live `SBCEligibilityKey` enum through the page bridge (issue #16) and
+ * passes the tables in as `options.keys` and `options.scopes`. Both are
+ * required by every entry point that decodes `elgReq`, and there is no fallback
+ * table anywhere under `src/solver/`.
  *
  * ## The greedy pass
  *
@@ -82,12 +82,7 @@
  * every clickable alternative keeps the squad valid.
  */
 
-import {
-  PINNED_ELIGIBILITY_KEYS,
-  SCOPE_VALUES,
-  normaliseFormation,
-  normaliseTeamChemLinks,
-} from '../ea/adapter.js';
+import { normaliseFormation, normaliseTeamChemLinks } from '../ea/adapter.js';
 import { buildClubIndex, countLinks, resolveProfile, squadChemistry } from './chemistry.js';
 import {
   UNKNOWN_CONTRIBUTION,
@@ -306,14 +301,50 @@ const resolveSolveOptions = (options) => {
   return options;
 };
 
-const decodeConstraints = (challenge) =>
+const decodeConstraints = (challenge, tables) =>
   orderConstraints(
     normaliseRequirements(challenge.elgReq, {
       operation: challenge.elgOperation,
-      keys: PINNED_ELIGIBILITY_KEYS,
-      scopes: SCOPE_VALUES,
+      keys: tables.keys,
+      scopes: tables.scopes,
     }).constraints
   );
+
+/** The two option names every entry point that decodes `elgReq` must carry. */
+const ELIGIBILITY_OPTIONS = Object.freeze(['keys', 'scopes']);
+
+/**
+ * Requires the caller-supplied eligibility tables, with no fallback of any
+ * kind. The live `SBCEligibilityKey` enum is read in the browser half (see
+ * `readEligibilityKeys` in `src/ea/adapter.js`) and passed in as an option,
+ * exactly like `options.challenge`; the pinned observation table is test data
+ * that this pure core is structurally unable to reach. A missing table throws
+ * a structured `Error` naming the option, never a bare `TypeError` from reading
+ * through `undefined`.
+ *
+ * @param {object} options the resolved solver options
+ * @returns {{ keys: object, scopes: object }}
+ * @throws {Error} with `code: 'MISSING_ELIGIBILITY_TABLE'` and `option` naming
+ *   the absent field
+ */
+const requireEligibilityTables = (options) => {
+  for (const name of ELIGIBILITY_OPTIONS) {
+    const value = options[name];
+    if (value === undefined || value === null) {
+      const error = new Error(
+        `solve: options.${name} is required; pass the table resolved from the live FC27 page` +
+          ' (readEligibilityKeys in src/ea/adapter.js). There is no fallback eligibility table.'
+      );
+      error.code = 'MISSING_ELIGIBILITY_TABLE';
+      error.option = name;
+      throw error;
+    }
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      fail(`options.${name} must be an object mapping eligibility values to definitions`);
+    }
+  }
+  return { keys: options.keys, scopes: options.scopes };
+};
 
 /**
  * Builds the club equivalence index from a solve options object. Only an absent
@@ -799,10 +830,13 @@ const buildBestAttempt = ({
  * @param {object} challenge a raw challenge payload; only `formation`,
  *   `elgReq` and `elgOperation` are read
  * @param {Array<object>} pool output of `buildPool`
- * @param {{ timeBudgetMs?: number, seed?: number|string, lockedSlots?: Array<number>,
- *   weights?: object, clubLinks?: Array<object>, chemistryRuleSet?: object,
- *   effort?: number|'fast'|'balanced'|'thorough', improvementTimeBudgetMs?: number }} [options]
- *   `timeBudgetMs` bounds the shuffled restarts (attempt 0 always runs);
+ * @param {{ keys: object, scopes: object, timeBudgetMs?: number, seed?: number|string,
+ *   lockedSlots?: Array<number>, weights?: object, clubLinks?: Array<object>,
+ *   chemistryRuleSet?: object, effort?: number|'fast'|'balanced'|'thorough',
+ *   improvementTimeBudgetMs?: number }} options `keys` and `scopes` are required:
+ *   the eligibility tables the browser half resolved from the live FC27 page
+ *   (see `readEligibilityKeys`). There is no fallback. `timeBudgetMs` bounds the
+ *   shuffled restarts (attempt 0 always runs);
  *   `seed` seeds the restarts; `weights` overrides the cost-model weights;
  *   `clubLinks` is the raw `/chemistry/teamlinks` payload, normalised through
  *   the adapter; `chemistryRuleSet` is the adapter's normalised profile rule
@@ -829,9 +863,10 @@ export function solve(challenge, pool, options) {
   requireChallenge(challenge);
   requirePool(pool);
   const resolved = resolveSolveOptions(options);
+  const tables = requireEligibilityTables(resolved);
 
   const { positions } = normaliseFormation(challenge.formation);
-  const constraints = decodeConstraints(challenge);
+  const constraints = decodeConstraints(challenge, tables);
   const clubIndex = buildClubIndexFor(resolved);
   const weights = resolveWeights(resolved.weights);
   const pricedPool = pricePool(pool);
@@ -949,10 +984,12 @@ const targetsFailure = (record, failure, currentRecord, players, clubIndex) => {
  * @param {{ players: Array<object> }} squad a valid squad, players in slot
  *   order
  * @param {Array<object>} pool the candidate pool `solve` takes
- * @param {{ challenge: object, effort?: number|'fast'|'balanced'|'thorough',
+ * @param {{ challenge: object, keys: object, scopes: object,
+ *   effort?: number|'fast'|'balanced'|'thorough',
  *   improvementTimeBudgetMs?: number, weights?: object, clubLinks?: Array<object>,
  *   chemistryRuleSet?: object, seed?: number|string }} options `challenge` is
- *   required, exactly as for `reevaluate`; `effort` defaults to level 3
+ *   required, exactly as for `reevaluate`, and so are `keys` and `scopes`; `effort`
+ *   defaults to level 3
  *   (balanced); `improvementTimeBudgetMs` overrides the level's budget
  * @returns {{ squad: { players: Array<object>, chemistry: object },
  *   cost: number|null, costComplete: boolean, valid: boolean,
@@ -971,9 +1008,10 @@ export function improve(squad, pool, options) {
   const resolved = resolveSolveOptions(options);
   requireChallenge(resolved.challenge);
   requirePool(pool);
+  const tables = requireEligibilityTables(resolved);
 
   const { positions } = normaliseFormation(resolved.challenge.formation);
-  const constraints = decodeConstraints(resolved.challenge);
+  const constraints = decodeConstraints(resolved.challenge, tables);
   const clubIndex = buildClubIndexFor(resolved);
   const weights = resolveWeights(resolved.weights);
   const chemistryRuleSet = resolved.chemistryRuleSet ?? null;
@@ -1490,8 +1528,9 @@ const buildAlternatives = ({
  *   squad, players in slot order; may be incomplete
  * @param {Array<number>} lockedSlots slot indexes to keep, 0..10
  * @param {Array<object>} pool the candidate pool `solve` takes
- * @param {{ challenge: object, seed?: number|string, timeBudgetMs?: number,
- *   weights?: object, clubLinks?: Array<object>, chemistryRuleSet?: object }} options
+ * @param {{ challenge: object, keys: object, scopes: object, seed?: number|string,
+ *   timeBudgetMs?: number, weights?: object, clubLinks?: Array<object>,
+ *   chemistryRuleSet?: object }} options
  * @returns {{ squad: { players: Array<object>, chemistry: object },
  *   cost: number|null, costComplete: boolean, valid: boolean,
  *   failures: Array<object>, unverified: Array<object>,
@@ -1511,8 +1550,9 @@ export function reevaluate(squad, lockedSlots, pool, options) {
   const { positions } = normaliseFormation(resolved.challenge.formation);
   const locked = requireLockedSlots(lockedSlots, positions.length);
   requirePool(pool);
+  const tables = requireEligibilityTables(resolved);
 
-  const constraints = decodeConstraints(resolved.challenge);
+  const constraints = decodeConstraints(resolved.challenge, tables);
   const clubIndex = buildClubIndexFor(resolved);
   const weights = resolveWeights(resolved.weights);
   const pricedPool = pricePool(pool);

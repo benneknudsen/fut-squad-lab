@@ -217,3 +217,44 @@ describe('startPageBridge', () => {
     expect(summary.summary).toMatch(/challenge not detected/i);
   });
 });
+
+describe('live eligibility keys logging', () => {
+  it('resolves the enum once per session and logs one pasteable line', () => {
+    const { pageWindow, dispatchMessage } = createFakeWindow();
+    let reads = 0;
+    Object.defineProperty(pageWindow, 'SBCEligibilityKey', {
+      configurable: true,
+      get() {
+        reads += 1;
+        return { PLAYER_COUNT: 2, 2: 'PLAYER_COUNT', SCOPE: 13, 13: 'SCOPE' };
+      },
+    });
+    pageWindow.console = { info: vi.fn() };
+
+    startPageBridge(pageWindow, { hookPollMs: 1 });
+    dispatchMessage(COPY_MESSAGE);
+    const Controller = pageWindow.UTSBCSquadDetailPanelViewController;
+    new Controller().initWithSBCSet(challengeFixture);
+    new Controller().initWithSBCSet(challengeFixture);
+
+    expect(reads).toBe(1);
+    expect(pageWindow.console.info).toHaveBeenCalledTimes(1);
+    const line = pageWindow.console.info.mock.calls[0][0];
+    expect(line).toContain('2=PLAYER_COUNT');
+    expect(line).not.toContain('\n');
+  });
+
+  it('logs the unreadable enum once instead of throwing when the symbol is missing', () => {
+    const { pageWindow, dispatchMessage } = createFakeWindow();
+    pageWindow.console = { info: vi.fn() };
+
+    startPageBridge(pageWindow, { hookPollMs: 1 });
+    dispatchMessage(COPY_MESSAGE);
+    const Controller = pageWindow.UTSBCSquadDetailPanelViewController;
+    new Controller().initWithSBCSet(challengeFixture);
+    new Controller().initWithSBCSet(challengeFixture);
+
+    expect(pageWindow.console.info).toHaveBeenCalledTimes(1);
+    expect(pageWindow.console.info.mock.calls[0][0]).toContain('SBCEligibilityKey');
+  });
+});

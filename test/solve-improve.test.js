@@ -7,8 +7,6 @@ import {
   solve,
 } from '../src/solver/solve.js';
 import {
-  PINNED_ELIGIBILITY_KEYS,
-  SCOPE_VALUES,
   normaliseChemistryProfile,
   normaliseTeamChemLinks,
 } from '../src/ea/adapter.js';
@@ -16,6 +14,7 @@ import { buildPool, normaliseClub } from '../src/solver/candidates.js';
 import { buildClubIndex } from '../src/solver/chemistry.js';
 import { normaliseRequirements } from '../src/solver/requirements.js';
 import { validateSquad } from '../src/solver/validate.js';
+import { PINNED_ELIGIBILITY_KEYS, SCOPE_VALUES, withEligibility } from './helpers/eligibility.js';
 import clubFixture from './fixtures/club-items.json';
 import linksFixture from './fixtures/chemistry-teamlinks.json';
 import profilesFixture from './fixtures/chemistry-profiles.json';
@@ -40,12 +39,13 @@ const CHEMISTRY_RULE_SET = normaliseChemistryProfile({
   mappings: [{ profileId: 4, rarityIds: [0, 69] }],
 });
 
-const fixtureOptions = (overrides = {}) => ({
-  seed: 1,
-  chemistryRuleSet: CHEMISTRY_RULE_SET,
-  clubLinks: linksFixture.teamChemLinks,
-  ...overrides,
-});
+const fixtureOptions = (overrides = {}) =>
+  withEligibility({
+    seed: 1,
+    chemistryRuleSet: CHEMISTRY_RULE_SET,
+    clubLinks: linksFixture.teamChemLinks,
+    ...overrides,
+  });
 
 const F442 = ['GK', 'LB', 'CB', 'CB', 'RB', 'LM', 'CM', 'CM', 'RM', 'ST', 'ST'];
 
@@ -191,7 +191,7 @@ describe('resolveEffort and EFFORT_LEVELS', () => {
 describe('improve', () => {
   it('finds the cheaper squad a cheapest-first greedy cannot reach', () => {
     const pool = headroomPool();
-    const greedy = solve(TEAM_RATING_80, pool, { seed: 1 });
+    const greedy = solve(TEAM_RATING_80, pool, withEligibility({ seed: 1 }));
 
     expect(greedy.valid).toBe(true);
     expect(greedy.cost).toBe(1010);
@@ -200,6 +200,7 @@ describe('improve', () => {
       challenge: TEAM_RATING_80,
       effort: 3,
       improvementTimeBudgetMs: 60000,
+      ...withEligibility(),
     });
 
     expect(improved.valid).toBe(true);
@@ -223,6 +224,7 @@ describe('improve', () => {
         challenge: NO_REQUIREMENTS,
         effort: 1,
         improvementTimeBudgetMs: 60000,
+        ...withEligibility(),
       });
 
       // Effort 1 allows one improvement round, so at most one accepted move
@@ -300,7 +302,12 @@ describe('improve', () => {
     const result = improve(
       { players: squadAtPrice(records, 70) },
       pool,
-      { challenge: NO_REQUIREMENTS, effort: 5, improvementTimeBudgetMs: 60000 }
+      {
+        challenge: NO_REQUIREMENTS,
+        effort: 5,
+        improvementTimeBudgetMs: 60000,
+        ...withEligibility(),
+      }
     );
 
     expect(result.cost).toBe(110);
@@ -328,6 +335,7 @@ describe('improve', () => {
       challenge: NO_REQUIREMENTS,
       effort: 5,
       improvementTimeBudgetMs: 60000,
+      ...withEligibility(),
     });
 
     expect(result.cost).toBeNull();
@@ -337,17 +345,19 @@ describe('improve', () => {
 
   it('does less work at effort 1 than at effort 5 and terminates inside the budget', () => {
     const pool = headroomPool();
-    const greedy = solve(TEAM_RATING_80, pool, { seed: 1 });
+    const greedy = solve(TEAM_RATING_80, pool, withEligibility({ seed: 1 }));
 
     const fast = improve(greedy.squad, pool, {
       challenge: TEAM_RATING_80,
       effort: 1,
       improvementTimeBudgetMs: 60000,
+      ...withEligibility(),
     });
     const thorough = improve(greedy.squad, pool, {
       challenge: TEAM_RATING_80,
       effort: 5,
       improvementTimeBudgetMs: 60000,
+      ...withEligibility(),
     });
 
     expect(fast.improvements.lineups).toBeLessThanOrEqual(EFFORT_LEVELS[1].maxLineups);
@@ -392,7 +402,7 @@ describe('solve with effort', () => {
   it('returns the improved winner and wires the pass into the solve result', () => {
     const pool = headroomPool();
 
-    const plain = solve(TEAM_RATING_80, pool, { seed: 1 });
+    const plain = solve(TEAM_RATING_80, pool, withEligibility({ seed: 1 }));
     expect(plain.cost).toBe(1010);
     expect(plain.improvements.acceptedMoves).toBe(0);
 
@@ -400,6 +410,7 @@ describe('solve with effort', () => {
       seed: 1,
       effort: 5,
       improvementTimeBudgetMs: 60000,
+      ...withEligibility(),
     });
 
     expect(wired.valid).toBe(true);

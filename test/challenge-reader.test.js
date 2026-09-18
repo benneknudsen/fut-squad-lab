@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import set10 from './fixtures/sbs-set-10-challenges.json';
-import { PINNED_ELIGIBILITY_KEYS, SCOPE_VALUES } from '../src/ea/adapter.js';
+import { PINNED_ELIGIBILITY_KEYS, SCOPE_VALUES } from './helpers/eligibility.js';
 import { readChallenge } from '../src/ea/challenge-reader.js';
 import { normaliseRequirements } from '../src/solver/requirements.js';
 
