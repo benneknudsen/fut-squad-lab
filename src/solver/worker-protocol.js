@@ -22,7 +22,7 @@
  *
  * ```js
  * { kind: 'progress', id: 1, stage: 'search-lineups', counters: { lineups: 3 } }
- * { kind: 'response', id: 1, result: { squad, cost, valid, failures, unverified } }
+ * { kind: 'response', id: 1, result: { squad, cost, costComplete, valid, failures, unverified } }
  * { kind: 'error', id: 1, error: { name: 'Error', message: 'solve: ...' } }
  * ```
  *
