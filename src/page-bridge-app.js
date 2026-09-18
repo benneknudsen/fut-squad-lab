@@ -146,6 +146,7 @@ export function startPageBridge(pageWindow, options = {}) {
   };
 
   pageWindow.addEventListener('message', (event) => {
+    if (event.source !== pageWindow) return;
     const data = event.data;
     if (data === null || typeof data !== 'object' || data.source !== CONTENT_SOURCE) return;
     if (data.kind === CONTENT_TO_PAGE_KINDS.COPY) {
