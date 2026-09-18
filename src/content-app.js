@@ -92,6 +92,7 @@ export function startContentApp({ window, document, chrome, navigator, fetch, co
       .catch((error) => console.warn(`[FUT Squad Lab] ${error.message}`));
 
   window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
     const data = event.data;
     if (data === null || typeof data !== 'object' || data.source !== PAGE_SOURCE) return;
     if (data.kind === PAGE_TO_CONTENT_KINDS.BRIDGE_HELLO) {
