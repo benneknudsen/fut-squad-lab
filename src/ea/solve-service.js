@@ -11,9 +11,12 @@
  *
  * Every stage records an outcome as data on the returned `stages` list, as
  * `{ id, ok, reason, detail }`, so the page bridge can render one staged
- * diagnostic report (#40) without any stage work of its own. A failure at one
- * stage leaves the later stages unrecorded; `completeStages` in
- * `src/ea/summary.js` fills those with an explicit not-reached outcome.
+ * diagnostic report (#40) without any stage work of its own. A failed club read
+ * additionally carries the live service and request surface shape report (#44)
+ * in its detail, because the failed strategy list cannot say what the page
+ * exposes instead. A failure at one stage leaves the later stages unrecorded;
+ * `completeStages` in `src/ea/summary.js` fills those with an explicit
+ * not-reached outcome.
  *
  * Every stage is injectable through `steps`, so the glue is unit-testable with
  * fakes for the readers, the solver and the writer; production defaults to the
@@ -45,6 +48,7 @@ import {
 } from './adapter.js';
 import { readChallenge } from './challenge-reader.js';
 import { readClubItems } from './club-reader.js';
+import { describeServiceShape } from './service-shape.js';
 import { runSolve } from './solve-runner.js';
 import { applySolution, planSquadWrite, writeSolution } from './squad-writer.js';
 import { buildReadSummary, countConstraints, summarizeWritePlan } from './summary.js';
@@ -89,6 +93,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
   const readClubItemsFn = steps.readClubItems ?? readClubItems;
   const resolveSquad = steps.resolveChallengeSquad ?? resolveChallengeSquad;
   const readKeys = steps.readEligibilityKeys ?? (() => readEligibilityKeys(pageWindow));
+  const describeShape = steps.describeServiceShape ?? describeServiceShape;
   const runSolveFn = steps.runSolve ?? runSolve;
   const planSquadWriteFn = steps.planSquadWrite ?? planSquadWrite;
   const applySolutionFn = steps.applySolution ?? applySolution;
@@ -177,6 +182,9 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
           items: clubRecords.length,
           strategy: clubResult.strategy ?? null,
           attempts: clubResult.attempts,
+          // The shape report runs on failure only: a read that answered
+          // carries none (#44).
+          shape: clubResult.ok === true ? null : describeShape(pageWindow),
         }
       );
 
