@@ -36,9 +36,12 @@ import {
  * used, and a page failure distinguishes EA throwing on our criteria from a
  * missing method. Incremented by #64: an observer wraps EA's own club methods
  * and the panel hook, so the diagnostics block also carries how EA itself
- * called them.
+ * called them. Incremented by #65: the criteria handed to EA now carry
+ * `untradeables` as the reference's string and the named page size, the club
+ * DAO's stats cache is reset when the page provides it, and the criteria
+ * diagnostic names the fields this project sets.
  */
-export const BUILD_ID = 'fsl-build/6';
+export const BUILD_ID = 'fsl-build/7';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact
