@@ -23,9 +23,12 @@ import set16 from './fixtures/sbs-set-16-challenges.json';
 // beside the cost, so a caller can tell a real total from a lower bound without
 // walking the card list.
 //
-// The exact fixture costs below are the pre-change numbers observed on this
-// fixture (set16.challenges[0] and [3] with the shared options). They are here
-// so the qualifier cannot be added by changing what the cost number means.
+// The exact fixture costs below are the numbers observed on this fixture
+// (set16.challenges[0] and [3] with the shared options). They are here so the
+// qualifier cannot be added by changing what the cost number means. Issue #60
+// re-pinned them when the borrowed published fodder weights changed the
+// weighted contribution of the untradeable cards these squads contain: 769 ->
+// 1199.5, 2062.4 -> 2934, and the invalid set10 solve 829 -> 1304.5.
 
 const POOL = buildPool(normaliseClub(clubFixture.itemData));
 
@@ -255,7 +258,7 @@ describe('solve cost completeness', () => {
 
     expect(result.valid).toBe(true);
     expect(result.failures).toEqual([]);
-    expect(result.cost).toBe(769);
+    expect(result.cost).toBe(1199.5);
     expect(result.costComplete).toBe(true);
 
     const coverage = costCoverage(result.squad.players);
@@ -269,11 +272,12 @@ describe('solve cost completeness', () => {
 
     // Issue #53: the reachability bound for TEAM_RATING now uses EA's
     // adjusted-mean formula instead of a plain rounded mean. This challenge
-    // (set 16 challenge 39, TEAM_RATING >= 75) solves to 2062.4, where the
-    // plain-mean bound had pinned 2368.4. The result is still valid under the
-    // validator's adjusted-mean rating.
+    // (set 16 challenge 39, TEAM_RATING >= 75) validly solves under the
+    // adjusted-mean rating, where the plain-mean bound had pinned 2368.4.
+    // Issue #60 re-pinned the solved cost from 2062.4 to 2934 when the fodder
+    // weights changed; the result is still valid.
     expect(result.valid).toBe(true);
-    expect(result.cost).toBe(2062.4);
+    expect(result.cost).toBe(2934);
     expect(result.costComplete).toBe(true);
   });
 
@@ -281,7 +285,7 @@ describe('solve cost completeness', () => {
     const result = solve(set10.challenges[0], POOL, options());
 
     expect(result.valid).toBe(false);
-    expect(result.cost).toBe(829);
+    expect(result.cost).toBe(1304.5);
     expect(result.costComplete).toBe(true);
   });
 

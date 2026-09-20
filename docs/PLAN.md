@@ -157,11 +157,19 @@ Two-tier pricing, both sources already available:
 1. **Primary:** fut.gg player-prices API (`/api/fut/player-prices/26/` → FC27 path), batched, cached, rate-limited, fetched from the service worker.
 2. **Fallback / offline:** EA's own `marketAverage` and `discardValue`, which are *already inside every club item payload*. Zero extra requests, always present.
 
-Pricing weights (a v1 proposal, tunable in settings):
+Pricing weights (tunable in settings). The four numbers are a **borrowed published
+heuristic** — the percentages SBC Monkey describes in its public documentation for how it
+values fodder. That is a published fact about a third party we are not affiliated with; the
+numbers are not claimed to be tuned or correct, and the settings sliders keep them
+configurable:
 - untradeable duplicate → 0.1 × value (prefer clearing duplicates)
 - untradeable → 0.7 × value
 - tradeable → 1.0 × value
 - concept player → 2.0 × value (must be bought, so avoid)
+
+A card with no value from any source is estimated at the 60th percentile (P60) of the
+market values of same-rated cards in the same club batch, tagged with its own price source;
+too few same-rated values leaves it unknown. See `src/solver/prices.js`.
 
 ### 2.5 Safety posture
 
