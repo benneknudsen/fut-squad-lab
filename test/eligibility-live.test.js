@@ -178,17 +178,12 @@ describe('readEligibilityKeys against a fake page window', () => {
     expect(resolved.keys[13].type).toBe('SCOPE');
   });
 
-  it('names the missing EA symbol when the global is absent, never a bare TypeError', () => {
-    let caught;
-    try {
-      readEligibilityKeys({});
-    } catch (error) {
-      caught = error;
-    }
+  it('falls back to the pinned number table and names the missing EA symbol', () => {
+    const resolved = readEligibilityKeys({});
 
-    expect(caught).toBeInstanceOf(Error);
-    expect(caught).not.toBeInstanceOf(TypeError);
-    expect(caught.message).toContain('SBCEligibilityKey');
+    expect(resolved.source).toBe('fallback');
+    expect(resolved.liveError).toContain('SBCEligibilityKey');
+    expect(resolved.keys[2].type).toBe('PLAYER_COUNT');
   });
 
   it('rejects an empty enum instead of resolving an empty table', () => {

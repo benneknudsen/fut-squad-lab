@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import set16 from './fixtures/sbs-set-16-challenges.json';
 import { PINNED_ELIGIBILITY_KEYS, SCOPE_VALUES } from './helpers/eligibility.js';
-import { normaliseRequirements } from '../src/solver/requirements.js';
+import { ELIGIBILITY_KEY_MODEL } from '../src/ea/adapter.js';
+import { DEFAULT_SCOPE, normaliseRequirements } from '../src/solver/requirements.js';
 
 // Accepted/rejected squad cases cannot live here yet: they require a logged-in
 // FC27 session and experimental submissions against the live challenge. They are
@@ -118,6 +119,34 @@ const scopeEntry = (slot, value) => ({
   eligibilityValue: value,
 });
 
+// The eligibility keys issue #53 added to the model, with the live numbers from
+// the issue. The pinned observation table above only carries what the captured
+// fixtures use; these numbers are facts about EA's enum, and the descriptors
+// come from `ELIGIBILITY_KEY_MODEL` so the tests exercise the model the live
+// reader builds descriptors from.
+const MODEL_KEY_NUMBERS = Object.freeze({
+  PLAYER_RARITY_GROUP: 25,
+  PLAYER_MIN_OVR: 26,
+  PLAYER_EXACT_OVR: 27,
+  PLAYER_MAX_OVR: 28,
+  PLAYER_TRADABILITY: 33,
+  ALL_PLAYERS_CHEMISTRY_POINTS: 36,
+});
+
+const MODEL_KEYS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(MODEL_KEY_NUMBERS).map(([name, number]) => [
+      number,
+      Object.freeze({ type: name, ...ELIGIBILITY_KEY_MODEL[name] }),
+    ])
+  )
+);
+
+const EXTENDED_KEYS = Object.freeze({ ...PINNED_ELIGIBILITY_KEYS, ...MODEL_KEYS });
+
+const normaliseExtended = (elgReq) =>
+  normaliseRequirements(elgReq, { keys: EXTENDED_KEYS, scopes: SCOPE_VALUES }).constraints;
+
 describe('normaliseRequirements against the captured challenge payloads', () => {
   it('covers every challenge in both fixtures', () => {
     expect(sortedNumbers(allCases.map(([id]) => id))).toEqual(
@@ -229,7 +258,7 @@ describe('the keys and scopes mappings are required input', () => {
 
 describe('inference: scope comparison labels come from our mapping, not an EA enum', () => {
   it('names the comparison values used by the fixtures', () => {
-    expect(SCOPE_VALUES).toEqual({ 0: 'GREATER', 1: 'LOWER', 2: 'EXACT' });
+    expect(SCOPE_VALUES).toEqual({ 0: 'GREATER', 1: 'LOWER', 2: 'EXACT', 3: 'RANGE' });
   });
 
   it('attaches SCOPE to the requirement that shares its eligibilitySlot', () => {
@@ -328,6 +357,263 @@ describe('PLAYER_COUNT discriminators', () => {
     expect(constraints).toEqual([
       { kind: 'PLAYER_COUNT_MATCH', value: 1, scope: 'GREATER', match: { clubIds: [73, 219] } },
     ]);
+  });
+});
+
+describe('a slot with no SCOPE entry defaults to a minimum, explicitly', () => {
+  it('exports the default comparison as a named minimum operator', () => {
+    expect(DEFAULT_SCOPE).toBe('GREATER');
+  });
+
+  it('treats a count with no SCOPE entry as "at least N", never "exactly N"', () => {
+    const { constraints } = normalise([
+      { type: 'CHEMISTRY_POINTS', eligibilitySlot: 5, eligibilityKey: 35, eligibilityValue: 30 },
+    ]);
+
+    expect(constraints).toEqual([{ kind: 'CHEMISTRY_POINTS', value: 30, scope: 'GREATER' }]);
+  });
+
+  it('applies the default to a count match as well', () => {
+    const { constraints } = normalise([
+      { type: 'PLAYER_COUNT', eligibilitySlot: 1, eligibilityKey: 2, eligibilityValue: 1 },
+      { type: 'NATION_ID', eligibilitySlot: 1, eligibilityKey: 10, eligibilityValue: 42 },
+    ]);
+
+    expect(constraints).toEqual([
+      { kind: 'PLAYER_COUNT_MATCH', value: 1, scope: 'GREATER', match: { nationIds: [42] } },
+    ]);
+  });
+});
+
+describe('scope value 3 resolves to a range, never to exact or minimum', () => {
+  it('pins RANGE in the scope table', () => {
+    expect(SCOPE_VALUES[3]).toBe('RANGE');
+  });
+
+  it('carries RANGE through the decode without degrading it', () => {
+    const { constraints } = normalise([
+      { type: 'CHEMISTRY_POINTS', eligibilitySlot: 5, eligibilityKey: 35, eligibilityValue: 30 },
+      scopeEntry(5, 3),
+    ]);
+
+    expect(constraints).toEqual([{ kind: 'CHEMISTRY_POINTS', value: 30, scope: 'RANGE' }]);
+  });
+
+  it('does not silently map an unknown scope number onto RANGE', () => {
+    expect(() =>
+      normalise([
+        { type: 'CHEMISTRY_POINTS', eligibilitySlot: 5, eligibilityKey: 35, eligibilityValue: 30 },
+        scopeEntry(5, 4),
+      ])
+    ).toThrow(/scope value 4/);
+  });
+});
+
+describe('scope operator names are matched loosely', () => {
+  const scoped = (operator) =>
+    normaliseRequirements(
+      [
+        { type: 'CHEMISTRY_POINTS', eligibilitySlot: 1, eligibilityKey: 35, eligibilityValue: 30 },
+        scopeEntry(1, 9),
+      ],
+      { keys: PINNED_ELIGIBILITY_KEYS, scopes: { 9: operator } }
+    ).constraints;
+
+  it.each([
+    ['minimum', 'GREATER'],
+    ['MIN', 'GREATER'],
+    ['greater than or equal', 'GREATER'],
+    ['maximum', 'LOWER'],
+    ['LESS than', 'LOWER'],
+    ['lower than or equal', 'LOWER'],
+    ['exact', 'EXACT'],
+    ['a RANGE of values', 'RANGE'],
+  ])('canonicalises the operator name %s to %s', (name, canonical) => {
+    expect(scoped(name)).toEqual([{ kind: 'CHEMISTRY_POINTS', value: 30, scope: canonical }]);
+  });
+});
+
+describe('count = -1 is a sentinel, never a requirement of minus one', () => {
+  it('resolves the target from the value when count is the -1 sentinel', () => {
+    const { constraints } = normalise([
+      {
+        type: 'CHEMISTRY_POINTS',
+        eligibilitySlot: 1,
+        eligibilityKey: 35,
+        eligibilityValue: 30,
+        count: -1,
+      },
+      scopeEntry(1, 0),
+    ]);
+
+    expect(constraints).toEqual([{ kind: 'CHEMISTRY_POINTS', value: 30, scope: 'GREATER' }]);
+  });
+
+  it('fails naming the -1 sentinel when the value cannot supply a target', () => {
+    expect(() =>
+      normalise([
+        {
+          type: 'CHEMISTRY_POINTS',
+          eligibilitySlot: 1,
+          eligibilityKey: 35,
+          eligibilityValue: -1,
+          count: -1,
+        },
+        scopeEntry(1, 0),
+      ])
+    ).toThrow(/-1.*sentinel|sentinel.*-1/);
+  });
+
+  it('never reads a bare -1 value as a requirement of minus one', () => {
+    expect(() =>
+      normalise([
+        { type: 'CHEMISTRY_POINTS', eligibilitySlot: 1, eligibilityKey: 35, eligibilityValue: -1 },
+        scopeEntry(1, 0),
+      ])
+    ).toThrow(/-1/);
+  });
+});
+
+describe('the eligibility keys issue #53 adds are decoded', () => {
+  it('decodes key 13 SCOPE inside the key list into the slot comparison', () => {
+    const { constraints } = normalise([
+      { type: 'CHEMISTRY_POINTS', eligibilitySlot: 1, eligibilityKey: 35, eligibilityValue: 30 },
+      { type: 'SCOPE', eligibilitySlot: 1, eligibilityKey: 13, eligibilityValue: 2 },
+    ]);
+
+    expect(constraints).toEqual([{ kind: 'CHEMISTRY_POINTS', value: 30, scope: 'EXACT' }]);
+  });
+
+  it('decodes key 26 PLAYER_MIN_OVR as a minimum-rating discriminator', () => {
+    expect(
+      normaliseExtended([
+        { type: 'PLAYER_COUNT', eligibilitySlot: 1, eligibilityKey: 2, eligibilityValue: 1 },
+        { type: 'PLAYER_MIN_OVR', eligibilitySlot: 1, eligibilityKey: 26, eligibilityValue: 85 },
+        scopeEntry(1, 0),
+      ])
+    ).toEqual([
+      { kind: 'PLAYER_COUNT_MATCH', value: 1, scope: 'GREATER', match: { minRatings: [85] } },
+    ]);
+  });
+
+  it('decodes key 27 PLAYER_EXACT_OVR as an exact-rating discriminator', () => {
+    expect(
+      normaliseExtended([
+        { type: 'PLAYER_COUNT', eligibilitySlot: 1, eligibilityKey: 2, eligibilityValue: 1 },
+        { type: 'PLAYER_EXACT_OVR', eligibilitySlot: 1, eligibilityKey: 27, eligibilityValue: 84 },
+        scopeEntry(1, 0),
+      ])
+    ).toEqual([
+      { kind: 'PLAYER_COUNT_MATCH', value: 1, scope: 'GREATER', match: { exactRatings: [84] } },
+    ]);
+  });
+
+  it('decodes key 28 PLAYER_MAX_OVR as a maximum-rating discriminator', () => {
+    expect(
+      normaliseExtended([
+        { type: 'PLAYER_COUNT', eligibilitySlot: 1, eligibilityKey: 2, eligibilityValue: 1 },
+        { type: 'PLAYER_MAX_OVR', eligibilitySlot: 1, eligibilityKey: 28, eligibilityValue: 79 },
+        scopeEntry(1, 0),
+      ])
+    ).toEqual([
+      { kind: 'PLAYER_COUNT_MATCH', value: 1, scope: 'GREATER', match: { maxRatings: [79] } },
+    ]);
+  });
+
+  it('decodes key 33 PLAYER_TRADABILITY as a tradeability discriminator', () => {
+    expect(
+      normaliseExtended([
+        { type: 'PLAYER_COUNT', eligibilitySlot: 1, eligibilityKey: 2, eligibilityValue: 1 },
+        { type: 'PLAYER_TRADABILITY', eligibilitySlot: 1, eligibilityKey: 33, eligibilityValue: 1 },
+        scopeEntry(1, 0),
+      ])
+    ).toEqual([
+      { kind: 'PLAYER_COUNT_MATCH', value: 1, scope: 'GREATER', match: { tradabilities: [1] } },
+    ]);
+  });
+
+  it('decodes key 35 CHEMISTRY_POINTS as a scalar', () => {
+    expect(
+      normaliseExtended([
+        { type: 'CHEMISTRY_POINTS', eligibilitySlot: 1, eligibilityKey: 35, eligibilityValue: 30 },
+        scopeEntry(1, 0),
+      ])
+    ).toEqual([{ kind: 'CHEMISTRY_POINTS', value: 30, scope: 'GREATER' }]);
+  });
+
+  it('decodes key 36 ALL_PLAYERS_CHEMISTRY_POINTS as a scalar', () => {
+    expect(
+      normaliseExtended([
+        {
+          type: 'ALL_PLAYERS_CHEMISTRY_POINTS',
+          eligibilitySlot: 1,
+          eligibilityKey: 36,
+          eligibilityValue: 8,
+        },
+        scopeEntry(1, 0),
+      ])
+    ).toEqual([{ kind: 'ALL_PLAYERS_CHEMISTRY_POINTS', value: 8, scope: 'GREATER' }]);
+  });
+});
+
+describe('key 25 PLAYER_RARITY_GROUP is disambiguated by label and value', () => {
+  const rarityGroup = (slot, value, label) => ({
+    type: 'PLAYER_RARITY_GROUP',
+    eligibilitySlot: slot,
+    eligibilityKey: 25,
+    eligibilityValue: value,
+    ...(label === undefined ? {} : { label }),
+  });
+
+  it('decodes a geographic region named by the label', () => {
+    expect(
+      normaliseExtended([
+        { type: 'PLAYER_COUNT', eligibilitySlot: 1, eligibilityKey: 2, eligibilityValue: 1 },
+        rarityGroup(1, 44, 'Players from Europe'),
+        scopeEntry(1, 0),
+      ])
+    ).toEqual([
+      { kind: 'PLAYER_COUNT_MATCH', value: 1, scope: 'GREATER', match: { rarityGroups: ['europe'] } },
+    ]);
+  });
+
+  it('decodes TOTS from the label', () => {
+    expect(
+      normaliseExtended([
+        { type: 'PLAYER_COUNT', eligibilitySlot: 1, eligibilityKey: 2, eligibilityValue: 1 },
+        rarityGroup(1, 44, 'Team of the Season players'),
+        scopeEntry(1, 0),
+      ])
+    ).toEqual([
+      { kind: 'PLAYER_COUNT_MATCH', value: 1, scope: 'GREATER', match: { rarityGroups: ['TOTS'] } },
+    ]);
+  });
+
+  it('decodes TOTW-or-TOTS from the value 44 when the label does not name TOTS', () => {
+    expect(
+      normaliseExtended([
+        { type: 'PLAYER_COUNT', eligibilitySlot: 1, eligibilityKey: 2, eligibilityValue: 1 },
+        rarityGroup(1, 44),
+        scopeEntry(1, 0),
+      ])
+    ).toEqual([
+      {
+        kind: 'PLAYER_COUNT_MATCH',
+        value: 1,
+        scope: 'GREATER',
+        match: { rarityGroups: ['TOTW_OR_TOTS'] },
+      },
+    ]);
+  });
+
+  it('refuses to guess when neither label nor value names a meaning', () => {
+    expect(() =>
+      normaliseExtended([
+        { type: 'PLAYER_COUNT', eligibilitySlot: 1, eligibilityKey: 2, eligibilityValue: 1 },
+        rarityGroup(1, 7),
+        scopeEntry(1, 0),
+      ])
+    ).toThrow(/eligibilityKey 25/);
   });
 });
 
@@ -467,12 +753,15 @@ describe('fail-loud behaviour', () => {
     expect(() => normalise([scopeEntry(3, 1)])).toThrow(/eligibilitySlot 3/);
   });
 
-  it('throws when a requirement has no SCOPE entry', () => {
-    expect(() =>
+  it('defaults a slot with no SCOPE entry to a minimum instead of throwing', () => {
+    expect(
       normalise([
         { type: 'CHEMISTRY_POINTS', eligibilitySlot: 5, eligibilityKey: 35, eligibilityValue: 30 },
       ])
-    ).toThrow(/eligibilitySlot 5 has no scope modifier/);
+    ).toEqual({
+      constraints: [{ kind: 'CHEMISTRY_POINTS', value: 30, scope: DEFAULT_SCOPE }],
+      operation: 'AND',
+    });
   });
 
   it('throws on an unknown SCOPE value and names it', () => {

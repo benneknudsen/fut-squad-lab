@@ -14,7 +14,7 @@
  *       required,    // the constraint's value
  *       actual,      // the measured quantity
  *       shortfall,   // how far it must move; 0 when satisfied
- *       scope,       // GREATER | LOWER | EXACT
+ *       scope,       // GREATER | LOWER | EXACT (RANGE is refused)
  *       match,       // the constraint's match object when present
  *       unverified,  // true when the measure behind the number is inferred
  *       diagnostic,  // { id, params } — see the vocabulary below
@@ -22,7 +22,7 @@
  *     unverified: [{
  *       kind,        // the kind whose requirement could not be checked
  *       required,    // the constraint's value
- *       scope,       // GREATER | LOWER | EXACT
+ *       scope,       // GREATER | LOWER | EXACT (RANGE is refused)
  *       reason,      // machine-readable code explaining why, see below
  *       match,       // the constraint's match object when present
  *       diagnostic,  // { id, params } — see the vocabulary below
@@ -123,13 +123,14 @@
  * item fields: `nationIds` -> `nationId`, `leagueIds` -> `leagueId`,
  * `clubIds` -> `clubId`.
  *
- * `TEAM_RATING` is measured as the rounded mean of the 11 item ratings by
- * `meanRating` below. EA's real formula is not provably a plain mean, so every
- * default TEAM_RATING result is flagged `unverified: true`. `meanRating` is one
- * isolated function so the formula is one line to swap once issue #13 can
- * compare against EA's own display. A caller-supplied measure counts as
- * verified — the caller takes responsibility for the formula — and the kind
- * leaves `unverified`.
+ * `TEAM_RATING` is measured by `squadRating` below, which implements EA's
+ * adjusted-mean formula: ratings above the squad mean count twice, the adjusted
+ * average is rounded to two decimals, and one is added when its fractional part
+ * reaches 0.96. Every default TEAM_RATING result is still flagged
+ * `unverified: true`, because the formula has not been compared against EA's
+ * live display — matching the arithmetic is not the same as having observed it.
+ * A caller-supplied measure counts as verified — the caller takes
+ * responsibility for the formula — and the kind leaves `unverified`.
  *
  * A measure — default or override — must return a finite number. `Infinity`
  * could satisfy a GREATER constraint and turn a broken measurement into a false
@@ -267,13 +268,43 @@ const largestGroup = (players, read) => {
 };
 
 /**
- * Default TEAM_RATING measure: the rounded arithmetic mean of the player
- * ratings. EA's real formula is not verified to be a plain mean, so results
- * computed with this function are reported as unverified. Isolated so the swap
- * is one line.
+ * EA's squad-rating formula over the eleven item ratings. EA does not average
+ * plainly: a player above the squad mean contributes `2 * rating - mean`
+ * (counting the amount above the mean twice), the adjusted average is rounded
+ * to two decimals, and one is added to its integer part when the fractional
+ * part of that rounded average reaches 0.96. The result is an integer.
+ *
+ * The comparison is `rating <= mean`, so a player sitting exactly on the mean
+ * contributes its own rating, never the doubled form. The 0.96 threshold is
+ * applied to the two-decimal rounded average, not to the raw ratio, so
+ * `53.9669... -> 53.97 -> 54` while `80.9090... -> 80.91 -> 80`.
+ *
+ * A caller-supplied `options.measures.TEAM_RATING` replaces this function
+ * entirely; the default stays flagged `unverified` because this formula has not
+ * been compared against EA's live display (see the header).
+ *
+ * @param {Array<number>} ratings the eleven item ratings
+ * @returns {number} EA's integer squad rating; 0 for an empty list
  */
-const meanRating = (squad) =>
-  Math.round(squad.players.reduce((sum, player) => sum + player.rating, 0) / squad.players.length);
+export function squadRating(ratings) {
+  const count = ratings.length;
+  if (count === 0) return 0;
+
+  let total = 0;
+  for (const rating of ratings) total += rating;
+  const mean = total / count;
+
+  let adjustedTotal = 0;
+  for (const rating of ratings) {
+    adjustedTotal += rating <= mean ? rating : 2 * rating - mean;
+  }
+
+  const adjustedMean = adjustedTotal / count;
+  const rounded = Math.round(adjustedMean * 100) / 100;
+  const base = Math.floor(rounded);
+  const decimal = rounded - base;
+  return Math.round(decimal * 100) >= 96 ? base + 1 : base;
+}
 
 /**
  * Reads `squad.chemistry` in either supported form and returns `{ value }` for
@@ -407,7 +438,7 @@ export const MEASURES = Object.freeze({
     return squad.players.filter((player) => wanted.has(read(player))).length;
   },
 
-  TEAM_RATING: meanRating,
+  TEAM_RATING: (squad) => squadRating(squad.players.map((player) => player.rating)),
 });
 
 /**
@@ -575,6 +606,12 @@ const requireConstraint = (constraint, index) => {
   }
   if (typeof constraint.kind !== 'string' || constraint.kind.length === 0) {
     fail(`constraint ${index} must carry a string kind`);
+  }
+  if (constraint.scope === 'RANGE') {
+    fail(
+      `constraint ${index} carries the RANGE scope; a range comparison has two bounds and is` +
+        ' not measured here, so refusing beats treating it as an exact or a minimum'
+    );
   }
   if (!SCOPE_OPERATORS.includes(constraint.scope)) {
     fail(`Unknown scope ${JSON.stringify(constraint.scope)} on constraint ${index}`);

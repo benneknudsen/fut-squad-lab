@@ -493,7 +493,7 @@ describe('validateSquad over the captured club fixture', () => {
     expect(result).toEqual({ valid: true, failures: [], unverified: [] });
   });
 
-  it('[inference] measures TEAM_RATING as the rounded mean of the 11 item ratings', () => {
+  it("[inference] measures TEAM_RATING with EA's adjusted-mean formula (base squad 83)", () => {
     const result = validateSquad(baseSquad(), [{ kind: 'TEAM_RATING', value: 84, scope: 'GREATER' }]);
 
     expect(result.valid).toBe(false);
@@ -533,7 +533,7 @@ describe('validateSquad over the captured club fixture', () => {
     ]);
   });
 
-  it('[inference] tracks the actual mean when the ratings change instead of returning a constant', () => {
+  it('[inference] tracks the actual rating when the ratings change instead of returning a constant', () => {
     const flat = baseSquad().players.map((player) => ({ ...player, rating: 80 }));
     const flatResult = validateSquad(
       { players: flat, chemistry: 31 },
@@ -549,10 +549,10 @@ describe('validateSquad over the captured club fixture', () => {
     expect(raisedResult.failures).toHaveLength(1);
     expect(raisedResult.failures[0]).toMatchObject({
       required: 80,
-      actual: 82,
-      shortfall: 2,
+      actual: 83,
+      shortfall: 3,
       unverified: true,
-      diagnostic: { id: 'missing-rating', params: { points: 2 } },
+      diagnostic: { id: 'missing-rating', params: { points: 3 } },
     });
   });
 
@@ -752,6 +752,61 @@ describe('TEAM_RATING through adapter key 19', () => {
   });
 });
 
+describe("TEAM_RATING follows EA's adjusted-mean formula", () => {
+  // Hand-computed from the documented formula: the mean of the eleven ratings,
+  // every rating above the mean contributing `2 * rating - mean`, the result
+  // rounded to two decimals, and one added when the fractional part reaches
+  // 0.96. Each expectation below is arithmetic, not a re-run of the code.
+  const ratedSquad = (ratings) => ({
+    players: baseSquad().players.map((player, index) => ({ ...player, rating: ratings[index] })),
+    chemistry: 31,
+  });
+
+  it('doubles the contribution of every player above the mean', () => {
+    // [80 x5, 90 x6]: mean 85.4545..., every 90 contributes
+    // 2 * 90 - 85.4545... = 94.5454...; adjusted average 87.9338... -> 87.93
+    // -> 87. A plain average of 85.4545... would round to 85.
+    const squad = ratedSquad([80, 80, 80, 80, 80, 90, 90, 90, 90, 90, 90]);
+
+    expect(MEASURES.TEAM_RATING(squad)).toBe(87);
+  });
+
+  it('adds one when the two-decimal adjusted average reaches the 0.96 threshold', () => {
+    // [50 x5, 55 x6]: mean 52.7272..., every 55 contributes
+    // 2 * 55 - 52.7272... = 57.2727...; adjusted average 53.9669... -> 53.97,
+    // whose fractional part 0.97 >= 0.96, so the rating is 54. A plain average
+    // would round to 53, and flooring the adjusted average without the bump
+    // would also give 53.
+    const squad = ratedSquad([50, 50, 50, 50, 50, 55, 55, 55, 55, 55, 55]);
+
+    expect(MEASURES.TEAM_RATING(squad)).toBe(54);
+  });
+
+  it('does not double a player sitting exactly at the mean', () => {
+    // [70, 80 x9, 90]: the mean is exactly 80, so the nine 80s contribute 80
+    // each (not 2 * 80); only the 90 is above the mean, contributing 100.
+    // Adjusted average 890 / 11 = 80.9090... -> 80.91, decimal 0.91 < 0.96,
+    // so the rating is 80.
+    const squad = ratedSquad([70, 80, 80, 80, 80, 80, 80, 80, 80, 80, 90]);
+
+    expect(MEASURES.TEAM_RATING(squad)).toBe(80);
+  });
+
+  it("satisfies a TEAM_RATING requirement by EA's number, not the plain average", () => {
+    // The same [80 x5, 90 x6] squad: EA's rating is 87, the plain average 85.
+    const squad = ratedSquad([80, 80, 80, 80, 80, 90, 90, 90, 90, 90, 90]);
+
+    const passes = validateSquad(squad, [{ kind: 'TEAM_RATING', value: 86, scope: 'GREATER' }]);
+    expect(passes.valid).toBe(true);
+    expect(passes.failures).toEqual([]);
+
+    const fails = validateSquad(squad, [{ kind: 'TEAM_RATING', value: 88, scope: 'GREATER' }]);
+    expect(fails.valid).toBe(false);
+    expect(fails.failures).toHaveLength(1);
+    expect(fails.failures[0]).toMatchObject({ actual: 87, shortfall: 1 });
+  });
+});
+
 describe('validateSquad never mutates its input', () => {
   it('leaves the squad and the constraint array untouched', () => {
     const squad = baseSquad();
@@ -791,6 +846,12 @@ describe('validateSquad fails loud on malformed input', () => {
 
   it('throws when constraints is not an array', () => {
     expect(() => validateSquad(baseSquad(), null)).toThrow(/constraints must be an array/);
+  });
+
+  it('refuses a RANGE scope instead of degrading it to an exact or a minimum', () => {
+    expect(() =>
+      validateSquad(baseSquad(), [{ kind: 'CHEMISTRY_POINTS', value: 31, scope: 'RANGE' }])
+    ).toThrow(/RANGE.*not measured|not measured.*RANGE/);
   });
 
   it('throws when options is not an object', () => {
