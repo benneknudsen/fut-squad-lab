@@ -65,6 +65,7 @@ describe('manifest.json', () => {
       'src/ea/build.js',
       'src/ea/challenge-reader.js',
       'src/ea/club-reader.js',
+      'src/ea/observer.js',
       'src/ea/summary.js',
       'src/ui/copy.js',
       'src/ui/messages.js',

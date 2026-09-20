@@ -34,9 +34,11 @@ import {
  * criteria are now read instance-first with the prototype as a reported
  * fallback, the criteria' key names and types are reported before they are
  * used, and a page failure distinguishes EA throwing on our criteria from a
- * missing method.
+ * missing method. Incremented by #64: an observer wraps EA's own club methods
+ * and the panel hook, so the diagnostics block also carries how EA itself
+ * called them.
  */
-export const BUILD_ID = 'fsl-build/5';
+export const BUILD_ID = 'fsl-build/6';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact
