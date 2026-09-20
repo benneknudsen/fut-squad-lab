@@ -20,6 +20,16 @@ import { DIAGNOSTIC_STAGES, buildDiagnosticsReport } from '../src/ea/summary.js'
 const installOne = (observer, holder, method = 'method', id = `fake.${method}`) =>
   observer.install([{ id, holder, method }]);
 
+// Issue #67: the default origin classifier reads the innermost frame that is
+// not this module's own machinery, so the tests need real frame URLs. The
+// calling code runs inside a function whose source URL is the EA page (or the
+// extension), which gives a genuine stack for both directions.
+const EA_SCRIPT_URL = 'https://www.ea.com/ut/fake-ea.js';
+const EXTENSION_SCRIPT_URL = 'chrome-extension://fsl-fake/src/ea/club-reader.js';
+
+const callFrom = (url, holder, body) =>
+  new Function('holder', `return ${body}\n//# sourceURL=${url}`)(holder);
+
 describe('call-through fidelity', () => {
   const cases = [
     ['a function', () => {}],
@@ -196,6 +206,123 @@ describe('what is recorded', () => {
   });
 });
 
+describe('origin classification', () => {
+  it('labels a call our own code makes as ours', () => {
+    const holder = { method: () => 'ok' };
+    const observer = createMethodObserver();
+    installOne(observer, holder);
+
+    callFrom(EXTENSION_SCRIPT_URL, holder, 'holder.method()');
+
+    expect(observer.report().calls[0].origin).toBe('extension');
+  });
+
+  it('labels a script with no extension frame as EA, never ours', () => {
+    const holder = { method: () => 'ok' };
+    const observer = createMethodObserver();
+    installOne(observer, holder);
+
+    callFrom(EA_SCRIPT_URL, holder, 'holder.method()');
+    holder.method();
+
+    const [fromEa, fromNoFrame] = observer.report().calls;
+    expect(fromEa.origin).toBe('ea');
+    expect(fromNoFrame.origin).not.toBe('extension');
+  });
+
+  it('labels a nested EA call as EA, not ours, because EA issued it', () => {
+    const items = ['item'];
+    const holder = {
+      clubDao: {
+        getClubItems() {
+          return items;
+        },
+      },
+    };
+    holder.search = new Function(
+      `return this.clubDao.getClubItems()\n//# sourceURL=${EA_SCRIPT_URL}`
+    );
+    const observer = createMethodObserver();
+    observer.install([
+      { id: 'services.Club.search', holder, method: 'search' },
+      { id: 'services.Club.clubDao.getClubItems', holder: holder.clubDao, method: 'getClubItems' },
+    ]);
+
+    const result = callFrom(EXTENSION_SCRIPT_URL, holder, 'holder.search()');
+
+    const calls = observer.report().calls;
+    expect(result).toBe(items);
+    expect(calls.map((call) => call.method)).toEqual([
+      'services.Club.search',
+      'services.Club.clubDao.getClubItems',
+    ]);
+    expect(calls[0].origin).toBe('extension');
+    expect(calls[1].origin).toBe('ea');
+    expect(calls[0].nested).toBe(false);
+    expect(calls[1].nested).toBe(true);
+  });
+});
+
+describe('nesting', () => {
+  it('tracks two and three levels of nesting and resets after the top-level call', () => {
+    const holder = {
+      one() {
+        holder.two();
+      },
+      two() {
+        holder.three();
+      },
+      three() {
+        return 'done';
+      },
+    };
+    const observer = createMethodObserver();
+    observer.install([
+      { id: 'fake.one', holder, method: 'one' },
+      { id: 'fake.two', holder, method: 'two' },
+      { id: 'fake.three', holder, method: 'three' },
+    ]);
+
+    holder.one();
+    holder.three();
+
+    expect(observer.report().calls.map((call) => [call.method, call.nested])).toEqual([
+      ['fake.one', false],
+      ['fake.two', true],
+      ['fake.three', true],
+      ['fake.three', false],
+    ]);
+  });
+
+  it('resets the nesting state after a throwing top-level call', () => {
+    const boom = new Error('EA blew up');
+    let throwNow = true;
+    const holder = {
+      outer() {
+        holder.inner();
+        if (throwNow) throw boom;
+        return 'ok';
+      },
+      inner: () => 'inner',
+    };
+    const observer = createMethodObserver();
+    observer.install([
+      { id: 'fake.outer', holder, method: 'outer' },
+      { id: 'fake.inner', holder, method: 'inner' },
+    ]);
+
+    expect(() => holder.outer()).toThrow(boom);
+    throwNow = false;
+    holder.inner();
+
+    expect(observer.report().calls.map((call) => [call.method, call.nested, call.threw])).toEqual([
+      ['fake.outer', false, true],
+      ['fake.inner', true, false],
+      ['fake.inner', false, false],
+    ]);
+  });
+});
+
 describe('install and remove', () => {
   it('restores the original function on remove and records nothing after', () => {
     const original = vi.fn(() => 'value');
@@ -224,6 +351,53 @@ describe('install and remove', () => {
     observer.remove();
 
     expect(Object.hasOwn(holder, 'method')).toBe(false);
+    expect(holder.method).toBe(original);
+  });
+
+  it('leaves a method someone else replaced after installation alone on remove', () => {
+    const original = () => 'original';
+    const holder = { method: original };
+    const observer = createMethodObserver();
+    installOne(observer, holder);
+    const replacement = () => 'replacement';
+
+    holder.method = replacement;
+    observer.remove();
+
+    expect(holder.method).toBe(replacement);
+  });
+
+  it('wraps once when two observers watch the same method', () => {
+    const original = vi.fn(() => 'ok');
+    const holder = { method: original };
+    const first = createMethodObserver();
+    const second = createMethodObserver();
+    installOne(first, holder);
+
+    const wrapped = holder.method;
+    installOne(second, holder);
+
+    expect(holder.method).toBe(wrapped);
+    holder.method();
+    expect(original).toHaveBeenCalledTimes(1);
+    expect(first.report().calls).toHaveLength(1);
+    expect(second.report().calls).toHaveLength(0);
+
+    second.remove();
+    expect(holder.method).toBe(wrapped);
+    first.remove();
+    expect(holder.method).toBe(original);
+  });
+
+  it('is safe to remove twice', () => {
+    const original = () => 'ok';
+    const holder = { method: original };
+    const observer = createMethodObserver();
+    installOne(observer, holder);
+
+    observer.remove();
+    expect(holder.method).toBe(original);
+    expect(() => observer.remove()).not.toThrow();
     expect(holder.method).toBe(original);
   });
 
@@ -286,6 +460,25 @@ describe('formatObserverCall', () => {
     expect(line).toContain('count:number');
     expect(line).toContain('values{count:25}');
     expect(line).toContain('string(non-empty)');
+  });
+
+  it('shows the nested flag on the line so the log states it outright', () => {
+    const holder = {
+      outer() {
+        return holder.inner();
+      },
+      inner: () => 'ok',
+    };
+    const observer = createMethodObserver();
+    observer.install([
+      { id: 'fake.outer', holder, method: 'outer' },
+      { id: 'fake.inner', holder, method: 'inner' },
+    ]);
+    holder.outer();
+
+    const [outer, inner] = observer.report().calls;
+    expect(formatObserverCall(outer)).toContain('nested=false');
+    expect(formatObserverCall(inner)).toContain('nested=true');
   });
 
   it('never prints a value the allowlist did not permit', () => {
