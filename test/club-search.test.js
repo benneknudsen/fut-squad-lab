@@ -391,3 +391,110 @@ describe('the criteria report (#61)', () => {
     expect(result.criteria.shape.keys).toEqual([{ name: '<redacted>', type: 'number' }]);
   });
 });
+
+// Issue #65: the criteria handed to EA must carry `untradeables` as a STRING
+// and the named page size, and the club DAO's stats cache is reset when the
+// page provides it. The string type is the deliberate part: EA lower-cases the
+// value, so a boolean would silently look right to a careless test.
+describe('the criteria initialisation (#65)', () => {
+  const searchWindow = (search, club = {}) => ({
+    UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
+    services: { Club: { search, ...club } },
+  });
+
+  it('sets untradeables as a string, never a boolean', async () => {
+    const { calls, search } = pagedSearch([[{ id: 1 }], []]);
+
+    const result = await resolveClubItems(searchWindow(search), { pacer: testPacer });
+
+    expect(result.ok).toBe(true);
+    expect(typeof calls[0].untradeables).toBe('string');
+    expect(calls[0].untradeables).toBe('false');
+  });
+
+  it('sets the untradeables-only path to "true" and the other path to "false"', async () => {
+    const onlyUntradeables = pagedSearch([[{ id: 1 }], []]);
+    await resolveClubItems(searchWindow(onlyUntradeables.search), {
+      pacer: testPacer,
+      onlyUntradeables: true,
+    });
+    expect(onlyUntradeables.calls[0].untradeables).toBe('true');
+    expect(typeof onlyUntradeables.calls[0].untradeables).toBe('string');
+
+    const notOnly = pagedSearch([[{ id: 1 }], []]);
+    await resolveClubItems(searchWindow(notOnly.search), {
+      pacer: testPacer,
+      onlyUntradeables: false,
+    });
+    expect(notOnly.calls[0].untradeables).toBe('false');
+    expect(notOnly.calls[0].untradeables).not.toBe(false);
+  });
+
+  it('sets count to the named page-size constant on every page', async () => {
+    const { calls, search } = pagedSearch([[{ id: 1 }, { id: 2 }], [{ id: 3 }], []]);
+
+    await resolveClubItems(searchWindow(search), { pacer: testPacer });
+
+    expect(calls.every((criteria) => criteria.count === CLUB_SEARCH_PAGE_SIZE)).toBe(true);
+  });
+
+  it('resets the club stats cache when present and treats its absence as normal', async () => {
+    const resetStatsCache = vi.fn();
+    const withCache = pagedSearch([[{ id: 1 }], []]);
+
+    const reset = await resolveClubItems(searchWindow(withCache.search, { clubDao: { resetStatsCache } }), {
+      pacer: testPacer,
+    });
+
+    expect(reset.ok).toBe(true);
+    expect(resetStatsCache).toHaveBeenCalledTimes(1);
+    expect(reset.criteria.statsCache).toBe('reset');
+
+    const withoutCache = pagedSearch([[{ id: 1 }], []]);
+    const absent = await resolveClubItems(searchWindow(withoutCache.search), { pacer: testPacer });
+
+    expect(absent.ok).toBe(true);
+    expect(absent.criteria.statsCache).toBe('absent');
+  });
+
+  it('does not lose the read when resetStatsCache throws', async () => {
+    const { search } = pagedSearch([[{ id: 1 }], []]);
+    const resetStatsCache = vi.fn(() => {
+      throw new Error('cache exploded');
+    });
+
+    const result = await resolveClubItems(searchWindow(search, { clubDao: { resetStatsCache } }), {
+      pacer: testPacer,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.criteria.statsCache).toMatch(/threw/);
+  });
+
+  it('names the criteria fields it set in the summary and in a failed page reason', async () => {
+    const { search } = pagedSearch([[{ id: 1 }], []]);
+    const read = await resolveClubItems(searchWindow(search), { pacer: testPacer });
+
+    expect(read.criteria.setFields).toEqual([
+      { name: 'untradeables', type: 'string' },
+      { name: 'count', type: 'number' },
+      { name: 'offset', type: 'number' },
+    ]);
+
+    const timedOut = await resolveClubItems(searchWindow(() => neverFires()), {
+      observableTimeoutMs: 20,
+      pacer: testPacer,
+    });
+    expect(timedOut.attempts[0].reason).toContain('untradeables');
+  });
+
+  it('never hands the criteria to EA, or reports set fields, when they cannot be read', async () => {
+    const search = vi.fn();
+
+    const result = await resolveClubItems({ services: { Club: { search } } }, { pacer: testPacer });
+
+    expect(search).not.toHaveBeenCalled();
+    expect(result.criteria.ok).toBe(false);
+    expect(Object.hasOwn(result.criteria, 'setFields')).toBe(false);
+  });
+});
