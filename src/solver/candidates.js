@@ -27,8 +27,9 @@
  * order. `owners` and `collected` say whether a copy is owned, not how many
  * spare copies exist, so they cannot identify fodder duplicates on their own
  * and are not used for this. The cost model (#6) weighs an untradeable
- * duplicate at 0.20 against 0.40 for a non-duplicate, which is why the rule is
- * fixed and tested here instead of guessed at in the pricing layer.
+ * duplicate at 0.10 against 0.70 for a non-duplicate (a borrowed published
+ * heuristic; see `prices.js`), which is why the rule is fixed and tested here
+ * instead of guessed at in the pricing layer.
  *
  * ## Rating bands
  *
@@ -80,7 +81,7 @@
  * "Cheapest" means the state-aware weighted contribution from `prices.js`, not
  * the raw market value. A card's contribution is its resolved price multiplied
  * by the weight of the state the solver would spend, so an untradeable
- * duplicate priced at 1000 coins contributes 0.20 * 1000 = 200 and must outrank
+ * duplicate priced at 1000 coins contributes 0.10 * 1000 = 100 and must outrank
  * a tradeable card priced at 300. The trimmer is the first consumer of the
  * cost model; a group can only be capped correctly if the ranking uses it.
  *

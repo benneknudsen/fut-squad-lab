@@ -274,9 +274,13 @@ that the inline copy is a faithful subset of `copy.*.json`.
 These are the places where the design records a choice that the solver's real behaviour should
 confirm. None of them block implementation.
 
-1. **Cost weights.** The four fodder weights (duplicate 0.20, untradeable 0.40, tradeable 1.00,
-   concept 1.00) are plausible defaults, not tuned values. The sliders expose them so a player
-   can correct them without a new build.
+1. **Cost weights.** The four fodder weights (duplicate 0.10, untradeable 0.70, tradeable 1.00,
+   concept 2.00) are a **borrowed published heuristic**: the percentages SBC Monkey describes in
+   its public documentation for how it values fodder. This project is not affiliated with SBC
+   Monkey, and the numbers are not claimed to be tuned, measured or correct — they are someone
+   else's reasonable defaults, adopted because they are more defensible than values we invented.
+   The sliders expose them so a player can correct them without a new build, which is exactly why
+   they remain configurable.
 2. **Per-row cost contribution.** The panel shows a card's weighted contribution (`320`), not
    its market value, on the theory that consuming an untradeable card costs you less than
    consuming a tradeable one. If the solver prices differently, the row shows whatever the

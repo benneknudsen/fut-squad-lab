@@ -94,19 +94,21 @@ describe('the pinned decode is unchanged through the new plumbing', () => {
   it('solves set 16 challenge 35 to the pinned cost and validity', () => {
     const result = solve(set16.challenges[0], POOL, options());
 
-    // 769 is the pre-change observation pinned in test/prices-coverage.test.js,
-    // not recomputed from the code under test.
+    // 1199.5 is the observation pinned in test/prices-coverage.test.js, re-pinned
+    // there by issue #60 when the borrowed published fodder weights changed the
+    // cost; it is not recomputed from the code under test.
     expect(result.valid).toBe(true);
-    expect(result.cost).toBe(769);
+    expect(result.cost).toBe(1199.5);
     expect(result.failures).toEqual([]);
   });
 
   it('decodes set 10 challenge 25 to the pinned failures', () => {
     const result = solve(set10.challenges[0], POOL, options());
 
-    // 829 is the pre-change observation pinned in test/prices-coverage.test.js.
+    // 1304.5 is the observation pinned in test/prices-coverage.test.js,
+    // re-pinned there by issue #60.
     expect(result.valid).toBe(false);
-    expect(result.cost).toBe(829);
+    expect(result.cost).toBe(1304.5);
     const nationCount = result.failures.find(({ kind }) => kind === 'NATION_COUNT');
     expect(nationCount).toMatchObject({ required: 2, scope: 'EXACT' });
   });

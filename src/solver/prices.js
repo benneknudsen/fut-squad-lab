@@ -18,16 +18,39 @@
  *      never appear in `src/solver/`.
  *
  * Precedence: a usable external price always wins; otherwise `marketAverage`;
- * otherwise `discardValue`; otherwise the price is unknown. `marketMin` and
- * `marketMax` are deliberately not used: they are a listing range, not a
- * resolved value.
+ * otherwise `discardValue`; otherwise the rating estimate below; otherwise the
+ * price is unknown. `marketMin` and `marketMax` are deliberately not used: they
+ * are a listing range, not a resolved value.
  *
  * A concept card is a card the user does not own, so EA has no price data for
  * it and it has no club record at all. `mergePrices` therefore never applies
- * the EA fallback to a concept card: it can only be priced externally, or be
- * left unknown. Without the external table, a concept card sorts and costs as
- * unknown, which is honest — the solver must not pretend a card it cannot price
- * is free.
+ * the EA fallback or the rating estimate to a concept card: it can only be
+ * priced externally, or be left unknown. Without the external table, a concept
+ * card sorts and costs as unknown, which is honest — the solver must not
+ * pretend a card it cannot price is free.
+ *
+ * ## Rating estimate for a card with no price at all
+ *
+ * An owned card whose payload carries neither `marketAverage` nor
+ * `discardValue` has no value from any source. Rather than leave it unknown,
+ * `mergePrices` estimates one from the market values of the other records in
+ * the same call, at the same rating:
+ *
+ *   - the estimate is the `P60_PERCENTILE` (0.6, nearest rank) of the
+ *     `marketAverage`/external prices of records with an exactly equal rating
+ *     (`SIMILAR_RATING_RADIUS` is 0; see the constant's comment for why);
+ *   - the population is *quoted* prices only — an estimated or
+ *     `discardValue`-only price never feeds another estimate, so estimates
+ *     cannot chain;
+ *   - at least `MIN_ESTIMATE_SAMPLES` (3) same-rating quotes must exist. With
+ *     fewer, no estimate is made and the price stays unknown (`'none'`, never
+ *     a silent zero). A record without a finite rating can never be placed in
+ *     the population and is treated the same way.
+ *
+ * An estimate is recorded with its own `PRICE_SOURCES.ratingEstimate`, so a
+ * caller can always tell an estimated price from a quoted one. The rule is a
+ * borrowed published heuristic (see `DEFAULT_WEIGHTS` below), and the constant
+ * names make it one reviewable decision rather than an inline formula.
  *
  * ## `null` means unknown, never zero
  *
@@ -55,11 +78,20 @@
  *
  * ## Weights
  *
- * `DEFAULT_WEIGHTS` carries the design contract's defaults
- * (`design/README.md` §12): duplicate 0.20, untradeable 0.40, tradeable 1.00,
- * concept 1.00. They are plausible defaults, not tuned values, and the design
- * exposes all four as options sliders — so they are a plain exported object,
- * overridable per call, never constants baked into the arithmetic.
+ * `DEFAULT_WEIGHTS` is a **borrowed published heuristic**: the percentages SBC
+ * Monkey describes in its public documentation for how it values fodder
+ * (duplicate 0.10, untradeable 0.70, tradeable 1.00, concept 2.00). SBC Monkey
+ * is third-party software this project is not affiliated with; the numbers are
+ * quoted as facts about a published rule, not as measurements, and they are
+ * not claimed to be tuned or correct. They replaced values we had invented,
+ * which makes them more defensible, not proven. The concept weight exists
+ * because using a concept card means manually buying it from the market, so a
+ * solution that prefers one over fodder the user already holds cannot be
+ * actioned as-is.
+ *
+ * The design contract (`design/README.md` §12.1) names these as its defaults
+ * and exposes all four as options sliders — so they are a plain exported
+ * object, overridable per call, never constants baked into the arithmetic.
  *
  * ## Unknown prices are never the cheaper choice, and never `Infinity`
  *
@@ -120,15 +152,18 @@ export const CARD_STATES = Object.freeze([
 ]);
 
 /**
- * The design contract's default weights, keyed by card state. Exported so a
- * caller can seed its sliders from them, and frozen because callers override
- * through `itemCost`'s second argument rather than by mutating this object.
+ * The design contract's default weights, keyed by card state. A borrowed
+ * published heuristic from SBC Monkey's public documentation (facts only; no
+ * affiliation, and no claim that the numbers are tuned or correct); see the
+ * header. Exported so a caller can seed its sliders from them, and frozen
+ * because callers override through `itemCost`'s second argument rather than by
+ * mutating this object.
  */
 export const DEFAULT_WEIGHTS = Object.freeze({
-  untradeableDuplicate: 0.2,
-  untradeable: 0.4,
+  untradeableDuplicate: 0.1,
+  untradeable: 0.7,
   tradeable: 1,
-  concept: 1,
+  concept: 2,
 });
 
 /** Where a resolved price came from, for display and for debugging. */
@@ -136,8 +171,33 @@ export const PRICE_SOURCES = Object.freeze({
   external: 'external',
   marketAverage: 'ea-market-average',
   discardValue: 'ea-discard-value',
+  ratingEstimate: 'rating-p60-estimate',
   none: 'none',
 });
+
+/**
+ * The percentile of same-rated market values used to estimate a card with no
+ * price at all, using the nearest-rank definition: the sorted population's
+ * element at `ceil(P60_PERCENTILE * count) - 1`.
+ */
+export const P60_PERCENTILE = 0.6;
+
+/**
+ * How far a reference card's rating may differ from the card being estimated
+ * and still count as "similarly rated". Fixed at 0 — an exact rating match —
+ * because rating is the dominant price driver and a band would blend the price
+ * of a cheaper rating into the estimate. Named rather than inlined so the rule
+ * is one decision with one test.
+ */
+export const SIMILAR_RATING_RADIUS = 0;
+
+/**
+ * The minimum number of same-rating quoted market values needed to compute an
+ * estimate. Three is the smallest population that has a middle; with one or
+ * two values the P60 nearest rank is effectively the maximum, which is not an
+ * estimate worth reporting. Below this count the price stays unknown, never 0.
+ */
+export const MIN_ESTIMATE_SAMPLES = 3;
 
 /**
  * The cost contribution of a record whose price is unknown: `null`, not
@@ -295,6 +355,11 @@ const readEaPrice = (record, field, index) => {
   return value;
 };
 
+/**
+ * First-pass price resolution for one record: a quoted source only. The
+ * rating estimate is deliberately not here — it needs every record's resolved
+ * price, so `mergePrices` applies it in a second pass.
+ */
 const resolvePrice = (record, table, cardState, index) => {
   const externalPrice = readExternalPrice(table, record);
   if (externalPrice !== null) {
@@ -314,16 +379,64 @@ const resolvePrice = (record, table, cardState, index) => {
   return { price: null, priceSource: PRICE_SOURCES.none };
 };
 
+const isQuotedSource = (priceSource) =>
+  priceSource === PRICE_SOURCES.marketAverage || priceSource === PRICE_SOURCES.external;
+
 /**
- * Resolves a price and its source for every record, and attaches the classified
- * `cardState`. Returns new records in input order; the input is never mutated.
- * Passing no external table at all is valid and is the offline path.
+ * Buckets the quoted market values of the batch by rating, in input order.
+ * Only `marketAverage` and external prices count: they are the market values
+ * the P60 rule is defined over, while a `discardValue` is a quick-sell price
+ * and an estimate must never feed another estimate. `similarValues` sorts the
+ * values it returns, so the buckets themselves need no order.
+ */
+const buildRatingIndex = (records, resolved) => {
+  const byRating = new Map();
+  records.forEach((record, index) => {
+    const { price, priceSource } = resolved[index];
+    if (!isQuotedSource(priceSource) || !Number.isFinite(record.rating)) return;
+    const values = byRating.get(record.rating);
+    if (values === undefined) byRating.set(record.rating, [price]);
+    else values.push(price);
+  });
+  return byRating;
+};
+
+/**
+ * The market values of the ratings within `SIMILAR_RATING_RADIUS` of `rating`,
+ * ascending. With the radius at its documented 0 this is one exact-rating
+ * bucket; wider radii merge neighbouring buckets, so the constant is the only
+ * place the "similarly rated" rule lives.
+ */
+const similarValues = (byRating, rating) => {
+  const values = [];
+  const lowest = rating - SIMILAR_RATING_RADIUS;
+  const highest = rating + SIMILAR_RATING_RADIUS;
+  for (let candidate = lowest; candidate <= highest; candidate++) {
+    const bucket = byRating.get(candidate);
+    if (bucket !== undefined) values.push(...bucket);
+  }
+  values.sort((left, right) => left - right);
+  return values;
+};
+
+/** Nearest rank: the sorted population's element at `ceil(fraction * count) - 1`. */
+const nearestRankPercentile = (sortedValues, fraction) =>
+  sortedValues[Math.ceil(fraction * sortedValues.length) - 1];
+
+/**
+ * Resolves a price and its source for every record, attaches the classified
+ * `cardState`, and estimates a price from the batch's same-rating market
+ * values for an owned record no source could price (see the header). Returns
+ * new records in input order; the input is never mutated. Passing no external
+ * table at all is valid and is the offline path.
  *
  * @param {Array<object>} records stable records, e.g. from `normaliseClub`
  * @param {Map|object|null} [externalPrices] `assetId` -> finite, non-negative
  *   price; malformed entries are ignored
  * @returns {Array<object>} each input record plus `{ cardState, price,
- *   priceSource }`
+ *   priceSource }`; `priceSource` is `PRICE_SOURCES.ratingEstimate` when the
+ *   price is an estimate rather than a quote, and `PRICE_SOURCES.none` when no
+ *   estimate was possible either
  * @throws {Error} when the record list is sparse, a record is not an object,
  *   `classifyCardState` rejects it, an EA price field is malformed, or
  *   `externalPrices` is neither a `Map` nor a plain object
@@ -331,12 +444,31 @@ const resolvePrice = (record, table, cardState, index) => {
 export function mergePrices(records, externalPrices) {
   requireDenseArray(records, 'mergePrices: records');
   const table = resolveExternalTable(externalPrices);
-  return records.map((record, index) => {
+  const resolved = records.map((record, index) => {
     if (record === null || typeof record !== 'object' || Array.isArray(record)) {
       fail(`mergePrices: records[${index}] must be a record object`);
     }
     const cardState = classifyCardState(record);
-    const { price, priceSource } = resolvePrice(record, table, cardState, index);
+    return { cardState, ...resolvePrice(record, table, cardState, index) };
+  });
+  const byRating = buildRatingIndex(records, resolved);
+  return records.map((record, index) => {
+    const { cardState, price, priceSource } = resolved[index];
+    if (
+      priceSource === PRICE_SOURCES.none &&
+      cardState !== 'concept' &&
+      Number.isFinite(record.rating)
+    ) {
+      const values = similarValues(byRating, record.rating);
+      if (values.length >= MIN_ESTIMATE_SAMPLES) {
+        return {
+          ...record,
+          cardState,
+          price: nearestRankPercentile(values, P60_PERCENTILE),
+          priceSource: PRICE_SOURCES.ratingEstimate,
+        };
+      }
+    }
     return { ...record, cardState, price, priceSource };
   });
 }
