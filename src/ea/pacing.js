@@ -10,6 +10,9 @@
  * - a minimum gap between call *starts*, jittered upward so calls do not land
  *   in lockstep;
  * - an explicit, narrow retry policy with bounded exponential backoff;
+ * - a per-call bound on every task, so a promise EA never settles cannot wedge
+ *   the queue: the entry is abandoned with a reason naming the timeout and the
+ *   queue moves on, while the underlying promise is left to settle on its own;
  * - cancellable waits, so a cancel never leaves a timer running and a solve
  *   never becomes unresponsive while waiting;
  * - counters (`calls`, `waits`, `retries`, `waitedMs`) a diagnostic can report.
@@ -44,6 +47,21 @@ export const BACKOFF_BASE_MS = 2500;
 
 /** Hard ceiling on any backoff delay, applied after jitter. */
 export const BACKOFF_MAX_MS = 20000;
+
+/**
+ * The bound on one task attempt. Reads already settle through the observable
+ * bridge's own 5 s timeout, so this is the outer bound that also covers save
+ * promises, which carry no such timeout. It is deliberately longer than the
+ * read timeout so a read still settles through its own bridge and keeps its
+ * retry semantics.
+ *
+ * When the bound fires the entry is abandoned: `run` rejects with a reason
+ * naming the timeout, `inFlight` clears and the queue continues. The pacer
+ * cannot cancel EA's own call, so the underlying promise is left to settle on
+ * its own and its outcome is ignored. An abandoned call is never retried:
+ * repeating a write whose completion is unknown could duplicate its effect.
+ */
+export const DEFAULT_TASK_TIMEOUT_MS = 30_000;
 
 /**
  * Attempts for a call kind the budget table does not name. One attempt: an
@@ -199,7 +217,12 @@ export function backoffDelay(attempt, options = {}) {
  * squad, while a 475 from a read is the transient "slow down" condition. The
  * two interpretations never share a branch.
  *
- * @param {{ status?: number, message?: string }|Error} error the failed call
+ * A pacing task timeout (`error.pacingTimedOut`) is never retried: an
+ * abandoned call has an unknown outcome, and repeating a write could duplicate
+ * its effect. It is checked before the message pattern so the decision does not
+ * depend on the timeout error's wording.
+ *
+ * @param {{ status?: number, message?: string, pacingTimedOut?: boolean }|Error} error the failed call
  * @param {{ kind?: string }} [context] the call kind the failure happened in
  * @returns {{ retry: boolean, reason: string }} frozen decision; `reason` is
  *   always a non-empty sentence a diagnostic can print
@@ -209,6 +232,12 @@ export function classifyFailure(error, context = {}) {
   const message = describeError(error);
   const kind = context.kind ?? CALL_KINDS.READ;
 
+  if (error?.pacingTimedOut === true) {
+    return Object.freeze({
+      retry: false,
+      reason: `the call did not settle within its pacing timeout; an abandoned call is not retried: ${message}`,
+    });
+  }
   if (status === DUAL_STATUS) {
     if (INELIGIBLE_SQUAD_PATTERN.test(message)) {
       return Object.freeze({
@@ -248,6 +277,16 @@ const cancelledError = (label) => {
   return error;
 };
 
+const taskTimeoutError = (label, timeoutMs) => {
+  const error = new Error(
+    `pacing: '${label}' did not settle within ${timeoutMs}ms; the entry was abandoned so the` +
+      ' queue can continue, and the underlying call is left to settle on its own'
+  );
+  error.name = 'TimeoutError';
+  error.pacingTimedOut = true;
+  return error;
+};
+
 const exhaustedError = (error, attempts, budget, decision) => {
   const wrapped = new Error(
     `attempt budget of ${budget} exhausted after ${attempts} attempts: ${describeError(error)}`
@@ -278,8 +317,9 @@ export function defaultPacer() {
  * caller with a different configuration; production uses the defaults.
  *
  * @param {{ minGapMs?: number, submitGapMs?: number, jitterRatio?: number,
- *   backoffBaseMs?: number, backoffMaxMs?: number, random?: () => number,
- *   budgets?: object }} [options]
+ *   backoffBaseMs?: number, backoffMaxMs?: number, taskTimeoutMs?: number,
+ *   random?: () => number, budgets?: object }} [options] `taskTimeoutMs`
+ *   bounds one task attempt and defaults to `DEFAULT_TASK_TIMEOUT_MS`
  * @returns {{ run: Function, cancel: Function, reset: Function,
  *   snapshot: Function }}
  *   `run(label, task, { kind, budget })` queues one call and resolves with the
@@ -293,6 +333,7 @@ export function createPacer(options = {}) {
   const jitterRatio = resolveNumber(options.jitterRatio, JITTER_RATIO, 0);
   const backoffBaseMs = resolveNumber(options.backoffBaseMs, BACKOFF_BASE_MS, 0);
   const backoffMaxMs = resolveNumber(options.backoffMaxMs, BACKOFF_MAX_MS, 0);
+  const taskTimeoutMs = resolveNumber(options.taskTimeoutMs, DEFAULT_TASK_TIMEOUT_MS, 1);
   const random = typeof options.random === 'function' ? options.random : Math.random;
   const budgets = isRecord(options.budgets) ? { ...ATTEMPT_BUDGETS, ...options.budgets } : ATTEMPT_BUDGETS;
 
@@ -315,6 +356,7 @@ export function createPacer(options = {}) {
     });
 
   const wait = (ms) => {
+    if (cancelled) return Promise.reject(cancelledError('a paced wait'));
     counters.waits += 1;
     counters.waitedMs += ms;
     return new Promise((resolve, reject) => {
@@ -325,6 +367,35 @@ export function createPacer(options = {}) {
       activeWait = { timer, reject };
     });
   };
+
+  /**
+   * Runs one task attempt under the task bound. The returned promise always
+   * settles: on the task's own outcome, or on the timeout. When the timeout
+   * wins, handlers stay attached to the task promise so a later settlement can
+   * neither reject unhandled nor resume the queue twice.
+   */
+  const runWithTimeout = (entry, attempt) =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(taskTimeoutError(entry.label, taskTimeoutMs)),
+        taskTimeoutMs
+      );
+      const settle = (outcome, value) => {
+        clearTimeout(timer);
+        outcome(value);
+      };
+      let returned;
+      try {
+        returned = entry.task(attempt);
+      } catch (error) {
+        settle(reject, error);
+        return;
+      }
+      Promise.resolve(returned).then(
+        (value) => settle(resolve, value),
+        (error) => settle(reject, error)
+      );
+    });
 
   const execute = async (entry) => {
     const budget = resolveBudget(entry.kind, entry.budget, budgets);
@@ -345,10 +416,11 @@ export function createPacer(options = {}) {
       counters.calls += 1;
       lastStartedAt = Date.now();
       try {
-        return await entry.task(attempt);
+        return await runWithTimeout(entry, attempt);
       } catch (error) {
         const decision = classifyFailure(error, { kind: entry.kind });
         if (decision.retry !== true) throw error;
+        if (cancelled) throw cancelledError(entry.label);
         if (attempt >= budget) throw exhaustedError(error, attempt, budget, decision);
         counters.retries += 1;
         await wait(
