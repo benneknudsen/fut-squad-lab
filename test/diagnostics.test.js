@@ -554,6 +554,7 @@ describe('the diagnostics block is safe to paste', () => {
 describe('the diagnostic path never sends anything anywhere', () => {
   const diagnosticModules = [
     'src/ea/adapter.js',
+    'src/ea/build.js',
     'src/ea/summary.js',
     'src/ea/solve-service.js',
     'src/page-bridge-app.js',

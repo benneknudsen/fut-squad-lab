@@ -16,6 +16,8 @@
  * no chrome APIs, no network.
  */
 
+import { BUILD_ID, buildMarker } from './build.js';
+
 /**
  * The number of constraints in a read challenge: one per distinct
  * `eligibilitySlot`, because entries in a slot describe a single requirement
@@ -67,7 +69,7 @@ export function buildReadSummary({ challenge, clubResult }) {
       ? 'challenge not detected'
       : `challenge "${challenge.name}" (id ${challenge.challengeId}, ${challenge.formation}),` +
         ` ${countConstraints(challenge)} constraints`;
-  return `FUT Squad Lab: ${challengePart} | ${describeClub(clubResult)}`;
+  return `FUT Squad Lab [${BUILD_ID}]: ${challengePart} | ${describeClub(clubResult)}`;
 }
 
 const describeCost = (result) => {
@@ -176,15 +178,20 @@ export function completeStages(recorded) {
  * Builds the one structured diagnostic report for a Solve from the stages the
  * pipeline recorded. `ok` is true only when every stage finished; `stoppedAt`
  * names the first stage that did not, so a reader can say where the chain
- * stopped without a debugger. A stage outcome that was never recorded is a
- * defect and throws naming the stage.
+ * stopped without a debugger. `build` states which build produced the report
+ * and the reader-chain ids it compiled, so a stale module beside fresh code is
+ * visible in the pasted block itself (#50). A stage outcome that was never
+ * recorded is a defect and throws naming the stage.
  *
  * @param {Array<object>} stages the stages recorded by `createSolveService`
- * @returns {{ schema: string, ok: boolean, stoppedAt: string|null,
+ * @param {{ id: string, readers: object }} [build] the build marker; defaults
+ *   to this build's `buildMarker()`, injectable so a test can prove the report
+ *   reports the marker it was handed
+ * @returns {{ schema: string, build: object, ok: boolean, stoppedAt: string|null,
  *   stages: Array<object> }}
  * @throws {Error} when a stage outcome is missing, unknown or duplicated
  */
-export function buildDiagnosticsReport(stages) {
+export function buildDiagnosticsReport(stages, build = buildMarker()) {
   if (!Array.isArray(stages)) {
     throw new Error('buildDiagnosticsReport: stages must be an array');
   }
@@ -207,6 +214,7 @@ export function buildDiagnosticsReport(stages) {
   const stopped = completed.find((stage) => stage.ok !== true) ?? null;
   return {
     schema: DIAGNOSTIC_SCHEMA,
+    build,
     ok: stopped === null,
     stoppedAt: stopped === null ? null : stopped.id,
     stages: completed,
@@ -230,7 +238,7 @@ export function formatDiagnosticsBlock(report) {
     throw new Error('formatDiagnosticsBlock: report must be the buildDiagnosticsReport output');
   }
   return [
-    `=== FUT Squad Lab diagnostics (${report.schema}) — copy from here ===`,
+    `=== FUT Squad Lab diagnostics (${report.schema}, ${report.build?.id ?? 'unknown build'}) — copy from here ===`,
     JSON.stringify(report, null, 2),
     '=== end FUT Squad Lab diagnostics ===',
     'Dump again with: copy(JSON.stringify(window.__FSL_DIAGNOSE__(), null, 2))',

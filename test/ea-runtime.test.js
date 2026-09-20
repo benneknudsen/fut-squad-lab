@@ -131,6 +131,7 @@ describe('isClubPayload', () => {
 // then the window classes, which are constructors and are refused as instances.
 const EXPECTED_CLUB_STRATEGY_ORDER = [
   'services.Club.clubDao.getClubItems',
+  'services.Club.clubDao.getClubItems+{}',
   'services.Club.clubDao.search',
   'services.Club.clubRepository.search',
   'services.Club.clubService.search',
@@ -172,9 +173,102 @@ describe('resolveClubItems', () => {
     expect(result.ok).toBe(true);
     expect(result.items).toBe(items);
     expect(result.strategy).toBe('services.Club.clubDao.getClubItems');
-    expect(result.attempts).toEqual([
-      { id: 'services.Club.clubDao.getClubItems', ok: true, reason: null },
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]).toMatchObject({
+      id: 'services.Club.clubDao.getClubItems',
+      ok: true,
+      reason: null,
+    });
+    expect(result.attempts[0].method.arity).toBe(0);
+  });
+
+  it('tries getClubItems with no arguments, then with an empty object and nothing else', async () => {
+    const items = [{ id: 5 }];
+    const received = [];
+    const pageWindow = {
+      services: {
+        Club: {
+          clubDao: {
+            getClubItems(...args) {
+              received.push(args);
+              if (args.length === 0) throw new Error('requires a query object');
+              return { itemData: items };
+            },
+          },
+        },
+      },
+    };
+
+    const result = await resolveClubItems(pageWindow);
+
+    expect(result.ok).toBe(true);
+    expect(result.strategy).toBe('services.Club.clubDao.getClubItems+{}');
+    expect(received).toHaveLength(2);
+    expect(received[0]).toEqual([]);
+    expect(received[1]).toHaveLength(1);
+    expect(received[1][0]).toEqual({});
+    expect(Object.keys(received[1][0])).toEqual([]);
+    expect(result.attempts.map((attempt) => attempt.id)).toEqual([
+      'services.Club.clubDao.getClubItems',
+      'services.Club.clubDao.getClubItems+{}',
     ]);
+  });
+
+  it('gives each getClubItems call shape its own attempt id and reason', async () => {
+    const pageWindow = {
+      services: {
+        Club: {
+          clubDao: {
+            getClubItems(...args) {
+              throw new Error(args.length === 0 ? 'no argument' : 'argument rejected');
+            },
+          },
+        },
+      },
+    };
+
+    const result = await resolveClubItems(pageWindow);
+    const [zeroArgument, emptyObject] = result.attempts;
+
+    expect(result.ok).toBe(false);
+    expect(zeroArgument.id).toBe('services.Club.clubDao.getClubItems');
+    expect(emptyObject.id).toBe('services.Club.clubDao.getClubItems+{}');
+    expect(zeroArgument.id).not.toBe(emptyObject.id);
+    expect(zeroArgument.reason).toBe('threw: no argument');
+    expect(emptyObject.reason).toBe('threw: argument rejected');
+  });
+
+  it('reports the arity and source signature of a method it resolved but could not use', async () => {
+    const pageWindow = {
+      services: {
+        Club: {
+          clubDao: {
+            getClubItems(count, offset) {
+              throw new Error('not supported');
+            },
+          },
+        },
+      },
+    };
+
+    const result = await resolveClubItems(pageWindow);
+
+    expect(result.attempts[0].ok).toBe(false);
+    expect(result.attempts[0].reason).toBe('threw: not supported');
+    expect(result.attempts[0].method.arity).toBe(2);
+    expect(result.attempts[0].method.constructor).toBe('Function');
+    expect(result.attempts[0].method.excerpt).toContain('getClubItems');
+  });
+
+  it('refuses an accessor method without invoking the getter', async () => {
+    const getterSpy = vi.fn(() => () => ({ itemData: [] }));
+    const clubDao = {};
+    Object.defineProperty(clubDao, 'getClubItems', { get: getterSpy });
+
+    const result = await resolveClubItems({ services: { Club: { clubDao } } });
+
+    expect(getterSpy).not.toHaveBeenCalled();
+    expect(result.attempts[0].reason).toMatch(/accessor/);
   });
 
   it('accepts a bare item array and a promise result from clubDao', async () => {
@@ -202,7 +296,12 @@ describe('resolveClubItems', () => {
       ok: false,
       reason: 'Club.clubDao has no getClubItems method',
     });
-    expect(result.attempts[1].ok).toBe(true);
+    expect(result.attempts[1]).toEqual({
+      id: 'services.Club.clubDao.getClubItems+{}',
+      ok: false,
+      reason: 'Club.clubDao has no getClubItems method',
+    });
+    expect(result.attempts[2].ok).toBe(true);
   });
 
   it('records a thrown method and tries the next candidate', async () => {
