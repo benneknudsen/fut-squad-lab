@@ -129,6 +129,23 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
     return eligibility;
   };
 
+  /**
+   * Runs the live shape report as instrumentation. Instrumentation must never
+   * be able to lose the run it exists to explain (#44, re-flagged in #49, done
+   * in #50), so a throwing shape function becomes a recorded reason on the club
+   * stage instead of a rejected solve.
+   */
+  const describeShapeSafely = () => {
+    try {
+      return { report: describeShape(pageWindow), reason: null };
+    } catch (error) {
+      return {
+        report: null,
+        reason: `the service shape report failed: ${toError(error).message}`,
+      };
+    }
+  };
+
   return {
     async solve(subject) {
       const stages = [];
@@ -172,6 +189,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
 
       const clubResult = await resolveClub(pageWindow);
       const clubRecords = clubResult.ok ? readClubItemsFn(clubResult.items) : [];
+      const shapeResult = clubResult.ok === true ? { report: null, reason: null } : describeShapeSafely();
       record(
         'club',
         clubResult.ok === true,
@@ -183,8 +201,10 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
           strategy: clubResult.strategy ?? null,
           attempts: clubResult.attempts,
           // The shape report runs on failure only: a read that answered
-          // carries none (#44).
-          shape: clubResult.ok === true ? null : describeShape(pageWindow),
+          // carries none (#44). A shape failure is a recorded reason, never a
+          // lost solve (#50).
+          shape: shapeResult.report,
+          shapeError: shapeResult.reason,
         }
       );
 
