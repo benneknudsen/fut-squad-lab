@@ -5,6 +5,7 @@ import {
   BACKOFF_BASE_MS,
   BACKOFF_MAX_MS,
   CALL_KINDS,
+  DEFAULT_TASK_TIMEOUT_MS,
   JITTER_RATIO,
   MIN_CALL_GAP_MS,
   SUBMIT_CALL_GAP_MS,
@@ -14,6 +15,7 @@ import {
   gapMsFor,
   jitteredDelay,
 } from '../src/ea/pacing.js';
+import { DEFAULT_OBSERVABLE_TIMEOUT_MS } from '../src/ea/observable.js';
 
 // Issue #52: every EA call goes through one serialised queue. These tests run
 // with fake timers only — no test here waits on a real clock.
@@ -180,6 +182,14 @@ describe('the retry policy', () => {
     expect(rejection.retry).toBe(false);
     expect(rejection.reason).toMatch(/ineligible|reject/i);
   });
+
+  it('never retries a call the pacer abandoned for not settling', () => {
+    const timeout = new Error('pacing: the save call did not settle within 30000ms');
+    timeout.pacingTimedOut = true;
+    const decision = classifyFailure(timeout, { kind: CALL_KINDS.SAVE });
+    expect(decision.retry).toBe(false);
+    expect(decision.reason).toMatch(/pacing timeout/);
+  });
 });
 
 describe('attempt budgets', () => {
@@ -239,6 +249,163 @@ describe('cancellable waits', () => {
     await expect(second).rejects.toThrow(/cancel/i);
     expect(vi.getTimerCount()).toBe(0);
     await expect(first).resolves.toBe('first');
+  });
+});
+
+describe('a bounded in-flight call', () => {
+  const neverSettles = () => new Promise(() => {});
+
+  it('leaves the read path its own observable timeout to fire first', () => {
+    expect(DEFAULT_TASK_TIMEOUT_MS).toBeGreaterThan(DEFAULT_OBSERVABLE_TIMEOUT_MS);
+  });
+
+  it('does not wedge the queue when a task never settles', async () => {
+    startClock();
+    const pacer = createPacer({ random: () => 0, taskTimeoutMs: 1000 });
+    const starts = [];
+    const hung = pacer.run('hung save', neverSettles, { kind: CALL_KINDS.SAVE });
+    const after = pacer.run('after the hung call', async () => {
+      starts.push(Date.now());
+      return 'after';
+    });
+    const hungRejection = expect(hung).rejects.toThrow(/did not settle within 1000ms/);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    // Without the bound this stays empty: the hung task keeps `inFlight` true
+    // and `pump` refuses the second entry forever.
+    expect(starts).toEqual([1000]);
+
+    await hungRejection;
+    await expect(after).resolves.toBe('after');
+    expect(pacer.snapshot().calls).toBe(2);
+  });
+
+  it('rejects a hung call with a reason naming the timeout, never a silent drop', async () => {
+    startClock();
+    const pacer = createPacer({ random: () => 0, taskTimeoutMs: 1000 });
+    const call = pacer.run('hung save', neverSettles, { kind: CALL_KINDS.SAVE });
+    const rejection = expect(call).rejects.toThrow(/did not settle within 1000ms/);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await rejection;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('bounds a call with the documented default when no override is given', async () => {
+    startClock();
+    const pacer = createPacer({ random: () => 0 });
+    const call = pacer.run('hung save', neverSettles, { kind: CALL_KINDS.SAVE });
+    const rejection = expect(call).rejects.toThrow(
+      new RegExp(`did not settle within ${DEFAULT_TASK_TIMEOUT_MS}ms`)
+    );
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_TASK_TIMEOUT_MS);
+    await rejection;
+  });
+
+  it('stays usable when reset() lands while a hung call is in flight', async () => {
+    startClock();
+    const pacer = createPacer({ random: () => 0, taskTimeoutMs: 1000 });
+    const hung = pacer.run('hung save', neverSettles, { kind: CALL_KINDS.SAVE });
+    const hungRejection = expect(hung).rejects.toThrow(/did not settle/);
+
+    pacer.cancel();
+    pacer.reset();
+    const next = pacer.run('next solve', async () => 'next');
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await hungRejection;
+    await expect(next).resolves.toBe('next');
+    expect(pacer.snapshot().calls).toBe(2);
+  });
+
+  it('starts the following call only after the hung call is abandoned', async () => {
+    startClock();
+    const pacer = createPacer({ random: () => 0, taskTimeoutMs: 1000 });
+    const starts = [];
+    const hung = pacer.run('hung save', neverSettles, { kind: CALL_KINDS.SAVE });
+    const after = pacer.run('after the hung call', async () => {
+      starts.push(Date.now());
+    });
+    const hungRejection = expect(hung).rejects.toThrow(/did not settle/);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(starts).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(starts).toEqual([1000]);
+
+    await hungRejection;
+    await after;
+    expect(pacer.snapshot().calls).toBe(2);
+  });
+});
+
+describe('a cancel that races an in-flight failure', () => {
+  const retryableFailure = () => {
+    const error = new Error('rate limited');
+    error.status = 429;
+    return error;
+  };
+
+  it('arms no further wait when the in-flight call fails retryably after the cancel', async () => {
+    startClock();
+    const pacer = createPacer({ random: () => 0 });
+    let failFirst = null;
+    const call = pacer.run(
+      'save',
+      () =>
+        new Promise((resolve, reject) => {
+          failFirst = reject;
+        }),
+      { kind: CALL_KINDS.SAVE }
+    );
+    const rejection = expect(call).rejects.toThrow(/cancel/i);
+    await vi.advanceTimersByTimeAsync(0);
+    const before = pacer.snapshot();
+
+    pacer.cancel();
+    failFirst(retryableFailure());
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Without the cancel guard a backoff timer is armed here and counted.
+    expect(vi.getTimerCount()).toBe(0);
+    expect(pacer.snapshot()).toEqual(before);
+
+    await vi.advanceTimersByTimeAsync(BACKOFF_MAX_MS);
+    await rejection;
+  });
+
+  it('counts no wait that served nothing after a cancel', async () => {
+    startClock();
+    const pacer = createPacer({ random: () => 0 });
+    let attempts = 0;
+    let failFirst = null;
+    const task = () => {
+      attempts += 1;
+      return attempts === 1
+        ? new Promise((resolve, reject) => {
+            failFirst = reject;
+          })
+        : new Promise(() => {});
+    };
+    const call = pacer.run('save', task, { kind: CALL_KINDS.SAVE });
+    const rejection = expect(call).rejects.toThrow(/cancel/i);
+    await vi.advanceTimersByTimeAsync(0);
+    const before = pacer.snapshot();
+
+    pacer.cancel();
+    failFirst(retryableFailure());
+    await vi.advanceTimersByTimeAsync(0);
+    pacer.reset();
+
+    await vi.advanceTimersByTimeAsync(BACKOFF_MAX_MS);
+
+    // Without the guard the backoff is armed after the cancel, the reset lands
+    // inside it, and the remaining retry fires as extra paced work.
+    expect(attempts).toBe(1);
+    expect(pacer.snapshot()).toEqual(before);
+    expect(vi.getTimerCount()).toBe(0);
+    await rejection;
   });
 });
 
