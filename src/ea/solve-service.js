@@ -50,6 +50,7 @@ import {
 } from './adapter.js';
 import { readChallenge } from './challenge-reader.js';
 import { readClubItems } from './club-reader.js';
+import { createPacer } from './pacing.js';
 import { describeServiceShape } from './service-shape.js';
 import { runSolve } from './solve-runner.js';
 import { applySolution, planSquadWrite, writeSolution } from './squad-writer.js';
@@ -75,19 +76,24 @@ const summarizeCostCoverage = (coverage) => ({
 });
 
 /**
- * @param {{ pageWindow: object, requestSolve: Function, steps?: object }} options
+ * @param {{ pageWindow: object, requestSolve: Function, steps?: object,
+ *   pacer?: object }} options
  *   `pageWindow` is the page's `window`; `requestSolve` backs the worker
- *   transport; `steps` overrides any pipeline stage for tests
- * @returns {{ solve: (subject: *) => Promise<object> }}
+ *   transport; `steps` overrides any pipeline stage for tests; `pacer` is the
+ *   queue every EA call runs through (#52), defaulting to a fresh paced queue
+ *   owned by this service
+ * @returns {{ solve: (subject: *) => Promise<object>, cancel: Function,
+ *   stats: Function }}
  * @throws {Error} when `pageWindow` or `requestSolve` is missing
  */
-export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}) {
+export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer } = {}) {
   if (!isRecord(pageWindow)) {
     fail('pageWindow must be the page window object');
   }
   if (typeof requestSolve !== 'function') {
     fail('requestSolve must be the worker-backed transport function');
   }
+  const calls = pacer ?? createPacer();
 
   const resolveSubject = steps.resolveChallengeSubject ?? resolveChallengeSubject;
   const loadChallengeFn = steps.loadChallenge ?? loadChallengePayload;
@@ -152,13 +158,20 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
   return {
     async solve(subject) {
       const stages = [];
+      // A cancel pauses the queue; a new solve re-arms it so a cancelled run
+      // cannot leave the service permanently unresponsive.
+      calls.reset();
       const record = (id, ok, reason = null, detail = null) => {
         stages.push({ id, ok, reason, detail });
       };
-      const finish = (outcome) => ({ ...outcome, stages: [...stages] });
+      const finish = (outcome) => ({
+        ...outcome,
+        stages: [...stages],
+        pacing: calls.snapshot(),
+      });
 
       const subjectResult = resolveSubject(subject, pageWindow);
-      const loadResult = await loadChallengeFn(pageWindow, subjectResult);
+      const loadResult = await loadChallengeFn(pageWindow, subjectResult, { pacer: calls });
       record(
         'bridge',
         loadResult.ok === true,
@@ -198,7 +211,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
         );
       }
 
-      const clubResult = await resolveClub(pageWindow);
+      const clubResult = await resolveClub(pageWindow, { pacer: calls });
       const clubRecords = clubResult.ok ? readClubItemsFn(clubResult.items) : [];
       const shapeResult = clubResult.ok === true ? { report: null, reason: null } : describeShapeSafely();
       record(
@@ -255,7 +268,9 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
         });
       }
 
-      const squadResult = await resolveSquad(subject, pageWindow, loadResult.payload);
+      const squadResult = await resolveSquad(subject, pageWindow, loadResult.payload, {
+        pacer: calls,
+      });
       record(
         'squad',
         squadResult.ok === true,
@@ -335,7 +350,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
       record('payload', true, null, summarizeWritePlan(plan));
 
       try {
-        const write = await writeSolutionFn(pageWindow, payload);
+        const write = await writeSolutionFn(pageWindow, payload, { pacer: calls });
         record(
           'write',
           write.ok === true,
@@ -352,6 +367,19 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
         record('write', false, wrapped.message, null);
         return finish({ ok: false, stage: 'write', read, error: wrapped });
       }
+    },
+
+    /**
+     * Cancels the run's waits and queued calls (#52). The in-flight EA call
+     * still settles through its own observable timeout; nothing new starts.
+     */
+    cancel() {
+      calls.cancel();
+    },
+
+    /** The pacing counters the diagnostic reports, as a frozen copy. */
+    stats() {
+      return calls.snapshot();
     },
   };
 }

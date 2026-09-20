@@ -7,6 +7,9 @@ import {
 import club from './fixtures/club-items.json';
 import challengeSquadFixture from './fixtures/sbs-challenge-25-squad.json';
 import { applySolution, planSquadWrite, writeSolution } from '../src/ea/squad-writer.js';
+import { createTestPacer } from './helpers/pacing.js';
+
+const testPacer = createTestPacer();
 
 const rawItems = club.itemData;
 
@@ -136,7 +139,7 @@ describe('writeSolution', () => {
       UTSquadBuildingChallengeDAO: { saveChallenge },
     });
 
-    const report = await writeSolution(pageWindow, payload);
+    const report = await writeSolution(pageWindow, payload, { pacer: testPacer });
 
     expect(report.ok).toBe(true);
     expect(report.strategy).toBe('services.UTSquadBuildingChallengeDAO.saveChallenge');
@@ -162,7 +165,7 @@ describe('writeSolution', () => {
       UTSquadEntity: { save },
     });
 
-    const report = await writeSolution(pageWindow, payload);
+    const report = await writeSolution(pageWindow, payload, { pacer: testPacer });
 
     expect(report.ok).toBe(true);
     expect(report.strategy).toBe('services.UTSquadEntity.save');
@@ -184,7 +187,7 @@ describe('writeSolution', () => {
       },
     });
 
-    const report = await writeSolution(pageWindow, payload);
+    const report = await writeSolution(pageWindow, payload, { pacer: testPacer });
 
     expect(report.ok).toBe(false);
     expect(report.strategy).toBeNull();
@@ -228,7 +231,7 @@ describe('writeSolution', () => {
       },
     });
 
-    const report = await writeSolution(pageWindow, payload);
+    const report = await writeSolution(pageWindow, payload, { pacer: testPacer });
 
     expect(report.ok).toBe(true);
     expect(report.strategy).toBe('services.UTSquadEntity.getSlots+save');
@@ -251,7 +254,7 @@ describe('writeSolution', () => {
       },
     });
 
-    const report = await writeSolution(pageWindow, payload);
+    const report = await writeSolution(pageWindow, payload, { pacer: testPacer });
 
     expect(report.ok).toBe(false);
     const slotAttempt = report.attempts.find((attempt) =>

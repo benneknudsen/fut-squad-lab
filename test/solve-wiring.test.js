@@ -9,6 +9,7 @@ import { panelLabel } from '../src/ui/copy.js';
 import club from './fixtures/club-items.json';
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import challengeSquadFixture from './fixtures/sbs-challenge-25-squad.json';
+import { createTestPacer } from './helpers/pacing.js';
 
 const challengeFixture = set10.challenges.find((entry) => entry.challengeId === 25);
 const COPY_MESSAGE = {
@@ -132,7 +133,7 @@ describe('the Solve action end to end', () => {
   it('posts one worker request, applies the relayed solution and writes through EA', async () => {
     const { pageWindow, view, messages, saveChallenge, submitChallenge, dispatchMessage } =
       createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet(subjectWithSquad());
 
@@ -188,7 +189,7 @@ describe('the Solve action end to end', () => {
 
   it('never writes when the worker reports the solution invalid', async () => {
     const { pageWindow, view, messages, saveChallenge, dispatchMessage } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet(subjectWithSquad());
 
@@ -222,7 +223,7 @@ describe('the Solve action end to end', () => {
 
   it('reports the relayed worker error loudly on the message channel', async () => {
     const { pageWindow, view, messages, dispatchMessage } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet(subjectWithSquad());
 
@@ -250,7 +251,7 @@ describe('the Solve action end to end', () => {
       withEligibilityKeys: false,
     });
     pageWindow.console = { info: vi.fn() };
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet(subjectWithSquad());
 

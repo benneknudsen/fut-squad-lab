@@ -187,11 +187,14 @@ export function completeStages(recorded) {
  * @param {{ id: string, readers: object }} [build] the build marker; defaults
  *   to this build's `buildMarker()`, injectable so a test can prove the report
  *   reports the marker it was handed
- * @returns {{ schema: string, build: object, ok: boolean, stoppedAt: string|null,
- *   stages: Array<object> }}
+ * @param {{ calls: number, waits: number, retries: number, waitedMs: number }} [pacing]
+ *   the run's pacing counters (#52), so a slow run is explainable; `null` when
+ *   the reporter has none
+ * @returns {{ schema: string, build: object, pacing: object|null, ok: boolean,
+ *   stoppedAt: string|null, stages: Array<object> }}
  * @throws {Error} when a stage outcome is missing, unknown or duplicated
  */
-export function buildDiagnosticsReport(stages, build = buildMarker()) {
+export function buildDiagnosticsReport(stages, build = buildMarker(), pacing = null) {
   if (!Array.isArray(stages)) {
     throw new Error('buildDiagnosticsReport: stages must be an array');
   }
@@ -215,6 +218,7 @@ export function buildDiagnosticsReport(stages, build = buildMarker()) {
   return {
     schema: DIAGNOSTIC_SCHEMA,
     build,
+    pacing: pacing ?? null,
     ok: stopped === null,
     stoppedAt: stopped === null ? null : stopped.id,
     stages: completed,

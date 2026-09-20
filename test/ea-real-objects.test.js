@@ -10,6 +10,9 @@ import {
   resolveClubItems,
 } from '../src/ea/adapter.js';
 import { readClubItems } from '../src/ea/club-reader.js';
+import { createTestPacer } from './helpers/pacing.js';
+
+const testPacer = createTestPacer();
 
 // Issue #48: the live shape report proved every EA global exists but that the
 // instances live under `services.<Domain>`, not at `services.<ClassName>`. The
@@ -43,7 +46,7 @@ describe('the club chain reaches the live service instances', () => {
       UTSBCRepository,
     };
 
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
 
     expect(result.strategy).toBe('services.Club.clubDao.getClubItems');
     expect(daoGet).toHaveBeenCalledTimes(1);
@@ -56,7 +59,7 @@ describe('the club chain reaches the live service instances', () => {
       services: { Club: { clubDao: { getClubItems: async () => ({ itemData: club.itemData }) } } },
     };
 
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
     const records = readClubItems(result.items);
 
     expect(result.ok).toBe(true);
@@ -65,7 +68,7 @@ describe('the club chain reaches the live service instances', () => {
   });
 
   it('reports one {id, ok, reason} record per strategy, in order', async () => {
-    const result = await resolveClubItems({ services: {} });
+    const result = await resolveClubItems({ services: {} }, { pacer: testPacer });
 
     expect(result.attempts.map((attempt) => attempt.id)).toEqual(
       CLUB_ITEM_STRATEGIES.map((strategy) => strategy.id)
@@ -81,7 +84,7 @@ describe('the club chain reaches the live service instances', () => {
     function UTSBCRepository() {}
     UTSBCRepository.prototype.getClubItems = vi.fn();
 
-    const result = await resolveClubItems({ services: {}, UTSBCRepository });
+    const result = await resolveClubItems({ services: {}, UTSBCRepository }, { pacer: testPacer });
     const attempt = result.attempts.find(
       (entry) => entry.id === 'window.UTSBCRepository.getClubItems'
     );
@@ -120,7 +123,7 @@ describe('the challenge and squad chains reach the live service containers', () 
 
     // The squad chain now ends with bridged view-model methods, so it resolves
     // through a promise like the club chain.
-    const result = await resolveChallengeSquad({}, pageWindow);
+    const result = await resolveChallengeSquad({}, pageWindow, null, { pacer: testPacer });
 
     expect(result.ok).toBe(true);
     expect(result.strategy).toBe('services.Squad.activeSquad');
@@ -128,7 +131,9 @@ describe('the challenge and squad chains reach the live service containers', () 
   });
 
   it('keeps one attempt per squad strategy and a reason for every one', async () => {
-    const result = await resolveChallengeSquad({}, { services: { Squad: {} } });
+    const result = await resolveChallengeSquad({}, { services: { Squad: {} } }, null, {
+      pacer: testPacer,
+    });
 
     expect(result.ok).toBe(false);
     expect(result.attempts.map((attempt) => attempt.id)).toEqual(

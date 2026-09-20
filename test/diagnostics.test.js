@@ -17,6 +17,7 @@ import club from './fixtures/club-items.json';
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import challengeSquadFixture from './fixtures/sbs-challenge-25-squad.json';
 import { PINNED_ELIGIBILITY_KEYS } from './fixtures/eligibility-observation.js';
+import { createTestPacer } from './helpers/pacing.js';
 
 const challengeFixture = set10.challenges.find((entry) => entry.challengeId === 25);
 
@@ -101,6 +102,7 @@ const createService = (steps) =>
     pageWindow: { marker: 'page-window' },
     requestSolve: vi.fn(async () => solutionFromClub()),
     steps,
+    pacer: createTestPacer(),
   });
 
 const stageById = (stages, id) => stages.find((stage) => stage.id === id);
@@ -720,7 +722,7 @@ const mountedButton = (view) => view.children[0]?.children[0]?.children[0] ?? nu
 describe('the page bridge exposes one documented diagnostic global', () => {
   it('returns null before the first solve and the staged report afterwards', async () => {
     const { pageWindow, view, dispatchMessage } = createDiagnosticsWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
 
     expect(typeof pageWindow.__FSL_DIAGNOSE__).toBe('function');
@@ -741,6 +743,10 @@ describe('the page bridge exposes one documented diagnostic global', () => {
     expect(report.schema).toBe(DIAGNOSTIC_SCHEMA);
     expect(report.stages.map((stage) => stage.id)).toEqual(DIAGNOSTIC_STAGES);
     expect(report.stages.every((stage) => stage.ok !== null)).toBe(true);
+    // #52: the pasted report explains a slow run with its paced call counts.
+    expect(report.pacing.calls).toBeGreaterThan(0);
+    expect(typeof report.pacing.waits).toBe('number');
+    expect(typeof report.pacing.retries).toBe('number');
 
     expect(pageWindow.fetch).not.toHaveBeenCalled();
     expect(pageWindow.navigator.sendBeacon).not.toHaveBeenCalled();
@@ -748,7 +754,7 @@ describe('the page bridge exposes one documented diagnostic global', () => {
 
   it('logs the one delimited block the global re-dumps', async () => {
     const { pageWindow, view, dispatchMessage, logs } = createDiagnosticsWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
     controller.initWithSBCSet({ ...challengeFixture, squad: challengeSquadFixture.squad });
