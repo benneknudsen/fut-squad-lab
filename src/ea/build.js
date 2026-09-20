@@ -30,9 +30,13 @@ import {
  * challenge read gained the load and active-squad chains, so a report from an
  * older build compiled different chains. Incremented by #52: every EA call now
  * goes through the pacing queue, so a report must state the pacing build and
- * carry the run's wait and retry counts.
+ * carry the run's wait and retry counts. Incremented by #61: the club search
+ * criteria are now read instance-first with the prototype as a reported
+ * fallback, the criteria' key names and types are reported before they are
+ * used, and a page failure distinguishes EA throwing on our criteria from a
+ * missing method.
  */
-export const BUILD_ID = 'fsl-build/4';
+export const BUILD_ID = 'fsl-build/5';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact
