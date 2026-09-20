@@ -30,6 +30,12 @@ const MAX_CLASS_NAMES = 6;
 const MAX_PROTOTYPE_METHODS = 60;
 
 /**
+ * The most source characters one method excerpt may carry. A signature fits
+ * well inside this; a body that does not is cut and the cut is named.
+ */
+export const METHOD_SOURCE_CAP = 300;
+
+/**
  * Names that must never be reported, matching the paste-safety rules the
  * diagnostics block enforces: the report names EA's fields, so a session,
  * credential, club-item or price field must stay unnamed too.
@@ -149,4 +155,112 @@ export function describePrototypeMethods(target) {
     proto = Object.getPrototypeOf(proto);
   }
   return [...names].slice(0, MAX_PROTOTYPE_METHODS);
+}
+
+/**
+ * Reads a data property along an object's prototype chain without ever running
+ * an accessor. A getter is a live value in the player's session; describing a
+ * method must not have the side effect of calling it.
+ */
+const readFunctionProperty = (target, name) => {
+  let current = target;
+  while (current !== null && current !== undefined) {
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(current, name);
+    } catch {
+      return undefined;
+    }
+    if (descriptor !== undefined) {
+      return descriptor.get === undefined ? descriptor.value : undefined;
+    }
+    try {
+      current = Object.getPrototypeOf(current);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Replaces the contents of every string and template literal in a source
+ * excerpt with `...`, keeping the quotes. The excerpt exists to show a
+ * parameter list, so identifier and numeric-default information survives,
+ * while a literal value in the source — a token, an id, a marker — cannot
+ * reach the pasted report.
+ */
+const redactSourceLiterals = (source) => {
+  let output = '';
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    if (char === "'" || char === '"' || char === '`') {
+      output += char;
+      index += 1;
+      while (index < source.length && source[index] !== char) {
+        index += source[index] === '\\' ? 2 : 1;
+      }
+      output += '...';
+      if (index < source.length) {
+        output += char;
+        index += 1;
+      }
+      continue;
+    }
+    output += char;
+    index += 1;
+  }
+  return output;
+};
+
+/**
+ * Describes how a resolved method wants to be called, so a wrong call shape
+ * can be corrected from one live report instead of a guessed round: its
+ * declared arity (`fn.length`), the name of its constructor (an async method
+ * reports `AsyncFunction`), and a capped excerpt of its source.
+ *
+ * The excerpt is EA's code and appears in runtime diagnostics only. Its string
+ * and template literal contents are replaced with `...` before it is emitted,
+ * because a literal is a value, not a signature; a truncated excerpt names how
+ * many characters were cut, and an unreadable source is dropped with that
+ * reason rather than reported as absent. No accessor is invoked: arity and
+ * constructor come from property descriptors.
+ *
+ * @param {*} fn the resolved method
+ * @returns {{ arity: number|null, constructor: string|null, excerpt: string|null,
+ *   truncated?: boolean, excerptReason?: string }}
+ */
+export function describeMethodShape(fn) {
+  const arity = readFunctionProperty(fn, 'length');
+  const constructor = readFunctionProperty(fn, 'constructor');
+  const constructorName = readFunctionProperty(constructor, 'name');
+  const shape = {
+    arity: Number.isInteger(arity) && arity >= 0 ? arity : null,
+    constructor:
+      typeof constructorName === 'string' && constructorName.length > 0
+        ? constructorName
+        : null,
+  };
+
+  let source;
+  try {
+    source = Function.prototype.toString.call(fn);
+  } catch {
+    source = null;
+  }
+  if (typeof source !== 'string' || source.length === 0) {
+    return { ...shape, excerpt: null, excerptReason: 'source unreadable' };
+  }
+
+  const redacted = redactSourceLiterals(source);
+  if (redacted.length <= METHOD_SOURCE_CAP) {
+    return { ...shape, excerpt: redacted, truncated: false };
+  }
+  const cutLength = redacted.length - METHOD_SOURCE_CAP;
+  return {
+    ...shape,
+    excerpt: `${redacted.slice(0, METHOD_SOURCE_CAP)}…[truncated ${cutLength} chars]`,
+    truncated: true,
+  };
 }

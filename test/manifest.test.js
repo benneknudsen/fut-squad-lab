@@ -62,6 +62,7 @@ describe('manifest.json', () => {
     const [war] = manifest.web_accessible_resources;
     for (const module of [
       'src/ea/adapter.js',
+      'src/ea/build.js',
       'src/ea/challenge-reader.js',
       'src/ea/club-reader.js',
       'src/ea/summary.js',

@@ -261,4 +261,36 @@ describe('createSolveService', () => {
     expect(() => createSolveService({ requestSolve: async () => {} })).toThrow(/pageWindow/);
     expect(() => createSolveService({ pageWindow: {} })).toThrow(/requestSolve/);
   });
+
+  it('keeps the diagnostics when the service shape report throws', async () => {
+    const steps = createSteps({
+      resolveClubItems: vi.fn(async () => ({
+        ok: false,
+        items: [],
+        strategy: null,
+        attempts: [
+          {
+            id: 'services.Club.clubDao.getClubItems',
+            ok: false,
+            reason: 'threw: Cannot read properties of undefined',
+          },
+        ],
+      })),
+      describeServiceShape: vi.fn(() => {
+        throw new Error('shape exploded');
+      }),
+    });
+    const { service } = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+    const club = outcome.stages.find((stage) => stage.id === 'club');
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.stage).toBe('club');
+    expect(club.ok).toBe(false);
+    expect(club.detail.shape).toBeNull();
+    expect(club.detail.shapeError).toMatch(/shape report failed/);
+    expect(club.detail.shapeError).toMatch(/shape exploded/);
+    expect(steps.describeServiceShape).toHaveBeenCalledTimes(1);
+  });
 });
