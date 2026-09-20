@@ -5,6 +5,9 @@ import {
   CHALLENGE_SQUAD_STRATEGIES,
   resolveChallengeSquad,
 } from '../src/ea/adapter.js';
+import { createTestPacer } from './helpers/pacing.js';
+
+const testPacer = createTestPacer();
 
 // Issue #51 deliverable 4: when the challenge carries no squad of its own, the
 // active squad is requested from the same search view model through the
@@ -49,7 +52,9 @@ describe('the active squad chain', () => {
 
     const result = await resolveChallengeSquad(
       {},
-      { UTBucketedItemSearchViewModel: viewModel }
+      { UTBucketedItemSearchViewModel: viewModel },
+      null,
+      { pacer: testPacer }
     );
 
     expect(result.ok).toBe(true);
@@ -62,7 +67,7 @@ describe('the active squad chain', () => {
   });
 
   it('carries the squad on the loaded challenge payload without a call', async () => {
-    const result = await resolveChallengeSquad({}, {}, squadPayload);
+    const result = await resolveChallengeSquad({}, {}, squadPayload, { pacer: testPacer });
 
     expect(result.ok).toBe(true);
     expect(result.payload).toBe(squadPayload);
@@ -70,7 +75,7 @@ describe('the active squad chain', () => {
   });
 
   it('errors with a reason per candidate when no active squad can be read', async () => {
-    const result = await resolveChallengeSquad({}, { services: {} });
+    const result = await resolveChallengeSquad({}, { services: {} }, null, { pacer: testPacer });
 
     expect(result.ok).toBe(false);
     expect(result.payload).toBeNull();
@@ -89,7 +94,9 @@ describe('the active squad chain', () => {
     }
     const result = await resolveChallengeSquad(
       {},
-      { UTBucketedItemSearchViewModel: { requestActiveSquadDefinitionIds } }
+      { UTBucketedItemSearchViewModel: { requestActiveSquadDefinitionIds } },
+      null,
+      { pacer: testPacer }
     );
     const attempt = result.attempts.find((entry) =>
       entry.id.includes('requestActiveSquadDefinitionIds')
@@ -106,7 +113,7 @@ describe('the active squad chain', () => {
       {},
       { UTBucketedItemSearchViewModel: viewModel },
       null,
-      { observableTimeoutMs: 20 }
+      { observableTimeoutMs: 20, pacer: testPacer }
     );
     const attempt = result.attempts.find((entry) =>
       entry.id.includes('requestActiveSquadDefinitionIds')
@@ -122,7 +129,7 @@ describe('the active squad chain', () => {
       observableOf({ definitionIds: [1, 2] }, state)
     );
 
-    const result = await resolveChallengeSquad({}, { UTBucketedItemSearchViewModel: viewModel });
+    const result = await resolveChallengeSquad({}, { UTBucketedItemSearchViewModel: viewModel }, null, { pacer: testPacer });
 
     expect(result.ok).toBe(false);
     const attempt = result.attempts.find((entry) =>

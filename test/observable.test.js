@@ -8,6 +8,9 @@ import {
   isObservable,
   observeOnce,
 } from '../src/ea/observable.js';
+import { createTestPacer } from './helpers/pacing.js';
+
+const testPacer = createTestPacer();
 
 // A fake EA observable: `observe` stores the callback and hands back an
 // observer whose `unobserve` counts calls, `emit` fires every stored callback.
@@ -211,7 +214,7 @@ describe('no real network primitive on the read path', () => {
     };
 
     const club = await import('../src/ea/adapter.js');
-    const result = await club.resolveClubItems(pageWindow);
+    const result = await club.resolveClubItems(pageWindow, { pacer: testPacer });
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(result.ok).toBe(false);

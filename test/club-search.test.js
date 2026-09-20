@@ -8,6 +8,9 @@ import {
   resolveClubItems,
 } from '../src/ea/adapter.js';
 import { readClubItems } from '../src/ea/club-reader.js';
+import { createTestPacer } from './helpers/pacing.js';
+
+const testPacer = createTestPacer();
 
 // Issue #51: the club read is a paged `services.Club.search(criteria)` call
 // whose result is an observable. These tests build fake EA observables — they
@@ -62,7 +65,7 @@ describe('resolveClubItems search path', () => {
     const { calls, search } = pagedSearch([[{ id: 1 }], []]);
     const pageWindow = { UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } }, services: { Club: { search } } };
 
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
 
     expect(result.ok).toBe(true);
     expect(result.strategy).toBe('services.Club.search+searchCriteria');
@@ -82,10 +85,13 @@ describe('resolveClubItems search path', () => {
       this.searchCriteria = { fromPrototypeFree: true };
     }
     const { calls, search } = pagedSearch([[{ id: 1 }], []]);
-    const result = await resolveClubItems({
-      UTBucketedItemSearchViewModel,
-      services: { Club: { search } },
-    });
+    const result = await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel,
+        services: { Club: { search } },
+      },
+      { pacer: testPacer }
+    );
 
     expect(result.ok).toBe(true);
     expect(constructed).toEqual(['constructed']);
@@ -95,7 +101,7 @@ describe('resolveClubItems search path', () => {
   it('does not mutate the view model search criteria it copies', async () => {
     const criteria = { ownedOnly: true };
     const { calls, search } = pagedSearch([[{ id: 1 }], []]);
-    await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: criteria }, services: { Club: { search } } });
+    await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: criteria }, services: { Club: { search } } }, { pacer: testPacer });
 
     expect(Object.hasOwn(criteria, 'count')).toBe(false);
     expect(Object.hasOwn(criteria, 'offset')).toBe(false);
@@ -105,7 +111,7 @@ describe('resolveClubItems search path', () => {
   it('pages until the result stops yielding items and sums every page', async () => {
     const { calls, search } = pagedSearch([[{ id: 1 }, { id: 2 }], [{ id: 3 }], []]);
 
-    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search } } });
+    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search } } }, { pacer: testPacer });
 
     expect(result.items.map((item) => item.id)).toEqual([1, 2, 3]);
     expect(result.pages).toBe(3);
@@ -116,7 +122,7 @@ describe('resolveClubItems search path', () => {
   it('stops at the page cap and reports the cap instead of looping forever', async () => {
     const { calls, search } = pagedSearch(Array.from({ length: 1000 }, (_, index) => [{ id: index }]));
 
-    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search } } });
+    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search } } }, { pacer: testPacer });
 
     expect(result.ok).toBe(true);
     expect(result.pages).toBe(CLUB_SEARCH_PAGE_CAP);
@@ -129,7 +135,7 @@ describe('resolveClubItems search path', () => {
   it('times out a subscription that never fires instead of hanging', async () => {
     const result = await resolveClubItems(
       { UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search: () => neverFires() } } },
-      { observableTimeoutMs: 20 }
+      { observableTimeoutMs: 20, pacer: testPacer }
     );
 
     expect(result.ok).toBe(false);
@@ -143,7 +149,7 @@ describe('resolveClubItems search path', () => {
     Object.defineProperty(viewModel, 'searchCriteria', { get: getter });
     const search = vi.fn();
 
-    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: viewModel, services: { Club: { search } } });
+    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: viewModel, services: { Club: { search } } }, { pacer: testPacer });
 
     expect(getter).not.toHaveBeenCalled();
     expect(search).not.toHaveBeenCalled();
@@ -154,7 +160,7 @@ describe('resolveClubItems search path', () => {
   it('names the missing view model when no search criteria can be read', async () => {
     const search = vi.fn();
 
-    const result = await resolveClubItems({ services: { Club: { search } } });
+    const result = await resolveClubItems({ services: { Club: { search } } }, { pacer: testPacer });
 
     expect(result.ok).toBe(false);
     expect(search).not.toHaveBeenCalled();
@@ -171,10 +177,13 @@ describe('resolveClubItems search path', () => {
   it('falls through to services.Item.searchStorageItems with the same criteria', async () => {
     const { calls, search } = pagedSearch([[{ id: 7 }], []]);
 
-    const result = await resolveClubItems({
-      UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
-      services: { Club: { clubDao: {} }, Item: { searchStorageItems: search } },
-    });
+    const result = await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
+        services: { Club: { clubDao: {} }, Item: { searchStorageItems: search } },
+      },
+      { pacer: testPacer }
+    );
 
     expect(result.ok).toBe(true);
     expect(result.strategy).toBe('services.Item.searchStorageItems+searchCriteria');
@@ -186,7 +195,7 @@ describe('resolveClubItems search path', () => {
   it('feeds the real fixture items through the existing normaliser', async () => {
     const { search } = pagedSearch([club.itemData, []]);
 
-    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search } } });
+    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search } } }, { pacer: testPacer });
     const records = readClubItems(result.items);
 
     expect(result.ok).toBe(true);
@@ -204,14 +213,14 @@ describe('resolveClubItems search path', () => {
       },
     };
 
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
 
     expect(result.strategy).toBe('services.Item.searchStorageItems+searchCriteria');
     expect(result.attempts[0].reason).toMatch(/itemData/);
   });
 
   it('keeps the recorded attempts in chain order with {id, ok, reason}', async () => {
-    const result = await resolveClubItems({ services: {} });
+    const result = await resolveClubItems({ services: {} }, { pacer: testPacer });
 
     expect(result.attempts.map((attempt) => attempt.id)).toEqual(
       CLUB_ITEM_STRATEGIES.map((strategy) => strategy.id)

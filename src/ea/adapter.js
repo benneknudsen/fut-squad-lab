@@ -67,6 +67,7 @@
 
 import { describeMethodShape } from '../shape.js';
 import { DEFAULT_OBSERVABLE_TIMEOUT_MS, isObservable, observeOnce } from './observable.js';
+import { CALL_KINDS, EA_CALL_FAILURE_NAME, defaultPacer } from './pacing.js';
 
 /**
  * The eleven starting slot positions of every SBC formation the solver may
@@ -1275,6 +1276,37 @@ const resolveTimeoutMs = (value) =>
   Number.isFinite(value) && value > 0 ? value : DEFAULT_OBSERVABLE_TIMEOUT_MS;
 
 /**
+ * The pacer a call runs through (#52): the caller's injected one, or the shared
+ * default so a direct call is paced too. There is no unpaced branch here.
+ */
+const resolvePacer = (options) =>
+  options !== null && typeof options === 'object' && options.pacer !== undefined
+    ? options.pacer
+    : defaultPacer();
+
+/**
+ * A failed EA call in the shape the pacer classifies: the observable bridge's
+ * own message plus the status it reported. The name marks it so a
+ * budget-exhaustion wrapper keeps the message printable without a `threw:`
+ * prefix.
+ */
+const callFailure = (message, status) => {
+  const error = new Error(message);
+  error.name = EA_CALL_FAILURE_NAME;
+  if (Number.isFinite(status)) error.status = status;
+  return error;
+};
+
+/**
+ * The attempt reason for a failed paced call. An observable failure keeps the
+ * message `describeEventError` produced; anything thrown keeps the pre-#52
+ * `threw: ...` form, so a budget-exhaustion wrapper still names which part
+ * failed.
+ */
+const failureReason = (error) =>
+  error?.name === EA_CALL_FAILURE_NAME ? error.message : `threw: ${describeCause(error)}`;
+
+/**
  * The ordered club-read strategies this bridge tries, most likely first.
  *
  * The #51 finding showed the read is a **search**, not a `getClubItems` call:
@@ -1671,16 +1703,39 @@ const describeEventError = (event) =>
       }`
     : null;
 
-const callReadMethod = async (found, base, callArguments, label, timeoutMs) => {
-  let event;
+/**
+ * Calls one resolved method and normalises its answer. A reported event error
+ * becomes a named failure, so the pacer's retry policy sees the same `status`
+ * and message a reader would.
+ *
+ * The two wait systems compose: the pacer owns the gap and backoff *before* a
+ * call starts, while `observeOnce` keeps owning the subscription's own timeout
+ * afterwards. A cancel rejects a pending paced wait and never clears the
+ * subscription's timer, so an in-flight observable still unsubscribes cleanly.
+ */
+const callMethodOnce = async (found, base, callArguments, label, timeoutMs) => {
+  const returned = await found.value.apply(base, callArguments);
+  const resolved = await resolveReadReturn(returned, label, timeoutMs);
+  const eventError = describeEventError(resolved);
+  if (eventError !== null) throw callFailure(eventError, resolved.status);
+  return resolved;
+};
+
+/**
+ * Calls one resolved method through the paced queue, so a retryable failure is
+ * retried under the pacer's policy.
+ */
+const callReadMethod = async (found, base, callArguments, label, timeoutMs, pacing) => {
   try {
-    const returned = await found.value.apply(base, callArguments);
-    event = await resolveReadReturn(returned, label, timeoutMs);
+    const event = await pacing.pacer.run(
+      label,
+      () => callMethodOnce(found, base, callArguments, label, timeoutMs),
+      { kind: pacing.kind }
+    );
+    return { ok: true, event };
   } catch (error) {
-    return { ok: false, reason: `threw: ${describeCause(error)}` };
+    return { ok: false, reason: failureReason(error) };
   }
-  const eventError = describeEventError(event);
-  return eventError === null ? { ok: true, event } : { ok: false, reason: eventError };
 };
 
 const clubItemsOf = (payload) =>
@@ -1689,19 +1744,21 @@ const clubItemsOf = (payload) =>
 /**
  * Subscribes to one page of a club search per offset until a page yields no
  * items, then reports how many pages ran and whether the cap, not exhaustion,
- * stopped the walk.
+ * stopped the walk. Every page is one paced call.
  */
-const runPagedSearch = async ({ base, found, criteria, strategy, timeoutMs }) => {
+const runPagedSearch = async ({ base, found, criteria, strategy, timeoutMs, pacer }) => {
   const items = [];
   let offset = 0;
   let pages = 0;
   while (pages < CLUB_SEARCH_PAGE_CAP) {
     pages += 1;
     const pageCriteria = { ...criteria, count: CLUB_SEARCH_PAGE_SIZE, offset };
-    const returned = await found.value.apply(base, [pageCriteria]);
-    const event = await resolveReadReturn(returned, `${strategy.id} page ${pages}`, timeoutMs);
-    const error = describeEventError(event);
-    if (error !== null) throw new Error(error);
+    const label = `${strategy.id} page ${pages}`;
+    const event = await pacer.run(
+      label,
+      () => callMethodOnce(found, base, [pageCriteria], label, timeoutMs),
+      { kind: CALL_KINDS.CLUB_PAGE }
+    );
     if (!isClubPayload(event.payload)) {
       throw new Error(
         `page ${pages} returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeValue(event.payload)})`
@@ -1742,8 +1799,10 @@ const runPagedSearch = async ({ base, found, criteria, strategy, timeoutMs }) =>
  * and every attempt's reason names what was missing or wrong.
  *
  * @param {object|undefined} pageWindow the page's `window`
- * @param {{ observableTimeoutMs?: number }} [options] subscription timeout,
- *   injectable so tests need not wait out the default
+ * @param {{ observableTimeoutMs?: number, pacer?: object }} [options]
+ *   `observableTimeoutMs` is injectable so tests need not wait out the default;
+ *   `pacer` is the queue every EA call runs through, defaulting to the shared
+ *   paced queue (#52)
  * @returns {Promise<{ ok: boolean, items: Array<object>, strategy: string|null,
  *   attempts: Array<{id: string, ok: boolean, reason: string|null,
  *   method?: object}>, pages: number, capped: boolean, capReason: string|null,
@@ -1751,6 +1810,7 @@ const runPagedSearch = async ({ base, found, criteria, strategy, timeoutMs }) =>
  */
 export async function resolveClubItems(pageWindow, options = {}) {
   const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
+  const pacer = resolvePacer(options);
   const attempts = [];
   let criteriaResolution = null;
   const resolveCriteriaOnce = () => {
@@ -1788,6 +1848,7 @@ export async function resolveClubItems(pageWindow, options = {}) {
           criteria: resolution.criteria,
           strategy,
           timeoutMs,
+          pacer,
         });
         attempt.ok = true;
         return {
@@ -1807,7 +1868,10 @@ export async function resolveClubItems(pageWindow, options = {}) {
     }
 
     const callArguments = Object.hasOwn(strategy, 'argument') ? [strategy.argument] : [];
-    const call = await callReadMethod(found, base.value, callArguments, strategy.id, timeoutMs);
+    const call = await callReadMethod(found, base.value, callArguments, strategy.id, timeoutMs, {
+      pacer,
+      kind: CALL_KINDS.CLUB_PAGE,
+    });
     if (!call.ok) {
       attempt.reason = call.reason;
       continue;
@@ -2039,14 +2103,16 @@ const describeArgumentFailure = (strategy, subjectResult) => {
  * @param {object|undefined} pageWindow the page's `window`
  * @param {{ ok: boolean, payload: object|null }} subjectResult the
  *   `resolveChallengeSubject` result
- * @param {{ observableTimeoutMs?: number }} [options] subscription timeout,
- *   injectable for tests
+ * @param {{ observableTimeoutMs?: number, pacer?: object }} [options]
+ *   `observableTimeoutMs` is injectable for tests; `pacer` is the queue every
+ *   EA call runs through, defaulting to the shared paced queue (#52)
  * @returns {Promise<{ ok: boolean, payload: object|null, strategy: string|null,
  *   attempts: Array<{id: string, ok: boolean, reason: string|null,
  *   method?: object}> }>}
  */
 export async function loadChallengePayload(pageWindow, subjectResult, options = {}) {
   const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
+  const pacer = resolvePacer(options);
   const attempts = [];
   const subjectPayload =
     subjectResult?.ok === true &&
@@ -2101,7 +2167,10 @@ export async function loadChallengePayload(pageWindow, subjectResult, options = 
       callArguments = [];
     }
 
-    const call = await callReadMethod(found, base.value, callArguments, strategy.id, timeoutMs);
+    const call = await callReadMethod(found, base.value, callArguments, strategy.id, timeoutMs, {
+      pacer,
+      kind: CALL_KINDS.CHALLENGE_LOAD,
+    });
     if (!call.ok) {
       attempt.reason = call.reason;
       continue;
@@ -2273,8 +2342,9 @@ const carriesChallengeSquad = (value) => {
  *   `services.<Domain>` strategies
  * @param {object|null} [loadedPayload] the `loadChallengePayload` payload,
  *   whose `squad` is the first documented source
- * @param {{ observableTimeoutMs?: number }} [options] subscription timeout,
- *   injectable for tests
+ * @param {{ observableTimeoutMs?: number, pacer?: object }} [options]
+ *   `observableTimeoutMs` is injectable for tests; `pacer` is the queue every
+ *   EA call runs through, defaulting to the shared paced queue (#52)
  * @returns {Promise<{ ok: boolean, payload: object|null, strategy: string|null,
  *   attempts: Array<{id: string, ok: boolean, reason: string|null,
  *   method?: object}> }>}
@@ -2286,6 +2356,7 @@ export async function resolveChallengeSquad(
   options = {}
 ) {
   const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
+  const pacer = resolvePacer(options);
   const attempts = [];
 
   for (const strategy of CHALLENGE_SQUAD_STRATEGIES) {
@@ -2313,7 +2384,10 @@ export async function resolveChallengeSquad(
         continue;
       }
       attempt.method = describeMethodShape(found.value);
-      const call = await callReadMethod(found, instance.value, [], strategy.id, timeoutMs);
+      const call = await callReadMethod(found, instance.value, [], strategy.id, timeoutMs, {
+        pacer,
+        kind: CALL_KINDS.SQUAD_READ,
+      });
       if (!call.ok) {
         attempt.reason = call.reason;
         continue;
