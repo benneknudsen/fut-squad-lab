@@ -16,11 +16,21 @@
  * The shape report is diagnostics: names and signatures only. It never reads a
  * string's contents, an id, a price, an item or an account/session field, and
  * property names matching the paste-safety rules are redacted, because the
- * output is pasted into public support reports.
+ * output is pasted into public support reports. The shape helpers and the one
+ * redaction list live in `src/shape.js`, shared with the service surface report
+ * (#44), so no second copy can drift.
  *
  * `document` is passed in, so this module has no module-level DOM access and is
  * testable in Node with a fake element.
  */
+
+import {
+  describeOwnProperties,
+  describePrototypeMethods,
+  describeValue,
+  isElement,
+  isRecord,
+} from '../shape.js';
 
 /** The `via` reported when the mount falls back to the document body. */
 export const FALLBACK_VIA = 'document.body (fallback)';
@@ -28,119 +38,7 @@ export const FALLBACK_VIA = 'document.body (fallback)';
 /** The schema id of the controller shape report emitted with diagnostics. */
 export const MOUNT_SHAPE_SCHEMA = 'fsl-mount-shape/1';
 
-const MAX_OBJECT_KEYS = 6;
-const MAX_CLASS_NAMES = 6;
 const MAX_PARENT_DEPTH = 32;
-const MAX_PROTOTYPE_METHODS = 60;
-
-/**
- * Names that must never be reported, matching the paste-safety rules the
- * diagnostics block already enforces: the report names EA's fields, so a
- * session, credential, club-item or price field must stay unnamed too.
- */
-const SENSITIVE_NAME =
-  /token|session|cookie|persona|credential|secret|authorization|itemData|assetId|marketAverage|discardValue|coin/i;
-
-const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-
-const isElement = (value) =>
-  value !== null &&
-  typeof value === 'object' &&
-  typeof value.appendChild === 'function' &&
-  typeof value.querySelector === 'function';
-
-const redactName = (name) => (SENSITIVE_NAME.test(name) ? '<redacted>' : name);
-
-const describeElement = (value) => {
-  const tag =
-    typeof value.tagName === 'string' && value.tagName.length > 0
-      ? value.tagName.toLowerCase()
-      : 'unknown';
-  const classes =
-    typeof value.className === 'string'
-      ? value.className.trim().split(/\s+/).filter(Boolean).slice(0, MAX_CLASS_NAMES)
-      : [];
-  const classPart = classes.map((name) => `.${name}`).join(' ');
-  return `ELEMENT <${tag}>${classPart.length > 0 ? ` ${classPart}` : ''}`;
-};
-
-/**
- * Describes a value in one short, content-free signature.
- *
- * @param {*} value any value
- * @returns {string} `'ELEMENT <div> .a.b'`, `'array[23]'`, `'obj{a,b,c}'`,
- *   `'string("...")'`, `'function'`, `'null'`, `'undefined'`, `'DOCUMENT'`,
- *   or the primitive's `typeof`
- */
-export function describeValue(value) {
-  if (value === null) return 'null';
-  if (value === undefined) return 'undefined';
-  if (typeof value === 'object' && value.nodeType === 9) return 'DOCUMENT';
-  if (isElement(value)) return describeElement(value);
-  if (Array.isArray(value)) return `array[${value.length}]`;
-  if (typeof value === 'function') return 'function';
-  if (typeof value === 'string') return 'string("...")';
-  if (typeof value === 'object') {
-    const names = Object.keys(value);
-    const shown = names.slice(0, MAX_OBJECT_KEYS).map(redactName).join(',');
-    return `obj{${shown}${names.length > MAX_OBJECT_KEYS ? ',…' : ''}}`;
-  }
-  return typeof value;
-}
-
-/**
- * Lists every own enumerable property as `name: signature`. A property whose
- * value is another object contributes its first few key names after redaction;
- * an accessor is never invoked, so a controller getter cannot run or leak.
- *
- * @param {*} target the controller or view to describe
- * @returns {Array<string>} one entry per own enumerable property
- */
-export function describeOwnProperties(target) {
-  if (!isRecord(target)) return [];
-  return Object.keys(target).map((name) => {
-    const descriptor = Object.getOwnPropertyDescriptor(target, name);
-    if (descriptor !== undefined && typeof descriptor.get === 'function') {
-      return `${redactName(name)}: accessor(get)`;
-    }
-    let signature;
-    try {
-      signature = describeValue(target[name]);
-    } catch {
-      signature = 'unreadable';
-    }
-    return `${redactName(name)}: ${signature}`;
-  });
-}
-
-/**
- * Names the prototype's methods, walking the chain up to (not including)
- * `Object.prototype`, so a method or getter that returns the view can be
- * spotted. Accessors are named but never invoked.
- *
- * @param {*} target the controller to describe
- * @returns {Array<string>} method names and `'name (getter)'` entries
- */
-export function describePrototypeMethods(target) {
-  if (target === null || typeof target !== 'object') return [];
-  const names = new Set();
-  let proto = Object.getPrototypeOf(target);
-  while (proto !== null && proto !== Object.prototype && names.size < MAX_PROTOTYPE_METHODS) {
-    let descriptors;
-    try {
-      descriptors = Object.getOwnPropertyDescriptors(proto);
-    } catch {
-      break;
-    }
-    for (const [name, descriptor] of Object.entries(descriptors)) {
-      if (name === 'constructor') continue;
-      if (typeof descriptor.get === 'function') names.add(`${redactName(name)} (getter)`);
-      else if (typeof descriptor.value === 'function') names.add(redactName(name));
-    }
-    proto = Object.getPrototypeOf(proto);
-  }
-  return [...names].slice(0, MAX_PROTOTYPE_METHODS);
-}
 
 /**
  * Describes where the mounted control actually landed: the element and every
