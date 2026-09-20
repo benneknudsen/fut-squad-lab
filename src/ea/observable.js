@@ -15,7 +15,9 @@
  *   observable can fire more than once and a subscription left open across
  *   solves is a leak;
  * - always time out, because a subscription that never fires must fail with an
- *   explicit reason instead of hanging (the item carried since #13);
+ *   explicit reason instead of hanging (the item carried since #13); the
+ *   timeout names the returned object's own `observe`/`unobserve` shape, so a
+ *   value that is not a real observable is visible in the reason (#61);
  * - carry every callback field through unchanged, so a diagnostic can report
  *   `error`, `status` and `success` faithfully.
  *
@@ -65,6 +67,29 @@ const describeCause = (error) =>
   error !== null && typeof error === 'object' && typeof error.message === 'string'
     ? error.message
     : String(error);
+
+/**
+ * Names what the timed-out call returned, so a subscription that never fires
+ * says whether it looked like a real EA observable at all: the observable's own
+ * `observe`/`unobserve` types and what `observe` handed back. A real EA
+ * observable carries an `unobserve` on the subscription object; a value that
+ * only borrowed the name is visible here instead of being waited on again
+ * (#61). No value and no callback payload is read.
+ */
+const describeSubscription = (observable, subscription) => {
+  const observe = typeof observable.observe;
+  const unobserve = observable.unobserve === undefined ? 'absent' : typeof observable.unobserve;
+  let subscriptionUnobserve;
+  if (subscription === null || subscription === undefined) {
+    subscriptionUnobserve = `absent (the subscription is ${
+      subscription === null ? 'null' : 'undefined'
+    })`;
+  } else {
+    subscriptionUnobserve =
+      typeof subscription.unobserve === 'function' ? 'function' : 'absent';
+  }
+  return `observe=${observe}, unobserve=${unobserve}; subscription unobserve=${subscriptionUnobserve}`;
+};
 
 /**
  * Subscribes to one EA observable and resolves with the first callback it
@@ -149,7 +174,8 @@ export function observeOnce(observable, options = {}) {
         reject,
         new Error(
           `observeOnce: ${label} timed out after ${timeoutMs}ms waiting for its first callback;` +
-            ' the EA observable may expect a different subscription'
+            ' the EA observable may expect a different subscription' +
+            ` (returned ${describeSubscription(observable, observer)})`
         )
       );
     }, timeoutMs);

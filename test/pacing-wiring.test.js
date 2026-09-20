@@ -43,7 +43,7 @@ describe('the club read goes through the queue', () => {
     const pages = [[{ id: 1 }], []];
     let page = 0;
     const pageWindow = {
-      UTBucketedItemSearchViewModel: { searchCriteria: {} },
+      UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
       services: {
         Club: {
           search: () => observableOf({ data: { itemData: pages[page++] ?? [] } }),
@@ -67,7 +67,7 @@ describe('the club read goes through the queue', () => {
     ];
     let call = 0;
     const pageWindow = {
-      UTBucketedItemSearchViewModel: { searchCriteria: {} },
+      UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
       services: { Club: { search: () => bodies[call++] } },
     };
 

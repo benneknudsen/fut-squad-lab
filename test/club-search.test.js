@@ -111,7 +111,7 @@ describe('resolveClubItems search path', () => {
   it('pages until the result stops yielding items and sums every page', async () => {
     const { calls, search } = pagedSearch([[{ id: 1 }, { id: 2 }], [{ id: 3 }], []]);
 
-    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search } } }, { pacer: testPacer });
+    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } }, services: { Club: { search } } }, { pacer: testPacer });
 
     expect(result.items.map((item) => item.id)).toEqual([1, 2, 3]);
     expect(result.pages).toBe(3);
@@ -122,7 +122,7 @@ describe('resolveClubItems search path', () => {
   it('stops at the page cap and reports the cap instead of looping forever', async () => {
     const { calls, search } = pagedSearch(Array.from({ length: 1000 }, (_, index) => [{ id: index }]));
 
-    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search } } }, { pacer: testPacer });
+    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } }, services: { Club: { search } } }, { pacer: testPacer });
 
     expect(result.ok).toBe(true);
     expect(result.pages).toBe(CLUB_SEARCH_PAGE_CAP);
@@ -134,7 +134,7 @@ describe('resolveClubItems search path', () => {
 
   it('times out a subscription that never fires instead of hanging', async () => {
     const result = await resolveClubItems(
-      { UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search: () => neverFires() } } },
+      { UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } }, services: { Club: { search: () => neverFires() } } },
       { observableTimeoutMs: 20, pacer: testPacer }
     );
 
@@ -195,7 +195,7 @@ describe('resolveClubItems search path', () => {
   it('feeds the real fixture items through the existing normaliser', async () => {
     const { search } = pagedSearch([club.itemData, []]);
 
-    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search } } }, { pacer: testPacer });
+    const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } }, services: { Club: { search } } }, { pacer: testPacer });
     const records = readClubItems(result.items);
 
     expect(result.ok).toBe(true);
@@ -206,7 +206,7 @@ describe('resolveClubItems search path', () => {
   it('reports a page that is not an item payload and tries the next candidate', async () => {
     const good = pagedSearch([[{ id: 4 }], []]);
     const pageWindow = {
-      UTBucketedItemSearchViewModel: { searchCriteria: {} },
+      UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
       services: {
         Club: { search: () => observableOf({ pagination: { total: 1 } }) },
         Item: { searchStorageItems: good.search },
@@ -228,5 +228,166 @@ describe('resolveClubItems search path', () => {
     for (const attempt of result.attempts) {
       expect(Object.keys(attempt).sort()).toEqual(['id', 'ok', 'reason']);
     }
+  });
+});
+
+// Issue #61: the criteria handed to EA must be reported by shape before they
+// are used, preferred from a live instance, and refused when they are
+// half-built. An EA-side throw must be labelled as one, distinct from a missing
+// method. Names and types only: a criteria object can carry account-scoped
+// fields, so no value may appear anywhere in the report.
+describe('the criteria report (#61)', () => {
+  it('reports the criteria shape by key name and type, never a value, and names the producing strategy', async () => {
+    const { search } = pagedSearch([[{ id: 1 }], []]);
+    const result = await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel: {
+          searchCriteria: {
+            ownedOnly: true,
+            label: 'do-not-log-me',
+            missing: undefined,
+            nothing: null,
+            empty: '',
+          },
+        },
+        services: { Club: { search } },
+      },
+      { pacer: testPacer }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.criteria.strategy).toBe('UTBucketedItemSearchViewModel.searchCriteria');
+    expect(result.criteria.source).toBe('instance');
+    expect(result.criteria.shape.keys).toEqual([
+      { name: 'ownedOnly', type: 'boolean' },
+      { name: 'label', type: 'string', empty: false },
+      { name: 'missing', type: 'undefined' },
+      { name: 'nothing', type: 'null' },
+      { name: 'empty', type: 'string', empty: true },
+    ]);
+    expect(result.criteria.shape.undefinedKeys).toEqual(['missing']);
+    expect(result.criteria.shape.nullKeys).toEqual(['nothing']);
+    expect(result.criteria.shape.emptyStringKeys).toEqual(['empty']);
+    expect(result.criteria.shape.prototype).toBe(false);
+    expect(result.criteria.attempts[0].constructed).toBe(false);
+    expect(JSON.stringify(result.criteria)).not.toContain('do-not-log-me');
+  });
+
+  it('prefers a populated instance criteria over a prototype default and reports which was used', async () => {
+    function UTBucketedItemSearchViewModel() {
+      this.searchCriteria = { fromInstance: true };
+    }
+    UTBucketedItemSearchViewModel.prototype.searchCriteria = { fromPrototype: true };
+    const { calls, search } = pagedSearch([[{ id: 1 }], []]);
+
+    const result = await resolveClubItems(
+      { UTBucketedItemSearchViewModel, services: { Club: { search } } },
+      { pacer: testPacer }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.criteria.ok).toBe(true);
+    expect(result.criteria.strategy).toBe('UTBucketedItemSearchViewModel.searchCriteria');
+    expect(result.criteria.source).toBe('instance');
+    expect(result.criteria.shape.own).toBe(true);
+    expect(result.criteria.attempts[0].constructed).toBe(true);
+    expect(calls[0].fromInstance).toBe(true);
+    expect(calls[0].fromPrototype).toBeUndefined();
+  });
+
+  it('refuses to call EA with half-built criteria and reports why', async () => {
+    const search = vi.fn();
+
+    const result = await resolveClubItems(
+      { UTBucketedItemSearchViewModel: { searchCriteria: {} }, services: { Club: { search } } },
+      { pacer: testPacer }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(search).not.toHaveBeenCalled();
+    expect(result.criteria.ok).toBe(false);
+    expect(result.criteria.strategy).toBeNull();
+    const [instanceAttempt, prototypeAttempt] = result.criteria.attempts;
+    expect(instanceAttempt.reason).toMatch(/not usable/i);
+    expect(instanceAttempt.shape.usable).toBe(false);
+    expect(prototypeAttempt.reason.length).toBeGreaterThan(0);
+  });
+
+  it('refuses criteria whose values are all undefined, from an instance or a prototype', async () => {
+    function UTBucketedItemSearchViewModel() {}
+    UTBucketedItemSearchViewModel.prototype.searchCriteria = {
+      type: undefined,
+      filters: undefined,
+    };
+    const search = vi.fn();
+
+    const result = await resolveClubItems(
+      { UTBucketedItemSearchViewModel, services: { Club: { search } } },
+      { pacer: testPacer }
+    );
+
+    expect(result.ok).toBe(false);
+    expect(search).not.toHaveBeenCalled();
+    const [instanceAttempt, prototypeAttempt] = result.criteria.attempts;
+    expect(instanceAttempt.reason).toMatch(/not usable/i);
+    expect(instanceAttempt.shape.own).toBe(false);
+    expect(instanceAttempt.shape.undefinedKeys).toEqual(['type', 'filters']);
+    expect(prototypeAttempt.reason).toMatch(/not usable/i);
+    expect(prototypeAttempt.shape.prototype).toBe(true);
+  });
+
+  it('labels an EA-side throw as EA refusing our criteria, never as a missing method', async () => {
+    const search = vi.fn(() => {
+      throw new Error("Cannot read properties of undefined (reading 'toLowerCase')");
+    });
+
+    const result = await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
+        services: { Club: { search } },
+      },
+      { pacer: testPacer }
+    );
+    const attempt = result.attempts.find(
+      (entry) => entry.id === 'services.Club.search+searchCriteria'
+    );
+
+    expect(attempt.reason).toMatch(/EA threw while calling this method with our criteria/);
+    expect(attempt.reason).toContain('UTBucketedItemSearchViewModel.searchCriteria');
+    expect(attempt.reason).toMatch(/toLowerCase/);
+    expect(attempt.reason).not.toMatch(/has no .* method/);
+  });
+
+  it('reports whether a timed-out observable looked real and what it was called with', async () => {
+    const result = await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
+        services: { Club: { search: () => ({ observe: () => ({}) }) } },
+      },
+      { observableTimeoutMs: 20, pacer: testPacer }
+    );
+    const reason = result.attempts[0].reason;
+
+    expect(reason).toMatch(/timed out/);
+    expect(reason).toMatch(/observe=function/);
+    expect(reason).toMatch(/unobserve=absent/);
+    expect(reason).toMatch(/count=100/);
+    expect(reason).toMatch(/offset=0/);
+    expect(reason).toMatch(/ownedOnly/);
+  });
+
+  it('redacts a criteria key name that matches the paste-safety list but keeps its type', async () => {
+    const result = await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel: { searchCriteria: { marketAverage: 987654 } },
+        services: { Club: { search: () => observableOf({ itemData: [] }) } },
+      },
+      { pacer: testPacer }
+    );
+
+    const report = JSON.stringify(result.criteria);
+    expect(report).toContain('<redacted>');
+    expect(report).not.toContain('987654');
+    expect(result.criteria.shape.keys).toEqual([{ name: '<redacted>', type: 'number' }]);
   });
 });

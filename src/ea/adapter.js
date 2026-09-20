@@ -68,7 +68,7 @@
  * This file is pure data and pure functions. No DOM, no chrome APIs, no network.
  */
 
-import { describeMethodShape } from '../shape.js';
+import { describeMethodShape, describeOwnPropertyTypes } from '../shape.js';
 import { DEFAULT_OBSERVABLE_TIMEOUT_MS, isObservable, observeOnce } from './observable.js';
 import { CALL_KINDS, EA_CALL_FAILURE_NAME, defaultPacer } from './pacing.js';
 
@@ -1509,6 +1509,25 @@ const failureReason = (error) =>
   error?.name === EA_CALL_FAILURE_NAME ? error.message : `threw: ${describeCause(error)}`;
 
 /**
+ * The name a failure carries when EA's own method threw while being called with
+ * our argument (#61). The message is kept byte for byte so the pacer's retry
+ * table classifies the same failure the same way; only the name records that
+ * the throw came from inside EA rather than from the observable bridge. The
+ * search path then reports it as "EA threw while calling this method with our
+ * criteria", which no reader can mistake for a missing method.
+ */
+const EA_METHOD_THREW_NAME = 'EaMethodThrew';
+
+const methodThrew = (error) => {
+  const message = describeCause(error);
+  const wrapped = new Error(message === undefined ? 'undefined' : message);
+  wrapped.name = EA_METHOD_THREW_NAME;
+  if (Number.isFinite(error?.status)) wrapped.status = error.status;
+  wrapped.cause = error;
+  return wrapped;
+};
+
+/**
  * The ordered club-read strategies this bridge tries, most likely first.
  *
  * The #51 finding showed the read is a **search**, not a `getClubItems` call:
@@ -1707,14 +1726,17 @@ export const CLUB_SEARCH_PAGE_CAP = 50;
 const SEARCH_CRITERIA_PROPERTY = 'searchCriteria';
 
 /**
- * How the search criteria are looked for, in order. The prototype probe needs
- * no construction and is tried first; the instance probe uses the global
- * directly when it is already an instance, or constructs the class with no
- * arguments when it is not (an unknown argument list is never invented).
+ * How the search criteria are looked for, in order (#61). The instance probe is
+ * primary: a live instance's criteria are populated, while a prototype carries
+ * uninitialised defaults whose fields are `undefined` until an instance
+ * populates them — the leading explanation for EA's own `.toLowerCase()` throw
+ * on the criteria we handed it. The prototype probe stays as a reported
+ * fallback, so a page that only carries the field on the prototype still has a
+ * path and the diagnostic names which source answered.
  */
 export const CLUB_SEARCH_CRITERIA_STRATEGIES = Object.freeze([
-  Object.freeze({ id: `${EA_GLOBALS.searchViewModel}.prototype.searchCriteria`, source: 'prototype' }),
   Object.freeze({ id: `${EA_GLOBALS.searchViewModel}.searchCriteria`, source: 'instance' }),
+  Object.freeze({ id: `${EA_GLOBALS.searchViewModel}.prototype.searchCriteria`, source: 'prototype' }),
 ]);
 
 const describeAttempts = (attempts) =>
@@ -1758,7 +1780,64 @@ const readDataProperty = (target, name) => {
 const isRecordObject = (value) =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
-const tryReadCriteria = (target, attempt) => {
+/**
+ * Renders one typed key entry the way the live reason strings print it: a
+ * string carries whether it is empty, every other type stands alone. Values are
+ * never rendered; only the name (already redacted) and the type are.
+ */
+const renderCriteriaEntry = (entry) =>
+  entry.type === 'string'
+    ? `${entry.name}: string(${entry.empty ? 'empty' : 'non-empty'})`
+    : `${entry.name}: ${entry.type}`;
+
+const describeCriteriaKeys = (shape) =>
+  shape === null || shape === undefined || shape.keys.length === 0
+    ? 'no own enumerable keys'
+    : shape.keys.map(renderCriteriaEntry).join(', ');
+
+/**
+ * Reports the criteria object's own enumerable keys by name and type — never by
+ * value — plus the keys that are `undefined`, `null` or an empty string, and
+ * where the object came from. `own` is false when the value was inherited along
+ * the instance's prototype chain, which keeps prototype defaults visible even
+ * when the instance probe answered.
+ *
+ * A criteria object is `usable` when at least one own enumerable value is
+ * actually set: a descriptor getter is never invoked to find out, and an
+ * `undefined`, `null`, accessor or unreadable entry never counts. An object
+ * with nothing set is half-built — it cannot be a real EA search — so it is
+ * refused instead of being handed to EA (#61).
+ */
+const describeCriteriaShape = (criteria, source, target) => {
+  const keys = describeOwnPropertyTypes(criteria);
+  const namesOfType = (type) =>
+    keys.filter((entry) => entry.type === type).map((entry) => entry.name);
+  const isSet = (entry) =>
+    entry.type !== 'undefined' &&
+    entry.type !== 'null' &&
+    entry.type !== 'accessor(get)' &&
+    entry.type !== 'unreadable';
+  let own = false;
+  try {
+    own = Object.hasOwn(target, SEARCH_CRITERIA_PROPERTY);
+  } catch {
+    own = false;
+  }
+  return {
+    source,
+    prototype: source === 'prototype',
+    own,
+    usable: keys.some(isSet),
+    keys,
+    undefinedKeys: namesOfType('undefined'),
+    nullKeys: namesOfType('null'),
+    emptyStringKeys: keys
+      .filter((entry) => entry.type === 'string' && entry.empty === true)
+      .map((entry) => entry.name),
+  };
+};
+
+const tryReadCriteria = (target, attempt, source) => {
   const read = readDataProperty(target, SEARCH_CRITERIA_PROPERTY);
   if (!read.ok) {
     attempt.reason =
@@ -1771,6 +1850,15 @@ const tryReadCriteria = (target, attempt) => {
     attempt.reason = `${SEARCH_CRITERIA_PROPERTY} is ${describeValue(read.value)}, not an object`;
     return null;
   }
+  const shape = describeCriteriaShape(read.value, source, target);
+  attempt.source = source;
+  attempt.shape = shape;
+  if (!shape.usable) {
+    attempt.reason =
+      `${SEARCH_CRITERIA_PROPERTY} is not usable: none of its own enumerable values is set` +
+      ` (${describeCriteriaKeys(shape)})`;
+    return null;
+  }
   attempt.ok = true;
   return read.value;
 };
@@ -1779,10 +1867,13 @@ const tryReadCriteria = (target, attempt) => {
  * Resolves EA's search view model to an instance: the global itself when it is
  * already an instance, or a no-argument construction when it is a class. An
  * unknown argument list is never invented, and a class that refuses
- * construction is a named reason rather than a thrown solve.
+ * construction is a named reason rather than a thrown solve. `constructed`
+ * records whether this call ran a constructor in the player's session, so the
+ * criteria report can name what was invoked (#61).
  *
  * @param {object|undefined} pageWindow the page's `window`
- * @returns {{ ok: boolean, value?: object, name?: string, reason?: string }}
+ * @returns {{ ok: boolean, value?: object, name?: string,
+ *   constructed?: boolean, reason?: string }}
  */
 const resolveSearchViewModelInstance = (pageWindow) => {
   const name = EA_GLOBALS.searchViewModel;
@@ -1790,61 +1881,96 @@ const resolveSearchViewModelInstance = (pageWindow) => {
   if (global === null) return { ok: false, reason: `page window has no ${name}` };
   if (typeof global === 'function') {
     try {
-      return { ok: true, value: new global(), name: `${name} instance` };
+      return { ok: true, value: new global(), name: `${name} instance`, constructed: true };
     } catch (error) {
       return { ok: false, reason: `new ${name}() threw: ${describeCause(error)}` };
     }
   }
-  if (typeof global === 'object') return { ok: true, value: global, name };
+  if (typeof global === 'object') {
+    return { ok: true, value: global, name, constructed: false };
+  }
   return { ok: false, reason: `${name} is ${typeof global}, not a class or an instance` };
 };
 
 /**
- * Reads the club search criteria off EA's search view model, recording every
- * probe as `{ id, ok, reason }`. An absent global, a class that refuses
- * construction without arguments, an accessor property and a non-object
- * value are each a named reason, never a guessed criteria object.
+ * Reads the club search criteria off EA's search view model, instance first and
+ * prototype as a reported fallback, recording every probe as
+ * `{ id, ok, reason, source, constructed?, shape? }`.
+ *
+ * The shape report names every own enumerable key with its type and explicitly
+ * marks the keys that are `undefined` or `null` and the strings that are empty,
+ * so a live report shows what EA was handed without ever printing a value. A
+ * criteria object with no own enumerable value set is refused as not usable
+ * rather than passed to EA as a half-built search (#61).
+ *
+ * An absent global, a class that refuses construction without arguments, an
+ * accessor property, a non-object value and unusable criteria are each a named
+ * reason, never a guessed criteria object.
  *
  * @param {object|undefined} pageWindow the page's `window`
  * @returns {{ ok: boolean, criteria: object|null, strategy: string|null,
- *   attempts: Array<{id: string, ok: boolean, reason: string|null}> }}
+ *   source: 'instance'|'prototype'|null, shape: object|null,
+ *   attempts: Array<{id: string, ok: boolean, reason: string|null,
+ *   source?: string, constructed?: boolean, shape?: object}> }}
  */
 export const readSearchCriteria = (pageWindow) => {
   const attempts = [];
   const globalName = EA_GLOBALS.searchViewModel;
   const global = resolveEaGlobal(pageWindow, 'searchViewModel');
+  const missingGlobal = `page window has no ${globalName}`;
 
-  const prototypeAttempt = { id: CLUB_SEARCH_CRITERIA_STRATEGIES[0].id, ok: false, reason: null };
-  attempts.push(prototypeAttempt);
-  if (global === null) {
-    prototypeAttempt.reason = `page window has no ${globalName}`;
-  } else {
-    const prototype = typeof global === 'function' ? global.prototype : Object.getPrototypeOf(global);
-    if (prototype === null || prototype === undefined) {
-      prototypeAttempt.reason = `${globalName} has no prototype to read`;
+  for (const strategy of CLUB_SEARCH_CRITERIA_STRATEGIES) {
+    const attempt = { id: strategy.id, ok: false, reason: null };
+    attempts.push(attempt);
+
+    if (global === null) {
+      attempt.reason = missingGlobal;
+      continue;
+    }
+
+    let target;
+    if (strategy.source === 'instance') {
+      const instance = resolveSearchViewModelInstance(pageWindow);
+      if (!instance.ok) {
+        attempt.reason = instance.reason;
+        continue;
+      }
+      attempt.constructed = instance.constructed === true;
+      target = instance.value;
     } else {
-      const criteria = tryReadCriteria(prototype, prototypeAttempt);
-      if (criteria !== null) return { ok: true, criteria, strategy: prototypeAttempt.id, attempts };
+      target = typeof global === 'function' ? global.prototype : Object.getPrototypeOf(global);
+      if (target === null || target === undefined) {
+        attempt.reason = `${globalName} has no prototype to read`;
+        continue;
+      }
+    }
+
+    const criteria = tryReadCriteria(target, attempt, strategy.source);
+    if (criteria !== null) {
+      return {
+        ok: true,
+        criteria,
+        strategy: attempt.id,
+        source: strategy.source,
+        shape: attempt.shape,
+        attempts,
+      };
     }
   }
 
-  const instanceAttempt = { id: CLUB_SEARCH_CRITERIA_STRATEGIES[1].id, ok: false, reason: null };
-  attempts.push(instanceAttempt);
-  const instance = resolveSearchViewModelInstance(pageWindow);
-  if (!instance.ok) {
-    instanceAttempt.reason = instance.reason;
-  } else {
-    const criteria = tryReadCriteria(instance.value, instanceAttempt);
-    if (criteria !== null) return { ok: true, criteria, strategy: instanceAttempt.id, attempts };
-  }
-
-  return { ok: false, criteria: null, strategy: null, attempts };
+  return { ok: false, criteria: null, strategy: null, source: null, shape: null, attempts };
 };
 
 const summarizeCriteria = (resolution) =>
   resolution === null
     ? null
-    : { ok: resolution.ok, strategy: resolution.strategy, attempts: resolution.attempts };
+    : {
+        ok: resolution.ok,
+        strategy: resolution.strategy,
+        source: resolution.source ?? null,
+        shape: resolution.shape ?? null,
+        attempts: resolution.attempts,
+      };
 
 /**
  * Calls one resolved method and normalises whatever convention it answered
@@ -1916,7 +2042,12 @@ const describeEventError = (event) =>
  * subscription's timer, so an in-flight observable still unsubscribes cleanly.
  */
 const callMethodOnce = async (found, base, callArguments, label, timeoutMs) => {
-  const returned = await found.value.apply(base, callArguments);
+  let returned;
+  try {
+    returned = await found.value.apply(base, callArguments);
+  } catch (error) {
+    throw methodThrew(error);
+  }
   const resolved = await resolveReadReturn(returned, label, timeoutMs);
   const eventError = describeEventError(resolved);
   if (eventError !== null) throw callFailure(eventError, resolved.status);
@@ -1943,12 +2074,48 @@ const callReadMethod = async (found, base, callArguments, label, timeoutMs, paci
 const clubItemsOf = (payload) =>
   Array.isArray(payload) ? payload : payload[CLUB_ITEM_ARRAY_FIELD];
 
+const describeCriteriaSource = (resolution) =>
+  resolution.source === null || resolution.source === undefined
+    ? resolution.strategy
+    : `${resolution.strategy} (${resolution.source})`;
+
+/**
+ * Names what one page call was handed: the criteria strategy that produced the
+ * object, the two request numbers this project sets, and every criteria key by
+ * name and type — never a value. This is what a timed-out observable reports
+ * instead of leaving its reader to guess which argument EA refused (#61).
+ */
+const describeCalledWith = (resolution, pageCriteria) =>
+  `called with criteria from ${describeCriteriaSource(resolution)}:` +
+  ` count=${pageCriteria.count}, offset=${pageCriteria.offset},` +
+  ` keys [${describeCriteriaKeys(resolution.shape)}]`;
+
+/**
+ * The reason for one failed search page. A throw from EA's own method is
+ * labelled as that — "EA threw while calling this method with our criteria" —
+ * and names the criteria strategy alongside, so it cannot be read as a missing
+ * method. Every other failure (an observable that timed out, an exhausted
+ * attempt budget, a pacer abort) keeps its own message and gains the
+ * called-with report.
+ */
+const describeSearchCallFailure = (error, resolution, pageCriteria) => {
+  const calledWith = describeCalledWith(resolution, pageCriteria);
+  return error?.name === EA_METHOD_THREW_NAME
+    ? `EA threw while calling this method with our criteria (${calledWith}): ${describeCause(error)}`
+    : `${describeCause(error)}; ${calledWith}`;
+};
+
 /**
  * Subscribes to one page of a club search per offset until a page yields no
  * items, then reports how many pages ran and whether the cap, not exhaustion,
  * stopped the walk. Every page is one paced call.
+ *
+ * A failed page throws with `describeSearchCallFailure`'s report, so the
+ * attempt reason distinguishes an EA-side throw from a missing method and
+ * carries the criteria shape the page was called with (#61).
  */
-const runPagedSearch = async ({ base, found, criteria, strategy, timeoutMs, pacer }) => {
+const runPagedSearch = async ({ base, found, resolution, strategy, timeoutMs, pacer }) => {
+  const criteria = resolution.criteria;
   const items = [];
   let offset = 0;
   let pages = 0;
@@ -1956,11 +2123,16 @@ const runPagedSearch = async ({ base, found, criteria, strategy, timeoutMs, pace
     pages += 1;
     const pageCriteria = { ...criteria, count: CLUB_SEARCH_PAGE_SIZE, offset };
     const label = `${strategy.id} page ${pages}`;
-    const event = await pacer.run(
-      label,
-      () => callMethodOnce(found, base, [pageCriteria], label, timeoutMs),
-      { kind: CALL_KINDS.CLUB_PAGE }
-    );
+    let event;
+    try {
+      event = await pacer.run(
+        label,
+        () => callMethodOnce(found, base, [pageCriteria], label, timeoutMs),
+        { kind: CALL_KINDS.CLUB_PAGE }
+      );
+    } catch (error) {
+      throw new Error(describeSearchCallFailure(error, resolution, pageCriteria));
+    }
     if (!isClubPayload(event.payload)) {
       throw new Error(
         `page ${pages} returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeValue(event.payload)})`
@@ -1995,7 +2167,11 @@ const runPagedSearch = async ({ base, found, criteria, strategy, timeoutMs, pace
  * resolved method's `{arity, constructor, excerpt, truncated}` shape — whenever
  * the strategy reached a callable method, including one that then threw. The
  * pagination report carries `pages`, `capped` and `capReason`; the criteria
- * report carries the view-model probes and which one answered.
+ * report carries the view-model probes, the producing strategy, whether it came
+ * from an instance or the prototype, and the criteria' key names and types —
+ * never a value (#61). A criteria object with nothing set is refused before EA
+ * is called, and a search page's failure reason distinguishes EA throwing on
+ * our criteria from the method being missing.
  *
  * When nothing succeeds, `items` is an empty array — never a guessed count —
  * and every attempt's reason names what was missing or wrong.
@@ -2047,7 +2223,7 @@ export async function resolveClubItems(pageWindow, options = {}) {
         const search = await runPagedSearch({
           base: base.value,
           found,
-          criteria: resolution.criteria,
+          resolution,
           strategy,
           timeoutMs,
           pacer,

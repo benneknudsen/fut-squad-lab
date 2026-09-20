@@ -102,6 +102,16 @@ describe('observeOnce', () => {
     expect(observable.state.unsubscribed).toBe(1);
   });
 
+  it('names the returned observable shape when it times out', async () => {
+    await expect(
+      observeOnce({ observe: () => ({}) }, { timeoutMs: 20, label: 'probe' })
+    ).rejects.toThrow(/observe=function, unobserve=absent; subscription unobserve=absent/);
+
+    await expect(observeOnce(neverFires(), { timeoutMs: 20, label: 'probe' })).rejects.toThrow(
+      /subscription unobserve=function/
+    );
+  });
+
   it('carries error, status and success through faithfully', async () => {
     const observable = makeObservable();
     const error = new Error('EA refused the search');
@@ -203,7 +213,7 @@ describe('no real network primitive on the read path', () => {
     const fetchSpy = vi.fn();
     const pageWindow = {
       fetch: fetchSpy,
-      UTBucketedItemSearchViewModel: { searchCriteria: {} },
+      UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
       services: {
         Club: {
           search() {
