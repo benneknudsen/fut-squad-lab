@@ -56,6 +56,8 @@ import {
 export const SERVICE_SHAPE_SCHEMA = 'fsl-service-shape/1';
 
 const MAX_REQUEST_CANDIDATES = 60;
+const MAX_SERVICE_DOMAINS = 40;
+const MAX_DOMAIN_VALUES = 24;
 
 /**
  * The name fragments that suggest a value can issue a request. A scan hit is a
@@ -139,6 +141,63 @@ const describeRead = (name, read) => ({
   signature: read.ok ? signatureOf(read.value) : read.signature,
 });
 
+/**
+ * True for a service domain member that is worth describing one level down: a
+ * class, an object or an instance. A plain value is not a domain member and an
+ * array is left to the owning report, because an array's prototype methods name
+ * the language, not the page. An unread own accessor is described too: it is
+ * named as `accessor(get)` and never invoked, so a hidden value stays
+ * distinguishable from an absent one.
+ */
+const isDomainMember = (read) => {
+  if (!read.ok) return true;
+  const value = read.value;
+  if (value === null || value === undefined || Array.isArray(value)) return false;
+  return typeof value === 'object' || typeof value === 'function';
+};
+
+const describeDomainMember = (name, read) => ({
+  name: redactName(name),
+  signature: read.ok ? signatureOf(read.value) : read.signature,
+  prototypeMethods: read.ok ? describePrototypeMethods(read.value) : [],
+});
+
+/**
+ * Describes one own property of `services` one level down: its signature, its
+ * own properties with signatures, and every member value's prototype method
+ * names. The recursion stops here — a member's own object graph is never
+ * walked — and the member list is capped, with the number left out reported as
+ * `omitted`, so a large or cyclic page object cannot blow the report up.
+ */
+const describeServiceDomain = (name, read) => {
+  if (!read.ok) {
+    return {
+      name: redactName(name),
+      signature: read.signature,
+      ownProperties: [],
+      values: [],
+      omitted: 0,
+    };
+  }
+  const domain = read.value;
+  const values = [];
+  let eligible = 0;
+  for (const property of ownKeysOf(domain)) {
+    const propertyRead = readProperty(domain, property);
+    if (!isDomainMember(propertyRead)) continue;
+    eligible += 1;
+    if (values.length >= MAX_DOMAIN_VALUES) continue;
+    values.push(describeDomainMember(property, propertyRead));
+  }
+  return {
+    name: redactName(name),
+    signature: signatureOf(domain),
+    ownProperties: describeOwnProperties(domain),
+    values,
+    omitted: eligible - values.length,
+  };
+};
+
 const describeGlobal = (pageWindow, name) => describeRead(name, readProperty(pageWindow, name));
 
 const describeClass = (pageWindow, key) => {
@@ -174,6 +233,18 @@ export function describeServiceShape(pageWindow) {
   );
   const shown = candidates.slice(0, MAX_REQUEST_CANDIDATES);
 
+  const domains = [];
+  let eligibleDomains = 0;
+  if (services !== null) {
+    for (const name of ownKeysOf(services)) {
+      const read = readProperty(services, name);
+      if (!isDomainMember(read)) continue;
+      eligibleDomains += 1;
+      if (domains.length >= MAX_SERVICE_DOMAINS) continue;
+      domains.push(describeServiceDomain(name, read));
+    }
+  }
+
   return {
     schema: SERVICE_SHAPE_SCHEMA,
     requestLayer: {
@@ -184,6 +255,10 @@ export function describeServiceShape(pageWindow) {
       present: isPresent(servicesRead),
       signature: servicesRead.ok ? signatureOf(servicesValue) : servicesRead.signature,
       ownProperties: services === null ? [] : describeOwnProperties(services),
+    },
+    serviceDomains: {
+      entries: domains,
+      omitted: eligibleDomains - domains.length,
     },
     classes: ['sbcRepository', 'sbcService'].map((key) => describeClass(pageWindow, key)),
     eaGlobals: Object.values(EA_GLOBALS).map((name) => describeGlobal(pageWindow, name)),
