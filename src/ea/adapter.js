@@ -12,10 +12,13 @@
  *
  * M2 of `docs/PLAN.md` requires the eligibility key table to be built by reading
  * EA's live `SBCEligibilityKey` enum at runtime (`window.SBCEligibilityKey`)
- * rather than hardcoding numbers. Production calls `readEligibilityKeys()`; the
- * pinned observation table this used to ship with now lives in
- * `test/fixtures/eligibility-observation.js`, where `src/solver/` cannot reach
- * it. There is no fallback table in `src/`.
+ * rather than hardcoding numbers. Production calls `readEligibilityKeys()`. The
+ * live enum is the source of truth; when it is missing, `readEligibilityKeys`
+ * resolves the clearly-labelled `ELIGIBILITY_KEY_FALLBACK` number table and says
+ * so in its result. When the live enum is present, any disagreement with that
+ * fallback is reported, and the live meaning always wins. The old pinned
+ * observation table lives in `test/fixtures/eligibility-observation.js`, where
+ * `src/solver/` cannot reach it.
  *
  * ## Optional role-id lists
  *
@@ -147,6 +150,84 @@ export function normaliseFormation(formation) {
 }
 
 /**
+ * The meanings key 25 `PLAYER_RARITY_GROUP` can carry. The same EA key stands
+ * for a geographic region, for TOTS, or for TOTW-or-TOTS; which one it is
+ * depends on the requirement's label and on the value. `decodeRarityGroup`
+ * resolves it.
+ */
+export const RARITY_GROUP_MEANINGS = Object.freeze({
+  REGION: 'REGION',
+  TOTS: 'TOTS',
+  TOTW_OR_TOTS: 'TOTW_OR_TOTS',
+});
+
+/** The classifier tag a descriptor carries when its values need decoding. */
+export const RARITY_GROUP_CLASSIFIER = 'PLAYER_RARITY_GROUP';
+
+/**
+ * The geographic-region phrases a key 25 label can carry, with the stable
+ * region key each resolves to. Labels are matched case-insensitively on their
+ * text; the region key is our own lowercase vocabulary, not an EA enum value.
+ */
+const GEO_REGION_LABELS = Object.freeze([
+  Object.freeze(['players from africa', 'africa']),
+  Object.freeze(['players from europe', 'europe']),
+  Object.freeze(['players from asia', 'asia']),
+  Object.freeze(['players from south america', 'south_america']),
+  Object.freeze(['players from north america', 'north_america']),
+  Object.freeze(['players from oceania', 'oceania']),
+]);
+
+/**
+ * Resolves a key 25 `PLAYER_RARITY_GROUP` meaning from the requirement's label
+ * and value. The label wins when it names a geographic region; TOTS is named by
+ * the label (TOTS or "Team of the Season") unless the label names TOTW as well,
+ * which means TOTW-or-TOTS. A value of 44 means TOTW-or-TOTS when the label
+ * does not say TOTS. Anything else returns a null meaning, and the decoder
+ * refuses rather than guessing.
+ *
+ * @param {string|null|undefined} label the requirement label, when the payload
+ *   carries one
+ * @param {number} value the entry's `eligibilityValue`
+ * @returns {{ meaning: string|null, region: string|null }}
+ */
+export function decodeRarityGroup(label, value) {
+  const text = typeof label === 'string' ? label.toLowerCase() : '';
+  const region = GEO_REGION_LABELS.find(([phrase]) => text.includes(phrase))?.[1] ?? null;
+  if (region !== null) return { meaning: RARITY_GROUP_MEANINGS.REGION, region };
+
+  const saysTots = text.includes('tots') || text.includes('team of the season');
+  const saysTotw =
+    text.includes('totw') || text.includes('team of the week') || text.includes('inform');
+  if (saysTots && saysTotw) return { meaning: RARITY_GROUP_MEANINGS.TOTW_OR_TOTS, region: null };
+  if (saysTots) return { meaning: RARITY_GROUP_MEANINGS.TOTS, region: null };
+  if (value === 44) return { meaning: RARITY_GROUP_MEANINGS.TOTW_OR_TOTS, region: null };
+  return { meaning: null, region: null };
+}
+
+/**
+ * Canonicalises a comparison-operator name. Names are matched loosely on their
+ * text: a name carrying MIN or GREATER is a minimum, one carrying MAX, LOWER or
+ * LESS is a maximum, EXACT is equality and RANGE is a range. Returns `null` for
+ * a name this model cannot classify, so a caller can keep its own vocabulary
+ * instead of having it forced into one of the four.
+ *
+ * @param {*} name
+ * @returns {string|null} `GREATER` | `LOWER` | `EXACT` | `RANGE` | null
+ */
+export function decodeScopeName(name) {
+  if (typeof name !== 'string' || name.length === 0) return null;
+  const upper = name.toUpperCase();
+  if (upper.includes('MIN')) return 'GREATER';
+  if (upper.includes('MAX')) return 'LOWER';
+  if (upper.includes('GREATER')) return 'GREATER';
+  if (upper.includes('LOWER') || upper.includes('LESS')) return 'LOWER';
+  if (upper.includes('EXACT')) return 'EXACT';
+  if (upper.includes('RANGE')) return 'RANGE';
+  return null;
+}
+
+/**
  * The stable solver semantics for every eligibility enum member we model,
  * keyed by EA's enum member name — which is also the payload `type` string the
  * decoder cross-checks. The key numbers are deliberately absent: they are EA's
@@ -171,6 +252,28 @@ export const ELIGIBILITY_KEY_MODEL = Object.freeze({
   PLAYER_LEVEL: Object.freeze({ kind: 'PLAYER_LEVEL_MATCH', role: 'match', field: 'playerLevels' }),
   TEAM_RATING_1_TO_100: Object.freeze({ kind: 'TEAM_RATING', role: 'scalar' }),
   CHEMISTRY_POINTS: Object.freeze({ kind: 'CHEMISTRY_POINTS', role: 'scalar' }),
+  PLAYER_RARITY_GROUP: Object.freeze({
+    kind: 'PLAYER_RARITY_GROUP',
+    role: 'match',
+    field: 'rarityGroups',
+    classify: RARITY_GROUP_CLASSIFIER,
+  }),
+  PLAYER_MIN_OVR: Object.freeze({ kind: 'PLAYER_MIN_OVR', role: 'match', field: 'minRatings' }),
+  PLAYER_EXACT_OVR: Object.freeze({
+    kind: 'PLAYER_EXACT_OVR',
+    role: 'match',
+    field: 'exactRatings',
+  }),
+  PLAYER_MAX_OVR: Object.freeze({ kind: 'PLAYER_MAX_OVR', role: 'match', field: 'maxRatings' }),
+  PLAYER_TRADABILITY: Object.freeze({
+    kind: 'PLAYER_TRADABILITY',
+    role: 'match',
+    field: 'tradabilities',
+  }),
+  ALL_PLAYERS_CHEMISTRY_POINTS: Object.freeze({
+    kind: 'ALL_PLAYERS_CHEMISTRY_POINTS',
+    role: 'scalar',
+  }),
 });
 
 /**
@@ -183,9 +286,10 @@ export const ELIGIBILITY_KEY_MODEL = Object.freeze({
  * enum, so there is no live read this could be masking. The comparison semantics
  * (`GREATER` means the measured quantity must be >= the required value, `LOWER`
  * <=, `EXACT` ===) are documented by EA's client bundle, but EA does not expose
- * the numbers, so 0/1/2 is a model this project owns and pins. The capture
- * cross-check that supports it lives beside the pinned key observation in
- * `test/fixtures/eligibility-observation.js`.
+ * the numbers, so 0/1/2/3 is a model this project owns and pins. Value 3 is a
+ * range comparison (`RANGE`), which is decoded but not yet measured by
+ * `validateSquad`. The capture cross-check that supports 0/1/2 lives beside the
+ * pinned key observation in `test/fixtures/eligibility-observation.js`.
  *
  * The browser half supplies this table as `options.scopes`; the solver has no
  * fallback and refuses to run without a caller-supplied table. It sits here
@@ -196,6 +300,7 @@ export const SCOPE_VALUES = Object.freeze({
   0: 'GREATER',
   1: 'LOWER',
   2: 'EXACT',
+  3: 'RANGE',
 });
 
 /** A canonical non-negative integer enum key, without leading zeros. */
@@ -265,28 +370,105 @@ const readEnumMembers = (enumTable) => {
 };
 
 /**
+ * The number-to-member-name fallback for `SBCEligibilityKey`, used only when
+ * the live enum cannot be read. It is a *fallback*, never the source of truth:
+ * when the live enum is present it wins, and `readEligibilityKeys` reports any
+ * disagreement between the two instead of reconciling it.
+ *
+ * Provenance: the numbers and names are facts about EA's shipped FC27 client
+ * enum. Most entries were confirmed by a capture of the live `SBCEligibilityKey`
+ * table; the rest are pinned here so a broken live read still fails loudly on
+ * the first key the model cannot name, rather than silently decoding nothing.
+ * Key 19 keeps the name the live FC27 enum observed (`TEAM_RATING_1_TO_100`),
+ * not a shortened variant. This table carries numbers only; the stable solver
+ * semantics stay in `ELIGIBILITY_KEY_MODEL` above.
+ */
+export const ELIGIBILITY_KEY_FALLBACK = Object.freeze({
+  0: 'TEAM_STAR_RATING',
+  2: 'PLAYER_COUNT',
+  3: 'PLAYER_QUALITY',
+  4: 'SAME_NATION_COUNT',
+  5: 'SAME_LEAGUE_COUNT',
+  6: 'SAME_CLUB_COUNT',
+  7: 'NATION_COUNT',
+  8: 'LEAGUE_COUNT',
+  9: 'CLUB_COUNT',
+  10: 'NATION_ID',
+  11: 'LEAGUE_ID',
+  12: 'CLUB_ID',
+  13: 'SCOPE',
+  15: 'LEGEND_COUNT',
+  16: 'NUM_TROPHY_REQUIRED',
+  17: 'PLAYER_LEVEL',
+  18: 'PLAYER_RARITY',
+  19: 'TEAM_RATING_1_TO_100',
+  21: 'PLAYER_COUNT_COMBINED',
+  25: 'PLAYER_RARITY_GROUP',
+  26: 'PLAYER_MIN_OVR',
+  27: 'PLAYER_EXACT_OVR',
+  28: 'PLAYER_MAX_OVR',
+  30: 'FIRST_OWNER_PLAYERS_COUNT',
+  33: 'PLAYER_TRADABILITY',
+  35: 'CHEMISTRY_POINTS',
+  36: 'ALL_PLAYERS_CHEMISTRY_POINTS',
+});
+
+const fallbackMembers = () =>
+  Object.entries(ELIGIBILITY_KEY_FALLBACK)
+    .map(([number, name]) => ({ name, number: Number(number) }))
+    .sort((left, right) => left.number - right.number);
+
+const fallbackDescriptors = () => {
+  const descriptors = {};
+  for (const [number, name] of Object.entries(ELIGIBILITY_KEY_FALLBACK)) {
+    descriptors[number] = { type: name };
+  }
+  return descriptors;
+};
+
+/**
  * The production entry point for the eligibility key table: reads EA's live
  * `SBCEligibilityKey` enum off the page's `window` and builds the descriptor
- * table from it plus `ELIGIBILITY_KEY_MODEL`. There is no fallback: a missing
- * or malformed global throws naming the EA symbol, and a live member the model
- * cannot name is left out of the table and reported in `unmodelled`.
+ * table from it plus `ELIGIBILITY_KEY_MODEL`.
  *
- * No live scope enum is verified in FC27, so `scopes` is `null`: the 0/1/2
+ * The live enum is the source of truth. When it is present but malformed or
+ * empty this throws naming the EA symbol: a present-but-broken table is a
+ * problem to fix, not a reason to substitute stale numbers. Only a *missing*
+ * global falls back to `ELIGIBILITY_KEY_FALLBACK`, and the result then says so
+ * in `source` and `liveError`. A live member the model cannot name is left out
+ * of the table and reported in `unmodelled`, so a challenge that uses it raises
+ * with the key named instead of decoding a guessed constraint.
+ *
+ * `drift` is the live table compared against the fallback, in
+ * `crossCheckEligibilityKeys` form: `added` (live only), `missing` (fallback
+ * only) and `renamed` (same number, different name). A disagreement is always
+ * reported; the live meaning always wins. When the fallback itself supplied the
+ * table, `drift` is empty by construction.
+ *
+ * No live scope enum is verified in FC27, so `scopes` is `null`: the 0/1/2/3
  * scope mapping is an inference and the caller supplies it. Inventing a live
  * source for it would be a guess.
  *
  * @param {object|undefined} pageWindow the page's `window`
  * @returns {{ keys: object, scopes: null, members: Array<{eligibilityKey: number,
- *   type: string}>, unmodelled: Array<{eligibilityKey: number, type: string}> }}
- *   `keys` maps a live `eligibilityKey` number to the same descriptor shape the
- *   decoder consumes ({ type, kind, role, field? }); `members` is every enum
- *   member as read, for support reports
- * @throws {Error} when the global is missing, the enum is empty, or a member
- *   is malformed or ambiguous
+ *   type: string}>, unmodelled: Array<{eligibilityKey: number, type: string}>,
+ *   source: 'live'|'fallback', liveError: string|null,
+ *   drift: { added: Array<object>, missing: Array<object>, renamed: Array<object> } }}
+ *   `keys` maps an `eligibilityKey` number to the same descriptor shape the
+ *   decoder consumes (`{ type, kind, role, field?, classify? }`); `members` is
+ *   every enum member as read, for support reports
+ * @throws {Error} when the global is present but empty, or a member is
+ *   malformed or ambiguous
  */
 export function readEligibilityKeys(pageWindow) {
-  const enumTable = requireEaGlobal(pageWindow, 'eligibilityKeys');
-  const members = readEnumMembers(enumTable);
+  const enumTable = resolveEaGlobal(pageWindow, 'eligibilityKeys');
+  const source = enumTable === null ? 'fallback' : 'live';
+  const liveError =
+    source === 'fallback'
+      ? `${EA_GLOBALS.eligibilityKeys} is missing from the page window; resolving the pinned` +
+        ' fallback key table instead (see ELIGIBILITY_KEY_FALLBACK in src/ea/adapter.js)'
+      : null;
+  const members = source === 'live' ? readEnumMembers(enumTable) : fallbackMembers();
 
   const keys = {};
   const unmodelled = [];
@@ -298,8 +480,20 @@ export function readEligibilityKeys(pageWindow) {
     }
     const descriptor = { type: name, kind: model.kind, role: model.role };
     if (model.field !== undefined) descriptor.field = model.field;
+    if (model.classify !== undefined) descriptor.classify = model.classify;
     keys[number] = Object.freeze(descriptor);
   }
+
+  // The drift report compares what the live enum read — including members our
+  // model cannot name — against the fallback numbers, so a renumbered or
+  // renamed member is surfaced even when the model has no descriptor for it.
+  // A fallback-sourced table cannot disagree with itself, so its drift is empty.
+  const liveDescriptors = {};
+  for (const { name, number } of members) liveDescriptors[number] = { type: name };
+  const drift =
+    source === 'live'
+      ? crossCheckEligibilityKeys(liveDescriptors, fallbackDescriptors())
+      : { added: [], missing: [], renamed: [] };
 
   return Object.freeze({
     keys: Object.freeze(keys),
@@ -308,6 +502,9 @@ export function readEligibilityKeys(pageWindow) {
       members.map(({ name, number }) => Object.freeze({ eligibilityKey: number, type: name }))
     ),
     unmodelled: Object.freeze(unmodelled),
+    source,
+    liveError,
+    drift: Object.freeze(drift),
   });
 }
 
@@ -456,11 +653,16 @@ export function formatEligibilityKeysLine(resolved, report = resolved.report ?? 
     .map(([key, descriptor]) => `${Number(key)}=${descriptor.type}`);
 
   const parts = [
-    `FUT Squad Lab: ${EA_GLOBALS.eligibilityKeys}: ${keys.length} resolved [${keys.join(', ')}]`,
+    `FUT Squad Lab: ${EA_GLOBALS.eligibilityKeys}: ${keys.length} resolved [${keys.join(
+      ', '
+    )}] (source=${resolved.source ?? 'unknown'})`,
     resolved.unmodelled.length === 0
       ? 'unmodelled: none'
       : `unmodelled [${resolved.unmodelled.map(describeEligibilityEntry).join(', ')}]`,
   ];
+  if (typeof resolved.liveError === 'string') {
+    parts.push(`live read failed: ${resolved.liveError}`);
+  }
   if (report !== null) {
     parts.push(
       `cross-check added [${report.added.map(describeEligibilityEntry).join(', ')}],` +

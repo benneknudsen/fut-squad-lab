@@ -146,7 +146,12 @@ describe('the Solve action end to end', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0].operation).toBe('solve');
     expect(requests[0].payload.options.keys).toBeTruthy();
-    expect(requests[0].payload.options.scopes).toEqual({ 0: 'GREATER', 1: 'LOWER', 2: 'EXACT' });
+    expect(requests[0].payload.options.scopes).toEqual({
+      0: 'GREATER',
+      1: 'LOWER',
+      2: 'EXACT',
+      3: 'RANGE',
+    });
     // The solve is dispatched to the worker; nothing is written until it answers.
     expect(saveChallenge).not.toHaveBeenCalled();
 
@@ -246,11 +251,12 @@ describe('the Solve action end to end', () => {
     expect(error.message).toContain('solve: the worker found no legal lineup');
   });
 
-  it('fails loudly naming SBCEligibilityKey when the live enum is unreadable, and never solves', async () => {
+  it('solves from the pinned fallback table and reports the unreadable live enum', async () => {
     const { pageWindow, view, messages, saveChallenge, dispatchMessage } = createFakeWindow({
       withEligibilityKeys: false,
     });
-    pageWindow.console = { info: vi.fn() };
+    const logs = [];
+    pageWindow.console = { info: (line) => logs.push(line) };
     startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet(subjectWithSquad());
@@ -258,11 +264,17 @@ describe('the Solve action end to end', () => {
     mountedButton(view).click();
 
     await vi.waitFor(() => {
-      expect(messages.some((message) => message.kind === 'error')).toBe(true);
+      expect(messages.some((message) => message.kind === 'solve-request')).toBe(true);
     });
-    const error = messages.find((message) => message.kind === 'error');
-    expect(error.message).toContain('SBCEligibilityKey');
-    expect(messages.some((message) => message.kind === 'solve-request')).toBe(false);
+    const request = messages.find((message) => message.kind === 'solve-request');
+    // Key 35 is not in the fake live enum; the fallback table supplies it, and
+    // the diagnostic line says the table came from the fallback.
+    expect(request.payload.options.keys[35]).toMatchObject({ type: 'CHEMISTRY_POINTS' });
+    expect(
+      logs.some(
+        (line) => line.includes('source=fallback') && line.includes('SBCEligibilityKey')
+      )
+    ).toBe(true);
     expect(saveChallenge).not.toHaveBeenCalled();
   });
 });

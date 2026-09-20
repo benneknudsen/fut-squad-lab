@@ -114,11 +114,11 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
 
   /**
    * The key table is read at most once per session. A failed read is cached
-   * too, so a later solve reports the same reason instead of silently retrying
-   * into a fallback. The table is validated here, before any solve work is
-   * dispatched: an empty table is a failed read, not a solvable challenge.
-   * The full resolved object is kept beside the keys so the diagnostic stage
-   * can report the live members and the model cross-check (#40).
+   * too, so a later solve reports the same reason instead of silently retrying.
+   * `readEligibilityKeys` resolves the adapter's labelled fallback when the live
+   * enum is missing and reports its source in the result; the table is still
+   * validated here, because an empty table is a failed read, not a solvable
+   * challenge.
    */
   const resolveEligibilityOnce = () => {
     if (eligibility !== null) return eligibility;
@@ -127,8 +127,8 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
       const keys = isRecord(resolved) ? resolved.keys : null;
       if (!isRecord(keys) || Object.keys(keys).length === 0) {
         fail(
-          `the live ${EA_GLOBALS.eligibilityKeys} enum produced no usable key table; refusing to` +
-            ' fall back to a static table'
+          `the eligibility key read produced no usable key table (${EA_GLOBALS.eligibilityKeys});` +
+            ' refusing to dispatch a solve without one'
         );
       }
       eligibility = { keys, resolved };
@@ -297,6 +297,8 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
       }
       record('eligibility', true, null, {
         resolved: Object.keys(table.keys).length,
+        source: table.resolved?.source ?? null,
+        memberCount: table.resolved?.members?.length ?? 0,
         members: table.resolved?.members ?? [],
         unmodelled: table.resolved?.unmodelled ?? [],
         scopes: 'caller-supplied; no live scope enum',

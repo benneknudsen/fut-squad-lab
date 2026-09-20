@@ -93,7 +93,7 @@ import {
   totalCost,
 } from './prices.js';
 import { normaliseRequirements } from './requirements.js';
-import { validateSquad } from './validate.js';
+import { validateSquad, squadRating } from './validate.js';
 
 const MAX_ATTEMPTS = 32;
 const RESTART_WINDOW = 3;
@@ -408,7 +408,7 @@ const largestGroup = (players, read) => {
  * `unused` may contain records that no remaining slot can fit; the slot
  * coverage check handles that, so constraints may use it as a loose upper bound.
  */
-const isStillSatisfiable = (constraint, players, remainingSlots, unused, squadSize, clubIndex) => {
+const isStillSatisfiable = (constraint, players, remainingSlots, unused, clubIndex) => {
   if (!isMeasured(constraint)) return true;
 
   const { kind, value, scope } = constraint;
@@ -463,18 +463,20 @@ const isStillSatisfiable = (constraint, players, remainingSlots, unused, squadSi
   }
 
   if (kind === 'TEAM_RATING') {
-    const current = players.reduce((sum, player) => sum + player.rating, 0);
+    // The reachability bound uses the same EA formula as the validator, over
+    // the highest-rated and lowest-rated completions of the open slots. Using a
+    // plain rounded mean here could prune a completion the validator would
+    // accept (the adjusted formula can rate a squad higher than its mean).
+    const current = players.map((player) => player.rating);
     const ratings = unused.map((player) => player.rating).sort((left, right) => left - right);
     const top = ratings.slice(Math.max(0, ratings.length - remainingSlots));
     const bottom = ratings.slice(0, remainingSlots);
-    const maximum = current + top.reduce((sum, rating) => sum + rating, 0);
-    const minimum = current + bottom.reduce((sum, rating) => sum + rating, 0);
+    const highest = squadRating([...current, ...top]);
+    const lowest = squadRating([...current, ...bottom]);
 
-    if (scope === 'GREATER') return Math.round(maximum / squadSize) >= value;
-    if (scope === 'LOWER') return Math.round(minimum / squadSize) <= value;
-    return (
-      Math.round(maximum / squadSize) >= value && Math.round(minimum / squadSize) <= value
-    );
+    if (scope === 'GREATER') return highest >= value;
+    if (scope === 'LOWER') return lowest <= value;
+    return highest >= value && lowest <= value;
   }
 
   return true;
@@ -542,7 +544,7 @@ const classifyPlacement = (orderedConstraints, filled, usedIds, pool, positions,
   if (!canCoverRemainingSlots(positions, filled, unused)) return 0;
   if (
     orderedConstraints.every((constraint) =>
-      isStillSatisfiable(constraint, players, remainingSlots, unused, positions.length, clubIndex)
+      isStillSatisfiable(constraint, players, remainingSlots, unused, clubIndex)
     )
   ) {
     return 2;

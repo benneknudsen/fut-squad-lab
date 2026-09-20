@@ -104,9 +104,11 @@ export function startPageBridge(pageWindow, options = {}) {
    * Resolves EA's live `SBCEligibilityKey` enum once per session and logs one
    * line a support report can paste. The table is cached on the session state
    * for the solve wiring to pass in as `options.keys`; the pinned observation
-   * table is test data and production is structurally unable to reach it. A
-   * missing or malformed enum is reported, not thrown: this is a read, and a
-   * renamed EA symbol must stay observable rather than crash the bridge.
+   * table is test data and production is structurally unable to reach it.
+   * A missing global resolves the adapter's labelled fallback and the log line
+   * says `source=fallback`; a malformed enum is reported, not thrown: this is a
+   * read, and a renamed EA symbol must stay observable rather than crash the
+   * bridge.
    */
   const resolveEligibilityOnce = () => {
     if (state.eligibilityRead) return state.eligibility;
