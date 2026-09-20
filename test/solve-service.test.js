@@ -47,6 +47,14 @@ const createSteps = (overrides = {}) => {
       calls.push('subject');
       return { ok: true, payload: subject, strategy: 'panel-argument', attempts: [] };
     }),
+    // The load stage runs between the subject and the challenge read; the
+    // default mirrors production by falling back to the subject payload when
+    // it resolved and failing when it did not.
+    loadChallenge: vi.fn(async (pageWindow, subjectResult) =>
+      subjectResult.ok === true
+        ? { ok: true, payload: subjectResult.payload, strategy: 'subject.payload', attempts: [] }
+        : { ok: false, payload: null, strategy: null, attempts: [] }
+    ),
     readChallenge: vi.fn(() => {
       calls.push('challenge');
       return challenge;

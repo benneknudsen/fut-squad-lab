@@ -18,26 +18,27 @@
  */
 
 import {
+  CHALLENGE_LOAD_STRATEGIES,
   CHALLENGE_SQUAD_STRATEGIES,
   CHALLENGE_SUBJECT_STRATEGIES,
   CLUB_ITEM_STRATEGIES,
 } from './adapter.js';
 
 /**
- * The marker for this build. Incremented by #50: #49 introduced the
- * `services.<Domain>` reader chains and the service-domain shape report without
- * any way to say so, and this issue adds the argument evidence and the shape
- * guard.
+ * The marker for this build. Incremented by #51: the read layer moved to EA's
+ * observable calling convention, the club read became a paged search and the
+ * challenge read gained the load and active-squad chains, so a report from an
+ * older build compiled different chains.
  */
-export const BUILD_ID = 'fsl-build/2';
+export const BUILD_ID = 'fsl-build/3';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact
- * reader-chain ids compiled into `src/ea/adapter.js` for the challenge, club
- * and challenge-squad reads.
+ * reader-chain ids compiled into `src/ea/adapter.js` for the challenge, club,
+ * challenge-squad and challenge-load reads.
  *
  * @returns {{ id: string, readers: { challenge: Array<string>, club:
- *   Array<string>, squad: Array<string> } }}
+ *   Array<string>, squad: Array<string>, challengeLoad: Array<string> } }}
  */
 export function buildMarker() {
   return {
@@ -46,6 +47,7 @@ export function buildMarker() {
       challenge: CHALLENGE_SUBJECT_STRATEGIES.map((strategy) => strategy.id),
       club: CLUB_ITEM_STRATEGIES.map((strategy) => strategy.id),
       squad: CHALLENGE_SQUAD_STRATEGIES.map((strategy) => strategy.id),
+      challengeLoad: CHALLENGE_LOAD_STRATEGIES.map((strategy) => strategy.id),
     },
   };
 }
