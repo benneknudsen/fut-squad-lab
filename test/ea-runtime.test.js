@@ -124,12 +124,16 @@ describe('isClubPayload', () => {
   });
 });
 
-// The order is the contract, most-specific first: the instance paths the #44
-// live shape report proved (`services.<Domain>` containers and their DAOs), the
-// repository/service search names the report proved, the legacy
-// `services.UTSBCRepository` entry kept for page builds that still expose it,
-// then the window classes, which are constructors and are refused as instances.
+// The order is the contract, most-specific first: the #51 search path (the
+// view-model criteria plus `services.Club.search`, then the storage variant),
+// then the instance paths the #44 live shape report proved
+// (`services.<Domain>` containers and their DAOs), the repository/service
+// search names the report proved, the legacy `services.UTSBCRepository` entry
+// kept for page builds that still expose it, then the window classes, which
+// are constructors and are refused as instances.
 const EXPECTED_CLUB_STRATEGY_ORDER = [
+  'services.Club.search+searchCriteria',
+  'services.Item.searchStorageItems+searchCriteria',
   'services.Club.clubDao.getClubItems',
   'services.Club.clubDao.getClubItems+{}',
   'services.Club.clubDao.search',
@@ -173,13 +177,17 @@ describe('resolveClubItems', () => {
     expect(result.ok).toBe(true);
     expect(result.items).toBe(items);
     expect(result.strategy).toBe('services.Club.clubDao.getClubItems');
-    expect(result.attempts).toHaveLength(1);
-    expect(result.attempts[0]).toMatchObject({
+    // The two #51 search entries are attempted before it and fail for want of a
+    // search view model, so the winning attempt is found by id, not by index.
+    const attempt = result.attempts.find(
+      (entry) => entry.id === 'services.Club.clubDao.getClubItems'
+    );
+    expect(attempt).toMatchObject({
       id: 'services.Club.clubDao.getClubItems',
       ok: true,
       reason: null,
     });
-    expect(result.attempts[0].method.arity).toBe(0);
+    expect(attempt.method.arity).toBe(0);
   });
 
   it('tries getClubItems with no arguments, then with an empty object and nothing else', async () => {
@@ -208,7 +216,10 @@ describe('resolveClubItems', () => {
     expect(received[1]).toHaveLength(1);
     expect(received[1][0]).toEqual({});
     expect(Object.keys(received[1][0])).toEqual([]);
-    expect(result.attempts.map((attempt) => attempt.id)).toEqual([
+    const clubDaoAttempts = result.attempts
+      .map((attempt) => attempt.id)
+      .filter((id) => id.startsWith('services.Club.clubDao.getClubItems'));
+    expect(clubDaoAttempts).toEqual([
       'services.Club.clubDao.getClubItems',
       'services.Club.clubDao.getClubItems+{}',
     ]);
@@ -228,11 +239,16 @@ describe('resolveClubItems', () => {
     };
 
     const result = await resolveClubItems(pageWindow);
-    const [zeroArgument, emptyObject] = result.attempts;
+    const zeroArgument = result.attempts.find(
+      (attempt) => attempt.id === 'services.Club.clubDao.getClubItems'
+    );
+    const emptyObject = result.attempts.find(
+      (attempt) => attempt.id === 'services.Club.clubDao.getClubItems+{}'
+    );
 
     expect(result.ok).toBe(false);
-    expect(zeroArgument.id).toBe('services.Club.clubDao.getClubItems');
-    expect(emptyObject.id).toBe('services.Club.clubDao.getClubItems+{}');
+    expect(zeroArgument).toBeDefined();
+    expect(emptyObject).toBeDefined();
     expect(zeroArgument.id).not.toBe(emptyObject.id);
     expect(zeroArgument.reason).toBe('threw: no argument');
     expect(emptyObject.reason).toBe('threw: argument rejected');
@@ -252,12 +268,15 @@ describe('resolveClubItems', () => {
     };
 
     const result = await resolveClubItems(pageWindow);
+    const attempt = result.attempts.find(
+      (entry) => entry.id === 'services.Club.clubDao.getClubItems'
+    );
 
-    expect(result.attempts[0].ok).toBe(false);
-    expect(result.attempts[0].reason).toBe('threw: not supported');
-    expect(result.attempts[0].method.arity).toBe(2);
-    expect(result.attempts[0].method.constructor).toBe('Function');
-    expect(result.attempts[0].method.excerpt).toContain('getClubItems');
+    expect(attempt.ok).toBe(false);
+    expect(attempt.reason).toBe('threw: not supported');
+    expect(attempt.method.arity).toBe(2);
+    expect(attempt.method.constructor).toBe('Function');
+    expect(attempt.method.excerpt).toContain('getClubItems');
   });
 
   it('refuses an accessor method without invoking the getter', async () => {
@@ -268,7 +287,10 @@ describe('resolveClubItems', () => {
     const result = await resolveClubItems({ services: { Club: { clubDao } } });
 
     expect(getterSpy).not.toHaveBeenCalled();
-    expect(result.attempts[0].reason).toMatch(/accessor/);
+    const attempt = result.attempts.find(
+      (entry) => entry.id === 'services.Club.clubDao.getClubItems'
+    );
+    expect(attempt.reason).toMatch(/accessor/);
   });
 
   it('accepts a bare item array and a promise result from clubDao', async () => {
@@ -291,17 +313,18 @@ describe('resolveClubItems', () => {
     };
     const result = await resolveClubItems(pageWindow);
     expect(result.strategy).toBe('services.Club.clubDao.search');
-    expect(result.attempts[0]).toEqual({
+    const byId = (id) => result.attempts.find((attempt) => attempt.id === id);
+    expect(byId('services.Club.clubDao.getClubItems')).toEqual({
       id: 'services.Club.clubDao.getClubItems',
       ok: false,
       reason: 'Club.clubDao has no getClubItems method',
     });
-    expect(result.attempts[1]).toEqual({
+    expect(byId('services.Club.clubDao.getClubItems+{}')).toEqual({
       id: 'services.Club.clubDao.getClubItems+{}',
       ok: false,
       reason: 'Club.clubDao has no getClubItems method',
     });
-    expect(result.attempts[2].ok).toBe(true);
+    expect(byId('services.Club.clubDao.search').ok).toBe(true);
   });
 
   it('records a thrown method and tries the next candidate', async () => {
@@ -320,7 +343,8 @@ describe('resolveClubItems', () => {
     };
     const result = await resolveClubItems(pageWindow);
     expect(result.strategy).toBe('services.Club.clubDao.search');
-    expect(result.attempts[0].reason).toBe('threw: needs a search payload');
+    const attempt = result.attempts.find((entry) => entry.id === 'services.Club.clubDao.getClubItems');
+    expect(attempt.reason).toBe('threw: needs a search payload');
   });
 
   it('rejects a wrong-shaped result and records the shape, then tries the next', async () => {
@@ -337,7 +361,8 @@ describe('resolveClubItems', () => {
     };
     const result = await resolveClubItems(pageWindow);
     expect(result.strategy).toBe('services.Club.clubDao.search');
-    expect(result.attempts[0].reason).toMatch(/itemData/);
+    const attempt = result.attempts.find((entry) => entry.id === 'services.Club.clubDao.getClubItems');
+    expect(attempt.reason).toMatch(/itemData/);
   });
 
   it('reports every candidate in order with a reason when none succeed, and never guesses a size', async () => {

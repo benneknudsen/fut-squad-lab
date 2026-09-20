@@ -115,18 +115,20 @@ describe('the challenge and squad chains reach the live service containers', () 
     expect(repositoryAttempt.reason).toContain('SBC.repository');
   });
 
-  it('reads the challenge squad from services.Squad.activeSquad when the panel argument carries none', () => {
+  it('reads the challenge squad from services.Squad.activeSquad when the panel argument carries none', async () => {
     const pageWindow = { services: { Squad: { activeSquad: challengeSquad } } };
 
-    const result = resolveChallengeSquad({}, pageWindow);
+    // The squad chain now ends with bridged view-model methods, so it resolves
+    // through a promise like the club chain.
+    const result = await resolveChallengeSquad({}, pageWindow);
 
     expect(result.ok).toBe(true);
     expect(result.strategy).toBe('services.Squad.activeSquad');
     expect(result.payload).toBe(challengeSquad);
   });
 
-  it('keeps one attempt per squad strategy and a reason for every one', () => {
-    const result = resolveChallengeSquad({}, { services: { Squad: {} } });
+  it('keeps one attempt per squad strategy and a reason for every one', async () => {
+    const result = await resolveChallengeSquad({}, { services: { Squad: {} } });
 
     expect(result.ok).toBe(false);
     expect(result.attempts.map((attempt) => attempt.id)).toEqual(
