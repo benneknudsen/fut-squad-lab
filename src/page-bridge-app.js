@@ -30,7 +30,7 @@ import { createSolveService } from './ea/solve-service.js';
 import { createSolveTransport } from './ea/solve-transport.js';
 import { buildDiagnosticsReport, buildSolveSummary, formatDiagnosticsBlock } from './ea/summary.js';
 import { CONTENT_SOURCE, CONTENT_TO_PAGE_KINDS, PAGE_SOURCE, PAGE_TO_CONTENT_KINDS } from './ui/messages.js';
-import { findPanelMount } from './ui/panel-mount.js';
+import { FALLBACK_VIA, describeMountShape, findPanelMount } from './ui/panel-mount.js';
 import { mountSolveButton } from './ui/solve-button.js';
 
 const DEFAULT_HOOK_POLL_MS = 500;
@@ -57,6 +57,7 @@ export function startPageBridge(pageWindow, options = {}) {
     eligibilityRead: false,
     eligibility: null,
     eligibilityError: null,
+    mount: null,
     diagnostics: null,
   };
 
@@ -128,14 +129,22 @@ export function startPageBridge(pageWindow, options = {}) {
       );
       return;
     }
+    const fallback = via === FALLBACK_VIA;
     const mounted = mountSolveButton({
       document: pageWindow.document,
       root: node,
       label: state.label,
+      fallback,
       onClick: () => {
         handleSolveClick().catch((error) => reportError(`read failed: ${error.message}`));
       },
     });
+    // The diagnostic reports the route it took. When no panel view was
+    // recognised the shape report names what the controller actually exposes,
+    // so the real mount property can be found without another guessing round.
+    state.mount = fallback
+      ? describeMountShape(state.controller, mounted.button)
+      : { fallback: false, via };
     if (mounted.created) {
       post(PAGE_TO_CONTENT_KINDS.MOUNTED, { via, message: `button mounted via ${via}` });
       return;
@@ -149,8 +158,8 @@ export function startPageBridge(pageWindow, options = {}) {
     try {
       const outcome = await service.solve(state.subject);
       const diagnostics = buildDiagnosticsReport(outcome.stages);
-      state.diagnostics = diagnostics;
-      pageWindow.console?.log?.(formatDiagnosticsBlock(diagnostics));
+      state.diagnostics = { ...diagnostics, mount: state.mount };
+      pageWindow.console?.log?.(formatDiagnosticsBlock(state.diagnostics));
       post(PAGE_TO_CONTENT_KINDS.SUMMARY, {
         summary: outcome.read.summary,
         challengeStrategy: outcome.read.challengeStrategy,
