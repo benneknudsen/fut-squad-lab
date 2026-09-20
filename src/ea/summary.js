@@ -190,11 +190,21 @@ export function completeStages(recorded) {
  * @param {{ calls: number, waits: number, retries: number, waitedMs: number }} [pacing]
  *   the run's pacing counters (#52), so a slow run is explainable; `null` when
  *   the reporter has none
- * @returns {{ schema: string, build: object, pacing: object|null, ok: boolean,
- *   stoppedAt: string|null, stages: Array<object> }}
+ * @param {{ calls: Array<object>, dropped: number, truncated: boolean,
+ *   methods: Array<object> }} [observer] the #64 observer report: how EA's own
+ *   methods were called while this session ran, by name and type only; `null`
+ *   when no observer was installed
+ * @returns {{ schema: string, build: object, pacing: object|null,
+ *   observer: object|null, ok: boolean, stoppedAt: string|null,
+ *   stages: Array<object> }}
  * @throws {Error} when a stage outcome is missing, unknown or duplicated
  */
-export function buildDiagnosticsReport(stages, build = buildMarker(), pacing = null) {
+export function buildDiagnosticsReport(
+  stages,
+  build = buildMarker(),
+  pacing = null,
+  observer = null
+) {
   if (!Array.isArray(stages)) {
     throw new Error('buildDiagnosticsReport: stages must be an array');
   }
@@ -219,6 +229,7 @@ export function buildDiagnosticsReport(stages, build = buildMarker(), pacing = n
     schema: DIAGNOSTIC_SCHEMA,
     build,
     pacing: pacing ?? null,
+    observer: observer ?? null,
     ok: stopped === null,
     stoppedAt: stopped === null ? null : stopped.id,
     stages: completed,

@@ -1669,6 +1669,104 @@ export const resolveStrategyBase = (pageWindow, strategy) => {
 };
 
 /**
+ * The EA methods the #64 observer wraps, in the order it wants them. A wrapper
+ * records how each method was called, calls through unchanged and returns the
+ * original result; the user's own club browsing therefore answers how EA
+ * itself calls its club methods, without this project guessing.
+ *
+ * The three service entries are the read path #51/#61 reached: the club search,
+ * its item DAO fallback and the storage search. The panel entry wraps
+ * `initWithSBCSet` so the payload EA hands the SBC detail panel — and thereby
+ * the shape that carries the challenge — is recorded by property name and type.
+ *
+ * `prototype: true` means the holder is the class prototype, not the class
+ * itself, because EA calls the hook on an instance.
+ */
+export const OBSERVED_METHOD_TARGETS = Object.freeze([
+  Object.freeze({ id: 'services.Club.search', container: 'services', target: 'Club', method: 'search' }),
+  Object.freeze({
+    id: 'services.Club.clubDao.getClubItems',
+    container: 'services',
+    target: 'Club.clubDao',
+    method: 'getClubItems',
+  }),
+  Object.freeze({
+    id: 'services.Item.searchStorageItems',
+    container: 'services',
+    target: 'Item',
+    method: 'searchStorageItems',
+  }),
+  Object.freeze({
+    id: `${EA_GLOBALS.squadDetailPanel}.prototype.${EA_PANEL_HOOK.entry}`,
+    container: 'window',
+    target: 'squadDetailPanel',
+    method: EA_PANEL_HOOK.entry,
+    prototype: true,
+  }),
+]);
+
+/**
+ * The only criteria fields whose **values** the #64 observer may record. These
+ * are request-shaping numbers and enum-like strings, not account-scoped data.
+ * Every other argument field contributes its name and type only, and a name on
+ * the shared paste-safety list is redacted. A club search criteria object
+ * carries identifiers, so the allowlist is deliberately small.
+ */
+export const OBSERVED_CRITERIA_VALUE_FIELDS = Object.freeze([
+  'count',
+  'offset',
+  'sortBy',
+  '_type',
+  '_category',
+  '_position',
+  '_sort',
+  '_zone',
+  'isExactSearch',
+  'preferredPositionOnly',
+]);
+
+/**
+ * Resolves every `OBSERVED_METHOD_TARGETS` entry to the live holder the
+ * observer wraps: the instance behind a `services.<Domain>` path, or the
+ * prototype of a named window class. A missing holder keeps its entry with a
+ * reason, so the observer report can name what was absent instead of only what
+ * was wrapped.
+ *
+ * Reads only: it resolves property paths and never calls a method or invokes an
+ * accessor.
+ *
+ * @param {object|undefined} pageWindow the page's `window`
+ * @returns {{ targets: Array<{ id: string, holder: object|null, method: string,
+ *   reason?: string }> }}
+ */
+export function resolveObservationTargets(pageWindow) {
+  return {
+    targets: OBSERVED_METHOD_TARGETS.map((strategy) => {
+      const base = resolveStrategyBase(pageWindow, strategy);
+      if (!base.ok) {
+        return { id: strategy.id, holder: null, method: strategy.method, reason: base.reason };
+      }
+      if (strategy.prototype !== true) {
+        return { id: strategy.id, holder: base.value, method: strategy.method };
+      }
+      if (
+        typeof base.value !== 'function' ||
+        base.value.prototype === null ||
+        typeof base.value.prototype !== 'object'
+      ) {
+        return {
+          id: strategy.id,
+          holder: null,
+          method: strategy.method,
+          reason: `${base.name} is not a constructor with a prototype`,
+        };
+      }
+      return { id: strategy.id, holder: base.value.prototype, method: strategy.method };
+    }),
+  };
+}
+
+/**
  * Reads a method off a resolved container without invoking an accessor. The
  * descriptor chain is consulted first at every prototype level, so a live
  * getter is refused with a reason instead of being run inside the player's

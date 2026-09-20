@@ -787,4 +787,25 @@ describe('the page bridge exposes one documented diagnostic global', () => {
     expect(logs).toContain(block);
     expect(block).toContain('__FSL_DIAGNOSE__');
   });
+
+  it('carries the observer captures in the pasted report, names and types only', async () => {
+    const { pageWindow, view, dispatchMessage } = createDiagnosticsWindow();
+    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+    dispatchMessage(COPY_MESSAGE);
+    const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
+    controller.initWithSBCSet({ ...challengeFixture, squad: challengeSquadFixture.squad });
+    mountedButton(view).click();
+
+    await vi.waitFor(() => {
+      expect(pageWindow.__FSL_DIAGNOSE__()).not.toBeNull();
+    });
+
+    const report = pageWindow.__FSL_DIAGNOSE__();
+    const call = report.observer.calls.find((entry) => entry.method.includes('initWithSBCSet'));
+    expect(call).toBeDefined();
+    expect(call.argumentCount).toBe(1);
+    expect(call.args[0].type).toBe('object');
+    expect(call.args[0].keys.some((entry) => entry.name === 'elgReq')).toBe(true);
+    expect(JSON.stringify(report.observer)).not.toContain('3 Leagues & 2 Nations');
+  });
 });
