@@ -15,14 +15,18 @@
 
 const BUTTON_ATTRIBUTE = 'data-fsl-solve-button';
 const BUTTON_SELECTOR = `[${BUTTON_ATTRIBUTE}]`;
+const FALLBACK_ATTRIBUTE = 'data-fsl-fallback';
 
 /**
- * @param {{ document: object, root: object, label: string, onClick: Function }} options
+ * @param {{ document: object, root: object, label: string, onClick: Function,
+ *   fallback?: boolean }} options `fallback` marks the diagnostic
+ *   fixed-position mount (#42), so the stylesheet pins it where it is
+ *   reachable; it is not the intended panel mount
  * @returns {{ wrapper: object, toolbar: object, button: object, created: boolean }}
  *   `created` is false when an earlier mount's button was found
  * @throws {Error} when the mount root or the copy label is missing
  */
-export function mountSolveButton({ document, root, label, onClick }) {
+export function mountSolveButton({ document, root, label, onClick, fallback = false }) {
   if (root === null || root === undefined) {
     throw new Error('mountSolveButton: a panel mount root is required');
   }
@@ -38,6 +42,7 @@ export function mountSolveButton({ document, root, label, onClick }) {
 
   const wrapper = document.createElement('div');
   wrapper.className = 'fsl-root';
+  if (fallback === true) wrapper.setAttribute(FALLBACK_ATTRIBUTE, '');
 
   const toolbar = document.createElement('div');
   toolbar.className = 'fsl-toolbar';
