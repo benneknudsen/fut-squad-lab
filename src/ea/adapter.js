@@ -65,6 +65,8 @@
  * This file is pure data and pure functions. No DOM, no chrome APIs, no network.
  */
 
+import { describeMethodShape } from '../shape.js';
+
 /**
  * The eleven starting slot positions of every SBC formation the solver may
  * solve, keyed by the raw payload formation code. A formation is EA payload
@@ -1250,9 +1252,20 @@ const describeValue = (value) => {
  * of raw EA names inside the service locator. Every attempt keeps its
  * `{id, ok, reason}` record rather than being silently dropped, and nothing
  * here invents a club size or an argument payload.
+ *
+ * The #50 live session proved `services.Club.clubDao.getClubItems` exists and
+ * runs: it threw reading `.cacheable` off `undefined`, which points at its
+ * first argument. Its minimal call shapes are therefore both tried, under their
+ * own ids: no arguments, then a single empty object. `{}` is the empty
+ * argument, not an invented payload — no field value, no count and no offset is
+ * guessed, and a strategy's `argument` property is the only payload this chain
+ * ever passes. An attempt whose method resolved carries that method's
+ * `{arity, constructor, excerpt, truncated}` shape, so the next live run can
+ * read the real call shape instead of guessing another name.
  */
 export const CLUB_ITEM_STRATEGIES = Object.freeze([
   Object.freeze({ id: 'services.Club.clubDao.getClubItems', container: 'services', target: 'Club.clubDao', method: 'getClubItems' }),
+  Object.freeze({ id: 'services.Club.clubDao.getClubItems+{}', container: 'services', target: 'Club.clubDao', method: 'getClubItems', argument: Object.freeze({}) }),
   Object.freeze({ id: 'services.Club.clubDao.search', container: 'services', target: 'Club.clubDao', method: 'search' }),
   Object.freeze({ id: 'services.Club.clubRepository.search', container: 'services', target: 'Club.clubRepository', method: 'search' }),
   Object.freeze({ id: 'services.Club.clubService.search', container: 'services', target: 'Club.clubService', method: 'search' }),
@@ -1354,17 +1367,61 @@ export const resolveStrategyBase = (pageWindow, strategy) => {
 };
 
 /**
+ * Reads a method off a resolved container without invoking an accessor. The
+ * descriptor chain is consulted first at every prototype level, so a live
+ * getter is refused with a reason instead of being run inside the player's
+ * authenticated session; a data method is returned.
+ *
+ * @param {object} target the resolved strategy base
+ * @param {string} name the method name to read
+ * @returns {{ ok: true, value: Function }|{ ok: false, reason: string|null }}
+ *   `reason` is null when the property is absent or not a function; otherwise
+ *   it names why the value could not be called
+ */
+const findMethod = (target, name) => {
+  let current = target;
+  while (current !== null && current !== undefined) {
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(current, name);
+    } catch {
+      return { ok: false, reason: 'unreadable' };
+    }
+    if (descriptor !== undefined) {
+      if (typeof descriptor.get === 'function') {
+        return { ok: false, reason: 'an accessor(get); refusing to invoke it' };
+      }
+      return typeof descriptor.value === 'function'
+        ? { ok: true, value: descriptor.value }
+        : { ok: false, reason: null };
+    }
+    try {
+      current = Object.getPrototypeOf(current);
+    } catch {
+      return { ok: false, reason: 'unreadable' };
+    }
+  }
+  return { ok: false, reason: null };
+};
+
+/**
  * Tries every club-read strategy in order and returns the first payload that
  * looks like club items.
  *
  * The result carries the winning strategy id and an attempt record for every
- * candidate tried, in order: `{ id, ok, reason }`. When nothing succeeds,
- * `items` is an empty array — never a guessed count — and every attempt's
- * reason names what was missing or wrong.
+ * candidate tried, in order: `{ id, ok, reason }`, plus `method` — the resolved
+ * method's `{arity, constructor, excerpt, truncated}` shape — whenever the
+ * strategy reached a callable method, including one that then threw. A strategy
+ * that carries an `argument` is called with exactly that argument; every other
+ * strategy is called with none.
+ *
+ * When nothing succeeds, `items` is an empty array — never a guessed count —
+ * and every attempt's reason names what was missing or wrong.
  *
  * @param {object|undefined} pageWindow the page's `window`
  * @returns {Promise<{ ok: boolean, items: Array<object>, strategy: string|null,
- *   attempts: Array<{id: string, ok: boolean, reason: string|null}> }>}
+ *   attempts: Array<{id: string, ok: boolean, reason: string|null,
+ *   method?: object}> }>}
  */
 export async function resolveClubItems(pageWindow) {
   const attempts = [];
@@ -1376,14 +1433,19 @@ export async function resolveClubItems(pageWindow) {
       attempt.reason = base.reason;
       continue;
     }
-    const method = base.value[strategy.method];
-    if (typeof method !== 'function') {
-      attempt.reason = `${base.name} has no ${strategy.method} method`;
+    const found = findMethod(base.value, strategy.method);
+    if (!found.ok) {
+      attempt.reason =
+        found.reason === null
+          ? `${base.name} has no ${strategy.method} method`
+          : `${base.name} exposes ${strategy.method} as ${found.reason}`;
       continue;
     }
+    const callArguments = Object.hasOwn(strategy, 'argument') ? [strategy.argument] : [];
+    attempt.method = describeMethodShape(found.value);
     let result;
     try {
-      result = await method.call(base.value);
+      result = await found.value.apply(base.value, callArguments);
     } catch (error) {
       const message = error !== null && typeof error === 'object' ? error.message : String(error);
       attempt.reason = `threw: ${message}`;

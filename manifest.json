@@ -33,6 +33,7 @@
         "src/content-app.js",
         "src/page-bridge-app.js",
         "src/ea/adapter.js",
+        "src/ea/build.js",
         "src/ea/challenge-reader.js",
         "src/ea/club-reader.js",
         "src/ea/summary.js",
