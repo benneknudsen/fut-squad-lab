@@ -36,7 +36,7 @@ const solveInput = (overrides = {}) => ({
 
 describe('the pinned scope model', () => {
   it('lives in the adapter and the test fixture re-exports the same object', () => {
-    expect(SCOPE_VALUES).toEqual({ 0: 'GREATER', 1: 'LOWER', 2: 'EXACT' });
+    expect(SCOPE_VALUES).toEqual({ 0: 'GREATER', 1: 'LOWER', 2: 'EXACT', 3: 'RANGE' });
     expect(Object.isFrozen(SCOPE_VALUES)).toBe(true);
     expect(FIXTURE_SCOPE_VALUES).toBe(SCOPE_VALUES);
   });

@@ -264,11 +264,16 @@ describe('solve cost completeness', () => {
     expect(coverage.unknown).toBe(0);
   });
 
-  it('keeps a second fully priced fixture solve exactly as before', () => {
+  it('keeps a second fully priced fixture solve valid at its re-pinned cost', () => {
     const result = solve(set16.challenges[3], POOL, options());
 
+    // Issue #53: the reachability bound for TEAM_RATING now uses EA's
+    // adjusted-mean formula instead of a plain rounded mean. This challenge
+    // (set 16 challenge 39, TEAM_RATING >= 75) solves to 2062.4, where the
+    // plain-mean bound had pinned 2368.4. The result is still valid under the
+    // validator's adjusted-mean rating.
     expect(result.valid).toBe(true);
-    expect(result.cost).toBe(2368.4);
+    expect(result.cost).toBe(2062.4);
     expect(result.costComplete).toBe(true);
   });
 

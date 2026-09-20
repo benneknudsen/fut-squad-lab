@@ -4,10 +4,12 @@
  *
  * This data deliberately does not live under `src/`. Issue #16 requires the
  * production path to build its key table from EA's live `SBCEligibilityKey` enum
- * through `readEligibilityKeys()` in `src/ea/adapter.js`; a copy of this table
- * inside `src/` would be a fallback a caller could silently reach for. Keeping
- * it in the test fixtures makes that structurally impossible: there is no
- * export for `src/solver/` to import.
+ * through `readEligibilityKeys()` in `src/ea/adapter.js`; production may only
+ * fall back to the separately labelled `ELIGIBILITY_KEY_FALLBACK` table in that
+ * adapter, never to this captured observation set. Keeping this table in the
+ * test fixtures makes that structural: there is no export for `src/solver/` to
+ * import, and the solver's decode entry points still require caller-supplied
+ * tables.
  *
  * `PINNED_ELIGIBILITY_KEYS` maps `eligibilityKey` to a descriptor:
  *
