@@ -253,7 +253,7 @@ time. Sizing of the shell never changes between views, so the panel does not jum
 | Slider | `.fsl-range` | track `height: 4px`, `background: var(--fsl-surface-2)`, `border-radius: var(--fsl-r-pill)`; filled portion `var(--fsl-accent-deep)`; thumb 16 px circle, `background: var(--fsl-fg)`, `border: 2px solid var(--fsl-surface-0)`; focus-visible → accent ring |
 | Switch | `.fsl-switch` | `44×24`, `border-radius: var(--fsl-r-pill)`; off → `background: var(--fsl-surface-2)`, `border: 1px solid var(--fsl-border-strong)`; on → `background: var(--fsl-accent-deep)`, border `var(--fsl-accent-deep)`; knob 18 px `var(--fsl-fg)`, translates 20 px over `var(--fsl-dur-2)` |
 | Segmented control | `.fsl-seg` | 2–3 options, `height: var(--fsl-ctl)`; selected → `background: var(--fsl-surface-2)`, `color: var(--fsl-fg)`, `box-shadow: inset 0 0 0 1px var(--fsl-border-strong)`; unselected → `color: var(--fsl-fg-muted)`, transparent |
-| Cost-model weights | `.fsl-weights` | four sliders, each 0.00–1.00, step 0.05, value shown as `0.85`. Order is fixed: duplicate-untradeable, untradeable, tradeable, concept |
+| Cost-model weights | `.fsl-weights` | four sliders, each 0.00–2.00, step 0.05, value shown as `0.85`. Order is fixed: duplicate-untradeable, untradeable, tradeable, concept |
 | Effort control | `.fsl-effort` | 5 steps, labelled `fast` / `balanced` / `thorough` at the ends and middle; hint line carries the real number of lineups: `niveau 3 af 5 · op til 2 400 opstillinger` |
 | Danger row | `.fsl-danger-row` | `fsl-options.reset` styled with `--fsl-danger` text on transparent, `border: 1px solid color-mix(in oklch, var(--fsl-danger) 45%, transparent)`; hover → `background: var(--fsl-danger-soft)`. Only destructive-styled control on the page |
 

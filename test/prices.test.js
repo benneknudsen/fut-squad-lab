@@ -95,7 +95,7 @@ describe('captured club fixture degeneracy', () => {
 });
 
 describe('documented vocabulary', () => {
-  it('exposes exactly the four card states and four price sources', () => {
+  it('exposes exactly the four card states and the five price sources', () => {
     expect(CARD_STATES).toEqual([
       'untradeableDuplicate',
       'untradeable',
@@ -106,6 +106,7 @@ describe('documented vocabulary', () => {
       external: 'external',
       marketAverage: 'ea-market-average',
       discardValue: 'ea-discard-value',
+      ratingEstimate: 'rating-p60-estimate',
       none: 'none',
     });
   });
@@ -365,8 +366,8 @@ describe('itemCost', () => {
     expect(itemCost(record)).toEqual({
       price: 1000,
       priceSource: PRICE_SOURCES.marketAverage,
-      weight: 0.4,
-      contribution: 400,
+      weight: 0.7,
+      contribution: 700,
     });
   });
 
@@ -390,29 +391,29 @@ describe('itemCost', () => {
     expect(itemCost(untradeable)).toEqual({
       price: 1000,
       priceSource: PRICE_SOURCES.marketAverage,
-      weight: 0.4,
-      contribution: 400,
+      weight: 0.7,
+      contribution: 700,
     });
     expect(itemCost(duplicate)).toEqual({
       price: 1000,
       priceSource: PRICE_SOURCES.marketAverage,
-      weight: 0.2,
-      contribution: 200,
+      weight: 0.1,
+      contribution: 100,
     });
     expect(itemCost(concept)).toEqual({
       price: 1000,
       priceSource: PRICE_SOURCES.external,
-      weight: 1,
-      contribution: 1000,
+      weight: 2,
+      contribution: 2000,
     });
   });
 
   it('uses the design defaults when no weights argument is supplied', () => {
     expect(DEFAULT_WEIGHTS).toEqual({
-      untradeableDuplicate: 0.2,
-      untradeable: 0.4,
+      untradeableDuplicate: 0.1,
+      untradeable: 0.7,
       tradeable: 1,
-      concept: 1,
+      concept: 2,
     });
   });
 
@@ -425,7 +426,7 @@ describe('itemCost', () => {
       ])
     );
 
-    expect(itemCost(duplicate).contribution).toBe(200);
+    expect(itemCost(duplicate).contribution).toBe(100);
     expect(itemCost(tradeable).contribution).toBe(1000);
     expect(itemCost(duplicate).contribution).toBeLessThan(itemCost(tradeable).contribution);
   });
@@ -436,8 +437,8 @@ describe('itemCost', () => {
     expect(itemCost(record)).toEqual({
       price: 1000,
       priceSource: PRICE_SOURCES.marketAverage,
-      weight: 0.4,
-      contribution: 400,
+      weight: 0.7,
+      contribution: 700,
     });
     expect(itemCost(record, { untradeable: 0.75 })).toEqual({
       price: 1000,
@@ -457,8 +458,8 @@ describe('itemCost', () => {
 
     const cost = itemCost(duplicate, { tradeable: 5 });
 
-    expect(cost.weight).toBe(0.2);
-    expect(cost.contribution).toBe(200);
+    expect(cost.weight).toBe(0.1);
+    expect(cost.contribution).toBe(100);
   });
 
   it('does not mutate the caller weights or the defaults', () => {
@@ -564,7 +565,7 @@ describe('itemCost', () => {
     const priced = mergePrices([conceptRecord({ id: 1, assetId: 753 })], { 753: 2500 })[0];
     const unpriced = mergePrices([conceptRecord({ id: 2, assetId: 754 })])[0];
 
-    expect(itemCost(priced).contribution).toBe(2500);
+    expect(itemCost(priced).contribution).toBe(5000);
     expect(itemCost(unpriced).contribution).toBe(UNKNOWN_CONTRIBUTION);
   });
 
@@ -611,7 +612,7 @@ describe('totalCost', () => {
       merge({ id: 2, assetId: 762, untradeable: false, marketAverage: 250 })
     );
 
-    expect(totalCost([untradeable.contribution, tradeable.contribution])).toBe(650);
+    expect(totalCost([untradeable.contribution, tradeable.contribution])).toBe(950);
   });
 
   it('returns a known total as the same number after a JSON round trip', () => {
@@ -619,7 +620,7 @@ describe('totalCost', () => {
       merge({ id: 1, assetId: 763, untradeable: true, marketAverage: 1000 })
     ).contribution;
 
-    expect(JSON.parse(JSON.stringify(totalCost([contribution])))).toBe(400);
+    expect(JSON.parse(JSON.stringify(totalCost([contribution])))).toBe(700);
   });
 
   it('propagates an unknown contribution instead of adding it as zero', () => {
