@@ -28,6 +28,7 @@ import {
 } from './ea/adapter.js';
 import { createSolveService } from './ea/solve-service.js';
 import { createSolveTransport } from './ea/solve-transport.js';
+import { buildMarker } from './ea/build.js';
 import { buildDiagnosticsReport, buildSolveSummary, formatDiagnosticsBlock } from './ea/summary.js';
 import { CONTENT_SOURCE, CONTENT_TO_PAGE_KINDS, PAGE_SOURCE, PAGE_TO_CONTENT_KINDS } from './ui/messages.js';
 import { FALLBACK_VIA, describeMountShape, findPanelMount } from './ui/panel-mount.js';
@@ -41,9 +42,11 @@ const PATCH_FLAG = '__fslPatchedBySquadLab';
  * Starts the bridge in the page's `window`.
  *
  * @param {object} pageWindow the page `window`
- * @param {{ hookPollMs?: number, hookTimeoutMs?: number }} [options] poll
- *   tuning; the defaults keep checking for a minute before reporting a missing
- *   class, because the SPA may load EA's bundle after this script
+ * @param {{ hookPollMs?: number, hookTimeoutMs?: number, pacer?: object }} [options]
+ *   poll tuning; the defaults keep checking for a minute before reporting a
+ *   missing class, because the SPA may load EA's bundle after this script.
+ *   `pacer` is the queue every EA call runs through (#52); production omits it
+ *   and the solve service owns a fresh paced queue
  */
 export function startPageBridge(pageWindow, options = {}) {
   const hookPollMs = options.hookPollMs ?? DEFAULT_HOOK_POLL_MS;
@@ -76,6 +79,7 @@ export function startPageBridge(pageWindow, options = {}) {
   const service = createSolveService({
     pageWindow,
     requestSolve: (operation, payload) => transport.requestSolve(operation, payload),
+    pacer: options.pacer,
     steps: {
       readEligibilityKeys: () => {
         if (state.eligibilityError !== null) throw state.eligibilityError;
@@ -157,7 +161,11 @@ export function startPageBridge(pageWindow, options = {}) {
     state.busy = true;
     try {
       const outcome = await service.solve(state.subject);
-      const diagnostics = buildDiagnosticsReport(outcome.stages);
+      const diagnostics = buildDiagnosticsReport(
+        outcome.stages,
+        buildMarker(),
+        outcome.pacing
+      );
       state.diagnostics = { ...diagnostics, mount: state.mount };
       pageWindow.console?.log?.(formatDiagnosticsBlock(state.diagnostics));
       post(PAGE_TO_CONTENT_KINDS.SUMMARY, {
@@ -186,7 +194,10 @@ export function startPageBridge(pageWindow, options = {}) {
   };
 
   const onPanel = (controller, subject) => {
-    if (state.subject !== subject) transport.cancel();
+    if (state.subject !== subject) {
+      transport.cancel();
+      service.cancel();
+    }
     state.controller = controller;
     state.subject = subject;
     resolveEligibilityOnce();
@@ -249,7 +260,10 @@ export function startPageBridge(pageWindow, options = {}) {
     }
   });
 
-  pageWindow.addEventListener('pagehide', () => transport.cancel());
+  pageWindow.addEventListener('pagehide', () => {
+    service.cancel();
+    transport.cancel();
+  });
 
   const deadline = Date.now() + hookTimeoutMs;
   const poll = () => {

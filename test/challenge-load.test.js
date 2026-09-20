@@ -4,6 +4,9 @@ import {
   CHALLENGE_LOAD_STRATEGIES,
   loadChallengePayload,
 } from '../src/ea/adapter.js';
+import { createTestPacer } from './helpers/pacing.js';
+
+const testPacer = createTestPacer();
 
 // Issue #51: the challenge is loaded through an observable — the primary call
 // is `services.SBC.loadChallenge(challenge)`, the recorded fallback is the DAO
@@ -71,7 +74,7 @@ describe('loadChallengePayload', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, subjectResult);
+    const result = await loadChallengePayload(pageWindow, subjectResult, { pacer: testPacer });
 
     expect(result.ok).toBe(true);
     expect(result.payload).toBe(loaded);
@@ -92,7 +95,7 @@ describe('loadChallengePayload', () => {
       services: { SBC: { loadChallenge: () => responseOf(loaded) } },
     };
 
-    const result = await loadChallengePayload(pageWindow, subjectResult);
+    const result = await loadChallengePayload(pageWindow, subjectResult, { pacer: testPacer });
 
     expect(result.ok).toBe(true);
     expect(result.payload).toBe(loaded);
@@ -114,7 +117,7 @@ describe('loadChallengePayload', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, subjectResult);
+    const result = await loadChallengePayload(pageWindow, subjectResult, { pacer: testPacer });
 
     expect(result.ok).toBe(true);
     expect(result.strategy).toBe('services.SBC.sbcDAO.loadChallenge+id');
@@ -137,7 +140,7 @@ describe('loadChallengePayload', () => {
     };
     const emptySubject = { ok: false, payload: null, strategy: null, attempts: [] };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject);
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
 
     expect(result.ok).toBe(true);
     expect(result.strategy).toBe('services.SBC.loadChallenge');
@@ -146,7 +149,7 @@ describe('loadChallengePayload', () => {
   });
 
   it('falls back to the panel payload the subject already carried', async () => {
-    const result = await loadChallengePayload({ services: {} }, subjectResult);
+    const result = await loadChallengePayload({ services: {} }, subjectResult, { pacer: testPacer });
 
     expect(result.ok).toBe(true);
     expect(result.payload).toBe(challenge);
@@ -167,7 +170,7 @@ describe('loadChallengePayload', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, subjectResult);
+    const result = await loadChallengePayload(pageWindow, subjectResult, { pacer: testPacer });
 
     expect(result.strategy).toBe('subject.payload');
     const attempt = result.attempts.find((entry) => entry.id === 'services.SBC.loadChallenge+subject');
@@ -179,7 +182,7 @@ describe('loadChallengePayload', () => {
       services: { SBC: { loadChallenge: () => ({ pagination: {} }) } },
     };
 
-    const result = await loadChallengePayload(pageWindow, subjectResult);
+    const result = await loadChallengePayload(pageWindow, subjectResult, { pacer: testPacer });
 
     expect(result.strategy).toBe('subject.payload');
     const attempt = result.attempts.find((entry) => entry.id === 'services.SBC.loadChallenge+subject');
@@ -191,7 +194,10 @@ describe('loadChallengePayload', () => {
       services: { SBC: { loadChallenge: () => neverFires() } },
     };
 
-    const result = await loadChallengePayload(pageWindow, subjectResult, { observableTimeoutMs: 20 });
+    const result = await loadChallengePayload(pageWindow, subjectResult, {
+      observableTimeoutMs: 20,
+      pacer: testPacer,
+    });
 
     expect(result.ok).toBe(true);
     expect(result.strategy).toBe('subject.payload');
@@ -202,7 +208,7 @@ describe('loadChallengePayload', () => {
   it('fails with a reason per attempt when nothing can load the challenge', async () => {
     const emptySubject = { ok: false, payload: null, strategy: null, attempts: [] };
 
-    const result = await loadChallengePayload({ services: {} }, emptySubject);
+    const result = await loadChallengePayload({ services: {} }, emptySubject, { pacer: testPacer });
 
     expect(result.ok).toBe(false);
     expect(result.payload).toBeNull();
