@@ -22,13 +22,16 @@
 import {
   EA_GLOBALS,
   EA_PANEL_HOOK,
+  OBSERVED_CRITERIA_VALUE_FIELDS,
   formatEligibilityKeysLine,
   readEligibilityKeys,
   resolveEaGlobal,
+  resolveObservationTargets,
 } from './ea/adapter.js';
 import { createSolveService } from './ea/solve-service.js';
 import { createSolveTransport } from './ea/solve-transport.js';
 import { buildMarker } from './ea/build.js';
+import { createMethodObserver, formatObserverCall } from './ea/observer.js';
 import { buildDiagnosticsReport, buildSolveSummary, formatDiagnosticsBlock } from './ea/summary.js';
 import { CONTENT_SOURCE, CONTENT_TO_PAGE_KINDS, PAGE_SOURCE, PAGE_TO_CONTENT_KINDS } from './ui/messages.js';
 import { FALLBACK_VIA, describeMountShape, findPanelMount } from './ui/panel-mount.js';
@@ -37,6 +40,9 @@ import { mountSolveButton } from './ui/solve-button.js';
 const DEFAULT_HOOK_POLL_MS = 500;
 const DEFAULT_HOOK_TIMEOUT_MS = 60_000;
 const PATCH_FLAG = '__fslPatchedBySquadLab';
+
+/** The console group the #64 observer logs every captured EA call into. */
+const OBSERVER_GROUP_TITLE = 'FUT Squad Lab — observed EA calls';
 
 /**
  * Starts the bridge in the page's `window`.
@@ -62,12 +68,49 @@ export function startPageBridge(pageWindow, options = {}) {
     eligibilityError: null,
     mount: null,
     diagnostics: null,
+    observerGrouped: false,
   };
 
   const post = (kind, payload = {}) =>
     pageWindow.postMessage({ source: PAGE_SOURCE, kind, ...payload }, '*');
 
   const reportError = (message) => post(PAGE_TO_CONTENT_KINDS.ERROR, { message });
+
+  /**
+   * The #64 observer: read-only, wraps EA's own club methods and the panel
+   * hook, records how EA called them, and returns every result unchanged. The
+   * captures are logged into one console group as they happen and carried in
+   * the diagnostics report. Values are recorded only for the adapter's
+   * allowlist; everything else is a name and a type.
+   */
+  const observer = createMethodObserver({
+    valueFields: OBSERVED_CRITERIA_VALUE_FIELDS,
+    onCall: (record) => {
+      try {
+        const log = pageWindow.console;
+        if (!state.observerGrouped) {
+          state.observerGrouped = true;
+          log?.group?.(OBSERVER_GROUP_TITLE);
+        }
+        log?.log?.(formatObserverCall(record));
+      } catch {
+        // Instrumentation must never break the call it observes.
+      }
+    },
+  });
+
+  /**
+   * Installs the observer on whatever targets this page exposes right now.
+   * Idempotent, and never throws: it is instrumentation, so a missing EA
+   * symbol must not affect the bridge or the player's session.
+   */
+  const installObservation = () => {
+    try {
+      observer.install(resolveObservationTargets(pageWindow).targets);
+    } catch {
+      // A read-only observer must never be able to lose the bridge.
+    }
+  };
 
   const transport = createSolveTransport({
     post: (message) => {
@@ -166,7 +209,8 @@ export function startPageBridge(pageWindow, options = {}) {
       const diagnostics = buildDiagnosticsReport(
         outcome.stages,
         buildMarker(),
-        outcome.pacing
+        outcome.pacing,
+        observer.report()
       );
       state.diagnostics = { ...diagnostics, mount: state.mount };
       pageWindow.console?.log?.(formatDiagnosticsBlock(state.diagnostics));
@@ -204,6 +248,9 @@ export function startPageBridge(pageWindow, options = {}) {
     state.subject = subject;
     resolveEligibilityOnce();
     ensureMounted();
+    // A panel hook firing means EA's app is up; wrap anything that appeared
+    // after the last install attempt. Idempotent.
+    installObservation();
   };
 
   const patchPanel = (Controller) => {
@@ -265,6 +312,13 @@ export function startPageBridge(pageWindow, options = {}) {
   pageWindow.addEventListener('pagehide', () => {
     service.cancel();
     transport.cancel();
+    // Never leave an observer wrapper installed: restore EA's own functions
+    // and close the console group the captures opened.
+    observer.remove();
+    if (state.observerGrouped) {
+      state.observerGrouped = false;
+      pageWindow.console?.groupEnd?.();
+    }
   });
 
   const deadline = Date.now() + hookTimeoutMs;
@@ -282,6 +336,9 @@ export function startPageBridge(pageWindow, options = {}) {
     }
     pageWindow.clearInterval(timer);
     patchPanel(Controller);
+    // Patch first, then observe, so the observer wraps our hook and can
+    // restore it on teardown without unwrapping the button patch.
+    installObservation();
   };
   const timer = pageWindow.setInterval(poll, hookPollMs);
   poll();
