@@ -1238,27 +1238,42 @@ const describeValue = (value) => {
 /**
  * The ordered club-read strategies this bridge tries, most likely first.
  *
- * EA documents the `/club` endpoint but not the page method that calls it, so
- * the bridge does not guess a single name. It tries each combination in order,
- * records which one answered and records why the others did not, and reports
- * that whole list when none do. Nothing here invents a club size.
+ * The #44 live shape report proved the instances live under `services.<Domain>`
+ * (`services.Club.clubDao`, `services.Item.itemDao`, `services.SBC.repository`
+ * and so on), never at `services.<ClassName>`. The chain therefore reaches the
+ * proven instance paths first, then the repository search names the report
+ * proved, then the legacy `services.UTSBCRepository` entry as a late fallback
+ * for a page build that still exposes it, and finally the window classes, which
+ * are refused as constructors because a class is not an instance.
+ *
+ * A `services` target that is not a key of `EA_GLOBALS` is read as a dot path
+ * of raw EA names inside the service locator. Every attempt keeps its
+ * `{id, ok, reason}` record rather than being silently dropped, and nothing
+ * here invents a club size or an argument payload.
  */
 export const CLUB_ITEM_STRATEGIES = Object.freeze([
+  Object.freeze({ id: 'services.Club.clubDao.getClubItems', container: 'services', target: 'Club.clubDao', method: 'getClubItems' }),
+  Object.freeze({ id: 'services.Club.clubDao.search', container: 'services', target: 'Club.clubDao', method: 'search' }),
+  Object.freeze({ id: 'services.Club.clubRepository.search', container: 'services', target: 'Club.clubRepository', method: 'search' }),
+  Object.freeze({ id: 'services.Club.clubService.search', container: 'services', target: 'Club.clubService', method: 'search' }),
+  Object.freeze({ id: 'services.Item.itemDao.getClubItems', container: 'services', target: 'Item.itemDao', method: 'getClubItems' }),
+  Object.freeze({ id: 'services.Item.itemDao.search', container: 'services', target: 'Item.itemDao', method: 'search' }),
+  Object.freeze({ id: 'services.SBC.itemRepository.getClubItems', container: 'services', target: 'SBC.itemRepository', method: 'getClubItems' }),
+  Object.freeze({ id: 'services.SBC.itemRepository.search', container: 'services', target: 'SBC.itemRepository', method: 'search' }),
+  Object.freeze({ id: 'services.SBC.repository.getClubItems', container: 'services', target: 'SBC.repository', method: 'getClubItems' }),
+  Object.freeze({ id: 'services.SBC.repository.search', container: 'services', target: 'SBC.repository', method: 'search' }),
+  Object.freeze({ id: 'services.SBC.sbcDAO.getClubItems', container: 'services', target: 'SBC.sbcDAO', method: 'getClubItems' }),
+  Object.freeze({ id: 'services.SBC.sbcDAO.search', container: 'services', target: 'SBC.sbcDAO', method: 'search' }),
+  Object.freeze({ id: 'services.Item.marketRepository.getClubItems', container: 'services', target: 'Item.marketRepository', method: 'getClubItems' }),
+  Object.freeze({ id: 'services.Item.marketRepository.search', container: 'services', target: 'Item.marketRepository', method: 'search' }),
   Object.freeze({ id: 'services.UTSBCRepository.getClubItems', container: 'services', target: 'sbcRepository', method: 'getClubItems' }),
-  Object.freeze({ id: 'services.UTSBCRepository.getClub', container: 'services', target: 'sbcRepository', method: 'getClub' }),
-  Object.freeze({ id: 'services.UTSBCRepository.getClubPlayers', container: 'services', target: 'sbcRepository', method: 'getClubPlayers' }),
-  Object.freeze({ id: 'services.UTSBCRepository.searchClub', container: 'services', target: 'sbcRepository', method: 'searchClub' }),
-  Object.freeze({ id: 'services.UTSBCService.getClubItems', container: 'services', target: 'sbcService', method: 'getClubItems' }),
-  Object.freeze({ id: 'services.UTSBCService.getClub', container: 'services', target: 'sbcService', method: 'getClub' }),
-  Object.freeze({ id: 'services.UTSBCService.getClubPlayers', container: 'services', target: 'sbcService', method: 'getClubPlayers' }),
-  Object.freeze({ id: 'services.UTSBCService.searchClub', container: 'services', target: 'sbcService', method: 'searchClub' }),
-  Object.freeze({ id: 'services.getClubItems', container: 'services', target: 'services', method: 'getClubItems' }),
-  Object.freeze({ id: 'services.getClub', container: 'services', target: 'services', method: 'getClub' }),
-  Object.freeze({ id: 'window.UTSBCRepository.getClubItems', container: 'window', target: 'sbcRepository', method: 'getClubItems' }),
-  Object.freeze({ id: 'window.UTSBCRepository.getClub', container: 'window', target: 'sbcRepository', method: 'getClub' }),
-  Object.freeze({ id: 'window.UTSBCService.getClubItems', container: 'window', target: 'sbcService', method: 'getClubItems' }),
-  Object.freeze({ id: 'window.UTSBCService.getClub', container: 'window', target: 'sbcService', method: 'getClub' }),
+  Object.freeze({ id: 'window.UTSBCRepository.getClubItems', container: 'window', target: 'sbcRepository', method: 'getClubItems', requireInstance: true }),
+  Object.freeze({ id: 'window.UTSBCRepository.getClub', container: 'window', target: 'sbcRepository', method: 'getClub', requireInstance: true }),
+  Object.freeze({ id: 'window.UTSBCService.getClubItems', container: 'window', target: 'sbcService', method: 'getClubItems', requireInstance: true }),
+  Object.freeze({ id: 'window.UTSBCService.getClub', container: 'window', target: 'sbcService', method: 'getClub', requireInstance: true }),
 ]);
+
+const isConstructor = (value) => typeof value === 'function';
 
 /**
  * Resolves the container and instance a read or write strategy entry names:
@@ -1267,19 +1282,39 @@ export const CLUB_ITEM_STRATEGIES = Object.freeze([
  * `src/ea/squad-writer.js`, which feature-detects write candidates the same way
  * the club reader detects read candidates.
  *
+ * A `services` target that is a key of `EA_GLOBALS` resolves to the legacy
+ * single-name lookup (`services.UTSBCRepository`). Any other target is read as
+ * a dot path of raw EA names inside `services` (`Club.clubDao`), so the
+ * instances the #44 shape report proved are reached directly. A strategy
+ * marked `requireInstance` refuses a constructor: a window class exposes its
+ * instance methods on the prototype and is not an instance to call.
+ *
  * @param {object|undefined} pageWindow the page's `window`
- * @param {{ container: string, target: string }} strategy a strategy entry
+ * @param {{ container: string, target: string, requireInstance?: boolean }} strategy
+ *   a strategy entry
  * @returns {{ ok: boolean, value?: object, name?: string, reason?: string }}
  */
 export const resolveStrategyBase = (pageWindow, strategy) => {
   if (strategy.container !== 'services') {
     const name = EA_GLOBALS[strategy.target];
+    if (name === undefined) {
+      return { ok: false, reason: `unknown EA global key ${JSON.stringify(strategy.target)}` };
+    }
     const value = resolveEaGlobal(pageWindow, strategy.target);
     if (value === null) {
       return { ok: false, reason: `page window has no ${name}` };
     }
+    if (strategy.requireInstance === true && isConstructor(value)) {
+      return {
+        ok: false,
+        reason:
+          `${name} is a constructor, not an instance; window classes expose their methods on` +
+          ' the prototype and cannot be read as instances',
+      };
+    }
     return { ok: true, value, name };
   }
+
   const services = resolveEaGlobal(pageWindow, 'services');
   if (services === null || typeof services !== 'object') {
     return { ok: false, reason: 'page window has no services object' };
@@ -1287,12 +1322,35 @@ export const resolveStrategyBase = (pageWindow, strategy) => {
   if (strategy.target === 'services') {
     return { ok: true, value: services, name: EA_GLOBALS.services };
   }
-  const name = EA_GLOBALS[strategy.target];
-  const value = services[name];
-  if (value === null || value === undefined) {
-    return { ok: false, reason: `services has no ${name} instance` };
+  if (Object.hasOwn(EA_GLOBALS, strategy.target)) {
+    const name = EA_GLOBALS[strategy.target];
+    const value = services[name];
+    if (value === null || value === undefined) {
+      return { ok: false, reason: `services has no ${name} instance` };
+    }
+    if (strategy.requireInstance === true && isConstructor(value)) {
+      return { ok: false, reason: `services.${name} is a constructor, not an instance` };
+    }
+    return { ok: true, value, name };
   }
-  return { ok: true, value, name };
+
+  const segments = strategy.target.split('.');
+  const traversed = [];
+  let value = services;
+  for (const segment of segments) {
+    if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
+      return { ok: false, reason: `services has no ${traversed.join('.')}` };
+    }
+    value = value[segment];
+    traversed.push(segment);
+  }
+  if (value === null || value === undefined) {
+    return { ok: false, reason: `services has no ${traversed.join('.')}` };
+  }
+  if (strategy.requireInstance === true && isConstructor(value)) {
+    return { ok: false, reason: `services.${strategy.target} is a constructor, not an instance` };
+  }
+  return { ok: true, value, name: strategy.target };
 };
 
 /**
@@ -1348,16 +1406,28 @@ export async function resolveClubItems(pageWindow) {
 
 /**
  * Ordered strategies for reading the challenge payload out of the argument the
- * SBC detail panel receives. The entry point is `initWithSBCSet`, but whether
- * the argument is the challenge itself, an entity wrapping `.data`, or a set
- * carrying `.challenge` is not documented, so the bridge feature-detects each
- * shape and records which one carried an `elgReq` array.
+ * SBC detail panel receives and, when the argument carries none, out of the
+ * live service containers the #44 shape report proved exist.
+ *
+ * The entry point is `initWithSBCSet`, but whether the argument is the
+ * challenge itself, an entity wrapping `.data`, or a set carrying `.challenge`
+ * is not documented, so the bridge feature-detects each shape and records which
+ * one carried an `elgReq` array. The subject may be a `UTSBCSetEntity` whose
+ * challenges live behind the service locator, so the `services.<Domain>` paths
+ * are the hypothesis the shape report is expected to confirm: each one is a
+ * property read, never a method call, and a missing path keeps its reason.
  */
 export const CHALLENGE_SUBJECT_STRATEGIES = Object.freeze([
   Object.freeze({ id: 'panel-argument.data', path: ['data'] }),
   Object.freeze({ id: 'panel-argument', path: [] }),
   Object.freeze({ id: 'panel-argument.challenge', path: ['challenge'] }),
   Object.freeze({ id: 'panel-argument.sbcChallenge', path: ['sbcChallenge'] }),
+  Object.freeze({ id: 'services.SBC.repository.challenge', container: 'services', target: 'SBC.repository', path: ['challenge'] }),
+  Object.freeze({ id: 'services.SBC.repository.activeChallenge', container: 'services', target: 'SBC.repository', path: ['activeChallenge'] }),
+  Object.freeze({ id: 'services.SBC.sbcDAO.challenge', container: 'services', target: 'SBC.sbcDAO', path: ['challenge'] }),
+  Object.freeze({ id: 'services.SBC.sbcDAO.activeChallenge', container: 'services', target: 'SBC.sbcDAO', path: ['activeChallenge'] }),
+  Object.freeze({ id: 'services.Squad.activeSquad.challenge', container: 'services', target: 'Squad.activeSquad', path: ['challenge'] }),
+  Object.freeze({ id: 'services.Squad.squadDao.challenge', container: 'services', target: 'Squad.squadDao', path: ['challenge'] }),
 ]);
 
 const readPath = (subject, path) => {
@@ -1369,48 +1439,86 @@ const readPath = (subject, path) => {
   return value;
 };
 
+const describeSubject = (subject) =>
+  subject === null ? 'null' : Array.isArray(subject) ? 'an array' : typeof subject;
+
 /**
- * Reads the challenge payload out of the SBC detail panel argument.
- *
- * @param {*} subject the argument passed to `initWithSBCSet`
- * @returns {{ ok: boolean, payload: object|null, strategy: string|null,
- *   attempts: Array<{id: string, ok: boolean, reason: string|null}> }}
+ * Resolves one strategy entry to the value it names: a path inside the panel
+ * argument for a plain entry, or a property path inside a `services.<Domain>`
+ * container for a service entry. This reads properties only; it never calls a
+ * method, so an unknown service shape fails with a reason instead of an
+ * invented argument list.
  */
-export function resolveChallengeSubject(subject) {
+const readStrategyValue = (subject, pageWindow, strategy) => {
+  if (strategy.container === 'services') {
+    const base = resolveStrategyBase(pageWindow, strategy);
+    if (!base.ok) return { ok: false, reason: base.reason };
+    const value = readPath(base.value, strategy.path ?? []);
+    if (value === null || value === undefined) {
+      return { ok: false, reason: `${base.name} carries no ${strategy.path.at(-1) ?? 'value'}` };
+    }
+    return { ok: true, value };
+  }
+  const value = readPath(subject, strategy.path);
+  if (value === null || value === undefined) {
+    const label = strategy.id.replace('panel-argument', 'panel argument');
+    return {
+      ok: false,
+      reason: `${label} carries no ${strategy.path.at(-1) ?? 'value'} (got ${describeSubject(subject)})`,
+    };
+  }
+  return { ok: true, value };
+};
+
+const resolveFirstStrategy = (strategies, subject, pageWindow, accept) => {
   const attempts = [];
-  const describeSubject = () =>
-    subject === null
-      ? 'null'
-      : Array.isArray(subject)
-        ? 'an array'
-        : typeof subject;
-  for (const strategy of CHALLENGE_SUBJECT_STRATEGIES) {
+  for (const strategy of strategies) {
     const attempt = { id: strategy.id, ok: false, reason: null };
     attempts.push(attempt);
     const label = strategy.id.replace('panel-argument', 'panel argument');
-    const value = readPath(subject, strategy.path);
-    if (value === null || value === undefined) {
-      attempt.reason = `${label} carries no ${strategy.path.at(-1) ?? 'value'} (got ${describeSubject()})`;
+    const resolved = readStrategyValue(subject, pageWindow, strategy);
+    if (!resolved.ok) {
+      attempt.reason = resolved.reason;
       continue;
     }
-    if (typeof value !== 'object' || Array.isArray(value)) {
-      attempt.reason = `${label} is not an object (got ${describeSubject()})`;
-      continue;
-    }
-    if (!Array.isArray(value[CHALLENGE_FIELDS.requirements])) {
-      attempt.reason = `${label} has no ${CHALLENGE_FIELDS.requirements} array`;
+    const reason = accept(resolved.value, label);
+    if (reason !== null) {
+      attempt.reason = reason;
       continue;
     }
     attempt.ok = true;
-    return { ok: true, payload: value, strategy: strategy.id, attempts };
+    return { ok: true, payload: resolved.value, strategy: strategy.id, attempts };
   }
   return { ok: false, payload: null, strategy: null, attempts };
+};
+
+/**
+ * Reads the challenge payload out of the SBC detail panel argument, then out
+ * of the live service containers.
+ *
+ * @param {*} subject the argument passed to `initWithSBCSet`
+ * @param {object|undefined} [pageWindow] the page's `window`, needed for the
+ *   `services.<Domain>` strategies
+ * @returns {{ ok: boolean, payload: object|null, strategy: string|null,
+ *   attempts: Array<{id: string, ok: boolean, reason: string|null}> }}
+ */
+export function resolveChallengeSubject(subject, pageWindow) {
+  return resolveFirstStrategy(CHALLENGE_SUBJECT_STRATEGIES, subject, pageWindow, (value, label) => {
+    if (typeof value !== 'object' || Array.isArray(value)) {
+      return `${label} is not an object (got ${describeSubject(value)})`;
+    }
+    if (!Array.isArray(value[CHALLENGE_FIELDS.requirements])) {
+      return `${label} has no ${CHALLENGE_FIELDS.requirements} array`;
+    }
+    return null;
+  });
 }
 
 /**
  * Ordered strategies for reading the challenge *squad* payload out of the
- * argument the SBC detail panel receives. The challenge definition and the
- * squad state may arrive on the same subject (the challenge read already
+ * argument the SBC detail panel receives and, when it carries none, out of the
+ * `services.Squad` and `services.SBC` containers. The challenge definition and
+ * the squad state may arrive on the same subject (the challenge read already
  * feature-detects `elgReq`), so this reader independently looks for the
  * `{ challengeId, squad: { players: [...] } }` wrapper the writer consumes. The
  * captured fixture `test/fixtures/sbs-challenge-25-squad.json` is that shape.
@@ -1420,6 +1528,11 @@ export const CHALLENGE_SQUAD_STRATEGIES = Object.freeze([
   Object.freeze({ id: 'panel-argument.data', path: ['data'] }),
   Object.freeze({ id: 'panel-argument.challenge', path: ['challenge'] }),
   Object.freeze({ id: 'panel-argument.sbcChallenge', path: ['sbcChallenge'] }),
+  Object.freeze({ id: 'services.Squad.activeSquad', container: 'services', target: 'Squad.activeSquad', path: [] }),
+  Object.freeze({ id: 'services.Squad.activeSquad.data', container: 'services', target: 'Squad.activeSquad', path: ['data'] }),
+  Object.freeze({ id: 'services.Squad.squadDao.activeSquad', container: 'services', target: 'Squad.squadDao', path: ['activeSquad'] }),
+  Object.freeze({ id: 'services.SBC.repository.activeSquad', container: 'services', target: 'SBC.repository', path: ['activeSquad'] }),
+  Object.freeze({ id: 'services.SBC.repository.challengeSquad', container: 'services', target: 'SBC.repository', path: ['challengeSquad'] }),
 ]);
 
 const carriesChallengeSquad = (value) => {
@@ -1433,38 +1546,21 @@ const carriesChallengeSquad = (value) => {
 };
 
 /**
- * Reads the challenge squad out of the SBC detail panel argument. Mirrors
- * `resolveChallengeSubject`: it never guesses, returns the winning strategy id
- * and an attempt record with a reason for every candidate tried, and returns a
- * null payload when no candidate carries a `squad.players` array.
+ * Reads the challenge squad out of the SBC detail panel argument and the live
+ * service containers. Mirrors `resolveChallengeSubject`: it never guesses,
+ * returns the winning strategy id and an attempt record with a reason for every
+ * candidate tried, and returns a null payload when no candidate carries a
+ * `squad.players` array.
  *
  * @param {*} subject the argument passed to `initWithSBCSet`
+ * @param {object|undefined} [pageWindow] the page's `window`, needed for the
+ *   `services.<Domain>` strategies
  * @returns {{ ok: boolean, payload: object|null, strategy: string|null,
  *   attempts: Array<{id: string, ok: boolean, reason: string|null}> }}
  */
-export function resolveChallengeSquad(subject) {
-  const attempts = [];
-  const describeSubject = () =>
-    subject === null
-      ? 'null'
-      : Array.isArray(subject)
-        ? 'an array'
-        : typeof subject;
-  for (const strategy of CHALLENGE_SQUAD_STRATEGIES) {
-    const attempt = { id: strategy.id, ok: false, reason: null };
-    attempts.push(attempt);
-    const label = strategy.id.replace('panel-argument', 'panel argument');
-    const value = readPath(subject, strategy.path);
-    if (value === null || value === undefined) {
-      attempt.reason = `${label} carries no value (got ${describeSubject()})`;
-      continue;
-    }
-    if (!carriesChallengeSquad(value)) {
-      attempt.reason = `${label} has no ${CHALLENGE_SQUAD_FIELDS.squad}.${CHALLENGE_SQUAD_FIELDS.players} array`;
-      continue;
-    }
-    attempt.ok = true;
-    return { ok: true, payload: value, strategy: strategy.id, attempts };
-  }
-  return { ok: false, payload: null, strategy: null, attempts };
+export function resolveChallengeSquad(subject, pageWindow) {
+  return resolveFirstStrategy(CHALLENGE_SQUAD_STRATEGIES, subject, pageWindow, (value, label) => {
+    if (carriesChallengeSquad(value)) return null;
+    return `${label} has no ${CHALLENGE_SQUAD_FIELDS.squad}.${CHALLENGE_SQUAD_FIELDS.players} array`;
+  });
 }
