@@ -66,6 +66,7 @@
  */
 
 import { describeMethodShape } from '../shape.js';
+import { DEFAULT_OBSERVABLE_TIMEOUT_MS, isObservable, observeOnce } from './observable.js';
 
 /**
  * The eleven starting slot positions of every SBC formation the solver may
@@ -988,6 +989,7 @@ export const EA_GLOBALS = Object.freeze({
   confirmSubmissionPopup: 'UTSBCConfirmSubmissionPopupViewController',
   squadStatsView: 'UTSBCSquadStatsView',
   squadEntity: 'UTSquadEntity',
+  searchViewModel: 'UTBucketedItemSearchViewModel',
   eligibilityKeys: 'SBCEligibilityKey',
   services: 'services',
 });
@@ -1022,6 +1024,13 @@ export const EA_ENDPOINTS = Object.freeze({
  * Raw field names on a challenge payload that the challenge reader consumes.
  * The live entity classes wrap this same payload; the readers see it through
  * `resolveChallengeSubject`.
+ *
+ * `requirements` is the field our own fixtures carry. The #51 finding showed
+ * the loaded payload may name the same array `eligibilityRequirements`,
+ * `requirements` or `requirementsList`, may expose it through a
+ * `getRequirements()` method, and may bury it one level down inside
+ * `challenge`, `sbcChallenge`, `data.challenge` or `data.sbcChallenge`.
+ * `resolveChallengeRequirements` is the one place that knows that search.
  */
 export const CHALLENGE_FIELDS = Object.freeze({
   challengeId: 'challengeId',
@@ -1029,8 +1038,35 @@ export const CHALLENGE_FIELDS = Object.freeze({
   formation: 'formation',
   operation: 'elgOperation',
   requirements: 'elgReq',
+  eligibilityRequirements: 'eligibilityRequirements',
+  requirementsList: 'requirementsList',
+  getRequirements: 'getRequirements',
   setId: 'setId',
+  squad: 'squad',
 });
+
+/**
+ * The property names a requirements array may live under, in the documented
+ * order. Our own observed field is appended after the issue's three, so the
+ * documented order is preserved and the legacy shape still decodes.
+ */
+export const CHALLENGE_REQUIREMENT_PROPERTIES = Object.freeze([
+  'eligibilityRequirements',
+  'requirements',
+  'requirementsList',
+  'elgReq',
+]);
+
+/**
+ * The containers a requirements array may live inside, one level down, in the
+ * documented order. Each entry is a path of raw payload segment names.
+ */
+export const CHALLENGE_REQUIREMENT_CONTAINERS = Object.freeze([
+  Object.freeze(['challenge']),
+  Object.freeze(['sbcChallenge']),
+  Object.freeze(['data', 'challenge']),
+  Object.freeze(['data', 'sbcChallenge']),
+]);
 
 /** The raw `/club` response field that carries the item array. */
 export const CLUB_ITEM_ARRAY_FIELD = 'itemData';
@@ -1144,11 +1180,6 @@ export const SQUAD_WRITE_STRATEGIES = Object.freeze([
   }),
 ]);
 
-const readPageWindow = (pageWindow, name) => {
-  if (pageWindow === null || pageWindow === undefined) return undefined;
-  return pageWindow[name];
-};
-
 /**
  * Reads a named global off the page's `window`.
  *
@@ -1170,7 +1201,7 @@ export function resolveEaGlobal(pageWindow, key) {
         ' in src/ea/adapter.js instead of spelling it at the call site'
     );
   }
-  const value = readPageWindow(pageWindow, EA_GLOBALS[key]);
+  const value = pageWindow?.[EA_GLOBALS[key]];
   return value === undefined ? null : value;
 }
 
@@ -1237,33 +1268,51 @@ const describeValue = (value) => {
   return typeof value;
 };
 
+const describeCause = (error) =>
+  error !== null && typeof error === 'object' ? error.message : String(error);
+
+const resolveTimeoutMs = (value) =>
+  Number.isFinite(value) && value > 0 ? value : DEFAULT_OBSERVABLE_TIMEOUT_MS;
+
 /**
  * The ordered club-read strategies this bridge tries, most likely first.
  *
- * The #44 live shape report proved the instances live under `services.<Domain>`
- * (`services.Club.clubDao`, `services.Item.itemDao`, `services.SBC.repository`
- * and so on), never at `services.<ClassName>`. The chain therefore reaches the
- * proven instance paths first, then the repository search names the report
- * proved, then the legacy `services.UTSBCRepository` entry as a late fallback
- * for a page build that still exposes it, and finally the window classes, which
- * are refused as constructors because a class is not an instance.
+ * The #51 finding showed the read is a **search**, not a `getClubItems` call:
+ * EA's service methods return observables, and the club is read by taking
+ * `searchCriteria` off the `UTBucketedItemSearchViewModel`, setting the page
+ * size and offset on a copy of it, and subscribing to
+ * `services.Club.search(criteria)`. That search path is the entry of the
+ * chain; `services.Item.searchStorageItems` is the same call shape for the
+ * unassigned/storage pile and is tried next.
  *
- * A `services` target that is not a key of `EA_GLOBALS` is read as a dot path
- * of raw EA names inside the service locator. Every attempt keeps its
- * `{id, ok, reason}` record rather than being silently dropped, and nothing
- * here invents a club size or an argument payload.
+ * Everything below those two entries is the map of where the club read has
+ * already failed: the #44 shape report proved the instances live under
+ * `services.<Domain>` (`services.Club.clubDao`, `services.Item.itemDao`,
+ * `services.SBC.repository` and so on), never at `services.<ClassName>`, so
+ * the chain reaches the proven instance paths next, then the repository search
+ * names the report proved, then the legacy `services.UTSBCRepository` entry as
+ * a late fallback for a page build that still exposes it, and finally the
+ * window classes, which are refused as constructors because a class is not an
+ * instance. Nothing is deleted on failure: every candidate keeps its
+ * `{id, ok, reason}` record so the next live report can see the whole map.
  *
  * The #50 live session proved `services.Club.clubDao.getClubItems` exists and
  * runs: it threw reading `.cacheable` off `undefined`, which points at its
- * first argument. Its minimal call shapes are therefore both tried, under their
- * own ids: no arguments, then a single empty object. `{}` is the empty
- * argument, not an invented payload — no field value, no count and no offset is
- * guessed, and a strategy's `argument` property is the only payload this chain
- * ever passes. An attempt whose method resolved carries that method's
+ * first argument. Its minimal call shapes are therefore both tried, under
+ * their own ids: no arguments, then a single empty object. `{}` is the empty
+ * argument, not an invented payload — no field value, no count and no offset
+ * is guessed, and a strategy's `argument` property is the only payload this
+ * chain ever passes. An attempt whose method resolved carries that method's
  * `{arity, constructor, excerpt, truncated}` shape, so the next live run can
  * read the real call shape instead of guessing another name.
+ *
+ * Every method is called through the observable bridge: a returned observable
+ * is subscribed and unsubscribed with a timeout, while a returned value or
+ * promise is accepted as-is for the page builds that still hand one back.
  */
 export const CLUB_ITEM_STRATEGIES = Object.freeze([
+  Object.freeze({ id: 'services.Club.search+searchCriteria', container: 'services', target: 'Club', method: 'search', searchCriteria: true }),
+  Object.freeze({ id: 'services.Item.searchStorageItems+searchCriteria', container: 'services', target: 'Item', method: 'searchStorageItems', searchCriteria: true }),
   Object.freeze({ id: 'services.Club.clubDao.getClubItems', container: 'services', target: 'Club.clubDao', method: 'getClubItems' }),
   Object.freeze({ id: 'services.Club.clubDao.getClubItems+{}', container: 'services', target: 'Club.clubDao', method: 'getClubItems', argument: Object.freeze({}) }),
   Object.freeze({ id: 'services.Club.clubDao.search', container: 'services', target: 'Club.clubDao', method: 'search' }),
@@ -1404,27 +1453,311 @@ const findMethod = (target, name) => {
   return { ok: false, reason: null };
 };
 
+const describeMissingMethod = (owner, method, reason) =>
+  reason === null
+    ? `${owner} has no ${method} method`
+    : `${owner} exposes ${method} as ${reason}`;
+
+/**
+ * The page size and the page cap for a paged club search. The size is this
+ * project's request, not a verified EA limit: the search advances by the
+ * number of items each page actually yielded, so a clamped or smaller page is
+ * still walked correctly, and a server that rejects the size fails the search
+ * attempt loudly with its own reason. The cap is the "never loop forever"
+ * bound: reaching it is reported as a cap, never as an exhausted club.
+ */
+export const CLUB_SEARCH_PAGE_SIZE = 100;
+export const CLUB_SEARCH_PAGE_CAP = 50;
+
+/** The view model property that carries the club search criteria. */
+const SEARCH_CRITERIA_PROPERTY = 'searchCriteria';
+
+/**
+ * How the search criteria are looked for, in order. The prototype probe needs
+ * no construction and is tried first; the instance probe uses the global
+ * directly when it is already an instance, or constructs the class with no
+ * arguments when it is not (an unknown argument list is never invented).
+ */
+export const CLUB_SEARCH_CRITERIA_STRATEGIES = Object.freeze([
+  Object.freeze({ id: `${EA_GLOBALS.searchViewModel}.prototype.searchCriteria`, source: 'prototype' }),
+  Object.freeze({ id: `${EA_GLOBALS.searchViewModel}.searchCriteria`, source: 'instance' }),
+]);
+
+const describeAttempts = (attempts) =>
+  attempts.length === 0
+    ? 'no candidate was tried'
+    : attempts.map((attempt) => `${attempt.id}: ${attempt.reason}`).join('; ');
+
+/**
+ * Reads a data property along an object's prototype chain without ever
+ * invoking an accessor. `{ ok: false, reason: null }` means absent or not a
+ * value; a present accessor is refused with a reason, because running a live
+ * getter inside the player's authenticated session is a side effect the read
+ * layer must not have.
+ */
+const readDataProperty = (target, name) => {
+  let current = target;
+  while (current !== null && current !== undefined) {
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(current, name);
+    } catch {
+      return { ok: false, reason: 'unreadable' };
+    }
+    if (descriptor !== undefined) {
+      if (typeof descriptor.get === 'function') {
+        return { ok: false, reason: 'an accessor(get); refusing to invoke it' };
+      }
+      return descriptor.value === undefined
+        ? { ok: false, reason: null }
+        : { ok: true, value: descriptor.value };
+    }
+    try {
+      current = Object.getPrototypeOf(current);
+    } catch {
+      return { ok: false, reason: 'unreadable' };
+    }
+  }
+  return { ok: false, reason: null };
+};
+
+const isRecordObject = (value) =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const tryReadCriteria = (target, attempt) => {
+  const read = readDataProperty(target, SEARCH_CRITERIA_PROPERTY);
+  if (!read.ok) {
+    attempt.reason =
+      read.reason === null
+        ? `has no ${SEARCH_CRITERIA_PROPERTY} property`
+        : `exposes ${SEARCH_CRITERIA_PROPERTY} as ${read.reason}`;
+    return null;
+  }
+  if (!isRecordObject(read.value)) {
+    attempt.reason = `${SEARCH_CRITERIA_PROPERTY} is ${describeValue(read.value)}, not an object`;
+    return null;
+  }
+  attempt.ok = true;
+  return read.value;
+};
+
+/**
+ * Resolves EA's search view model to an instance: the global itself when it is
+ * already an instance, or a no-argument construction when it is a class. An
+ * unknown argument list is never invented, and a class that refuses
+ * construction is a named reason rather than a thrown solve.
+ *
+ * @param {object|undefined} pageWindow the page's `window`
+ * @returns {{ ok: boolean, value?: object, name?: string, reason?: string }}
+ */
+const resolveSearchViewModelInstance = (pageWindow) => {
+  const name = EA_GLOBALS.searchViewModel;
+  const global = resolveEaGlobal(pageWindow, 'searchViewModel');
+  if (global === null) return { ok: false, reason: `page window has no ${name}` };
+  if (typeof global === 'function') {
+    try {
+      return { ok: true, value: new global(), name: `${name} instance` };
+    } catch (error) {
+      return { ok: false, reason: `new ${name}() threw: ${describeCause(error)}` };
+    }
+  }
+  if (typeof global === 'object') return { ok: true, value: global, name };
+  return { ok: false, reason: `${name} is ${typeof global}, not a class or an instance` };
+};
+
+/**
+ * Reads the club search criteria off EA's search view model, recording every
+ * probe as `{ id, ok, reason }`. An absent global, a class that refuses
+ * construction without arguments, an accessor property and a non-object
+ * value are each a named reason, never a guessed criteria object.
+ *
+ * @param {object|undefined} pageWindow the page's `window`
+ * @returns {{ ok: boolean, criteria: object|null, strategy: string|null,
+ *   attempts: Array<{id: string, ok: boolean, reason: string|null}> }}
+ */
+export const readSearchCriteria = (pageWindow) => {
+  const attempts = [];
+  const globalName = EA_GLOBALS.searchViewModel;
+  const global = resolveEaGlobal(pageWindow, 'searchViewModel');
+
+  const prototypeAttempt = { id: CLUB_SEARCH_CRITERIA_STRATEGIES[0].id, ok: false, reason: null };
+  attempts.push(prototypeAttempt);
+  if (global === null) {
+    prototypeAttempt.reason = `page window has no ${globalName}`;
+  } else {
+    const prototype = typeof global === 'function' ? global.prototype : Object.getPrototypeOf(global);
+    if (prototype === null || prototype === undefined) {
+      prototypeAttempt.reason = `${globalName} has no prototype to read`;
+    } else {
+      const criteria = tryReadCriteria(prototype, prototypeAttempt);
+      if (criteria !== null) return { ok: true, criteria, strategy: prototypeAttempt.id, attempts };
+    }
+  }
+
+  const instanceAttempt = { id: CLUB_SEARCH_CRITERIA_STRATEGIES[1].id, ok: false, reason: null };
+  attempts.push(instanceAttempt);
+  const instance = resolveSearchViewModelInstance(pageWindow);
+  if (!instance.ok) {
+    instanceAttempt.reason = instance.reason;
+  } else {
+    const criteria = tryReadCriteria(instance.value, instanceAttempt);
+    if (criteria !== null) return { ok: true, criteria, strategy: instanceAttempt.id, attempts };
+  }
+
+  return { ok: false, criteria: null, strategy: null, attempts };
+};
+
+const summarizeCriteria = (resolution) =>
+  resolution === null
+    ? null
+    : { ok: resolution.ok, strategy: resolution.strategy, attempts: resolution.attempts };
+
+/**
+ * Calls one resolved method and normalises whatever convention it answered
+ * with: an observable goes through the bridge, a promise is awaited under the
+ * same timeout, and a plain value is carried as-is. Every path produces the
+ * same `{ data, error, response, status, success, payload, via }` shape, so an
+ * attempt can record which convention answered.
+ */
+const resolveReadReturn = async (returned, label, timeoutMs) => {
+  if (isObservable(returned)) {
+    const event = await observeOnce(returned, { timeoutMs, label });
+    return { ...event, via: 'observable' };
+  }
+  if (returned !== null && typeof returned === 'object' && typeof returned.then === 'function') {
+    const value = await new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`${label} did not resolve within ${timeoutMs}ms`)),
+        timeoutMs
+      );
+      returned.then(
+        (resolved) => {
+          clearTimeout(timer);
+          resolve(resolved);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
+    return {
+      data: value,
+      error: null,
+      response: value,
+      status: null,
+      success: null,
+      payload: value,
+      via: 'promise',
+    };
+  }
+  return {
+    data: returned,
+    error: null,
+    response: returned,
+    status: null,
+    success: null,
+    payload: returned,
+    via: 'value',
+  };
+};
+
+const describeEventError = (event) =>
+  event.error !== null && event.error !== undefined
+    ? `the observable reported an error: ${
+        typeof event.error === 'object' && typeof event.error.message === 'string'
+          ? event.error.message
+          : String(event.error)
+      }`
+    : null;
+
+const callReadMethod = async (found, base, callArguments, label, timeoutMs) => {
+  let event;
+  try {
+    const returned = await found.value.apply(base, callArguments);
+    event = await resolveReadReturn(returned, label, timeoutMs);
+  } catch (error) {
+    return { ok: false, reason: `threw: ${describeCause(error)}` };
+  }
+  const eventError = describeEventError(event);
+  return eventError === null ? { ok: true, event } : { ok: false, reason: eventError };
+};
+
+const clubItemsOf = (payload) =>
+  Array.isArray(payload) ? payload : payload[CLUB_ITEM_ARRAY_FIELD];
+
+/**
+ * Subscribes to one page of a club search per offset until a page yields no
+ * items, then reports how many pages ran and whether the cap, not exhaustion,
+ * stopped the walk.
+ */
+const runPagedSearch = async ({ base, found, criteria, strategy, timeoutMs }) => {
+  const items = [];
+  let offset = 0;
+  let pages = 0;
+  while (pages < CLUB_SEARCH_PAGE_CAP) {
+    pages += 1;
+    const pageCriteria = { ...criteria, count: CLUB_SEARCH_PAGE_SIZE, offset };
+    const returned = await found.value.apply(base, [pageCriteria]);
+    const event = await resolveReadReturn(returned, `${strategy.id} page ${pages}`, timeoutMs);
+    const error = describeEventError(event);
+    if (error !== null) throw new Error(error);
+    if (!isClubPayload(event.payload)) {
+      throw new Error(
+        `page ${pages} returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeValue(event.payload)})`
+      );
+    }
+    const pageItems = clubItemsOf(event.payload);
+    items.push(...pageItems);
+    if (pageItems.length === 0) return { items, pages, capped: false, capReason: null };
+    offset += pageItems.length;
+  }
+  return {
+    items,
+    pages,
+    capped: true,
+    capReason:
+      `the page cap of ${CLUB_SEARCH_PAGE_CAP} was reached before the search stopped yielding` +
+      ` items; the club may be larger than the ${pages} pages read`,
+  };
+};
+
 /**
  * Tries every club-read strategy in order and returns the first payload that
  * looks like club items.
  *
+ * The first two entries are the #51 search path: the criteria are read once
+ * from EA's search view model, copied per page with the page size and offset
+ * set, and the subscription is walked page by page. Every subsequent entry is
+ * the recorded map of earlier attempts, each called through the same bridge.
+ *
  * The result carries the winning strategy id and an attempt record for every
- * candidate tried, in order: `{ id, ok, reason }`, plus `method` — the resolved
- * method's `{arity, constructor, excerpt, truncated}` shape — whenever the
- * strategy reached a callable method, including one that then threw. A strategy
- * that carries an `argument` is called with exactly that argument; every other
- * strategy is called with none.
+ * candidate tried, in order: `{ id, ok, reason }`, plus `method` — the
+ * resolved method's `{arity, constructor, excerpt, truncated}` shape — whenever
+ * the strategy reached a callable method, including one that then threw. The
+ * pagination report carries `pages`, `capped` and `capReason`; the criteria
+ * report carries the view-model probes and which one answered.
  *
  * When nothing succeeds, `items` is an empty array — never a guessed count —
  * and every attempt's reason names what was missing or wrong.
  *
  * @param {object|undefined} pageWindow the page's `window`
+ * @param {{ observableTimeoutMs?: number }} [options] subscription timeout,
+ *   injectable so tests need not wait out the default
  * @returns {Promise<{ ok: boolean, items: Array<object>, strategy: string|null,
  *   attempts: Array<{id: string, ok: boolean, reason: string|null,
- *   method?: object}> }>}
+ *   method?: object}>, pages: number, capped: boolean, capReason: string|null,
+ *   criteria: object|null }>}
  */
-export async function resolveClubItems(pageWindow) {
+export async function resolveClubItems(pageWindow, options = {}) {
+  const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
   const attempts = [];
+  let criteriaResolution = null;
+  const resolveCriteriaOnce = () => {
+    if (criteriaResolution === null) criteriaResolution = readSearchCriteria(pageWindow);
+    return criteriaResolution;
+  };
+
   for (const strategy of CLUB_ITEM_STRATEGIES) {
     const attempt = { id: strategy.id, ok: false, reason: null };
     attempts.push(attempt);
@@ -1435,35 +1768,79 @@ export async function resolveClubItems(pageWindow) {
     }
     const found = findMethod(base.value, strategy.method);
     if (!found.ok) {
-      attempt.reason =
-        found.reason === null
-          ? `${base.name} has no ${strategy.method} method`
-          : `${base.name} exposes ${strategy.method} as ${found.reason}`;
+      attempt.reason = describeMissingMethod(base.name, strategy.method, found.reason);
       continue;
     }
-    const callArguments = Object.hasOwn(strategy, 'argument') ? [strategy.argument] : [];
     attempt.method = describeMethodShape(found.value);
-    let result;
-    try {
-      result = await found.value.apply(base.value, callArguments);
-    } catch (error) {
-      const message = error !== null && typeof error === 'object' ? error.message : String(error);
-      attempt.reason = `threw: ${message}`;
+
+    if (strategy.searchCriteria === true) {
+      const resolution = resolveCriteriaOnce();
+      if (!resolution.ok) {
+        attempt.reason = `the search criteria could not be read; tried ${describeAttempts(
+          resolution.attempts
+        )}`;
+        continue;
+      }
+      try {
+        const search = await runPagedSearch({
+          base: base.value,
+          found,
+          criteria: resolution.criteria,
+          strategy,
+          timeoutMs,
+        });
+        attempt.ok = true;
+        return {
+          ok: true,
+          items: search.items,
+          strategy: strategy.id,
+          attempts,
+          pages: search.pages,
+          capped: search.capped,
+          capReason: search.capReason,
+          criteria: summarizeCriteria(resolution),
+        };
+      } catch (error) {
+        attempt.reason = describeCause(error);
+        continue;
+      }
+    }
+
+    const callArguments = Object.hasOwn(strategy, 'argument') ? [strategy.argument] : [];
+    const call = await callReadMethod(found, base.value, callArguments, strategy.id, timeoutMs);
+    if (!call.ok) {
+      attempt.reason = call.reason;
       continue;
     }
-    if (!isClubPayload(result)) {
-      attempt.reason = `returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeValue(result)})`;
+    const event = call.event;
+    if (!isClubPayload(event.payload)) {
+      attempt.reason = `returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeValue(
+        event.payload
+      )})`;
       continue;
     }
     attempt.ok = true;
     return {
       ok: true,
-      items: Array.isArray(result) ? result : result[CLUB_ITEM_ARRAY_FIELD],
+      items: clubItemsOf(event.payload),
       strategy: strategy.id,
       attempts,
+      pages: 1,
+      capped: false,
+      capReason: null,
+      criteria: summarizeCriteria(criteriaResolution),
     };
   }
-  return { ok: false, items: [], strategy: null, attempts };
+  return {
+    ok: false,
+    items: [],
+    strategy: null,
+    attempts,
+    pages: 0,
+    capped: false,
+    capReason: null,
+    criteria: summarizeCriteria(criteriaResolution),
+  };
 }
 
 /**
@@ -1474,7 +1851,8 @@ export async function resolveClubItems(pageWindow) {
  * The entry point is `initWithSBCSet`, but whether the argument is the
  * challenge itself, an entity wrapping `.data`, or a set carrying `.challenge`
  * is not documented, so the bridge feature-detects each shape and records which
- * one carried an `elgReq` array. The subject may be a `UTSBCSetEntity` whose
+ * one carried a requirements array in a documented location. The subject may
+ * be a `UTSBCSetEntity` whose
  * challenges live behind the service locator, so the `services.<Domain>` paths
  * are the hypothesis the shape report is expected to confirm: each one is a
  * property read, never a method call, and a missing path keeps its reason.
@@ -1500,6 +1878,247 @@ const readPath = (subject, path) => {
   }
   return value;
 };
+
+/**
+ * Finds the requirements array on a loaded challenge payload, in the #51
+ * documented order: the properties `eligibilityRequirements`, `requirements`,
+ * `requirementsList` and our own observed `elgReq`, then a `getRequirements()`
+ * method, each at the top level and again one level down inside `challenge`,
+ * `sbcChallenge`, `data.challenge` and `data.sbcChallenge`.
+ *
+ * Every location probed keeps an `{id, ok, reason}` record, and the winning
+ * one names itself in `source`, so a live report says which location answered
+ * instead of only that something did. A property read never invokes an
+ * accessor; the method is called with no arguments.
+ *
+ * @param {object} payload the loaded challenge payload
+ * @returns {{ ok: boolean, requirements: Array<object>|null, source: string|null,
+ *   attempts: Array<{id: string, ok: boolean, reason: string|null,
+ *   method?: object}> }}
+ */
+export function resolveChallengeRequirements(payload) {
+  const attempts = [];
+  const scopes = [
+    { prefix: 'payload', container: payload },
+    ...CHALLENGE_REQUIREMENT_CONTAINERS.map((path) => ({
+      prefix: `payload.${path.join('.')}`,
+      container: readPath(payload, path),
+    })),
+  ];
+
+  for (const scope of scopes) {
+    const readable =
+      scope.container !== null &&
+      (typeof scope.container === 'object' || typeof scope.container === 'function');
+    if (!readable) {
+      const reason = `${scope.prefix} is ${describeValue(scope.container)}, not an object`;
+      for (const property of CHALLENGE_REQUIREMENT_PROPERTIES) {
+        attempts.push({ id: `${scope.prefix}.${property}`, ok: false, reason });
+      }
+      attempts.push({
+        id: `${scope.prefix}.${CHALLENGE_FIELDS.getRequirements}()`,
+        ok: false,
+        reason,
+      });
+      continue;
+    }
+
+    for (const property of CHALLENGE_REQUIREMENT_PROPERTIES) {
+      const attempt = { id: `${scope.prefix}.${property}`, ok: false, reason: null };
+      attempts.push(attempt);
+      const read = readDataProperty(scope.container, property);
+      if (!read.ok) {
+        attempt.reason = read.reason ?? `${scope.prefix} carries no ${property}`;
+        continue;
+      }
+      if (!Array.isArray(read.value)) {
+        attempt.reason = `${scope.prefix}.${property} is ${describeValue(read.value)}, not an array`;
+        continue;
+      }
+      attempt.ok = true;
+      return { ok: true, requirements: read.value, source: attempt.id, attempts };
+    }
+
+    const methodName = CHALLENGE_FIELDS.getRequirements;
+    const attempt = { id: `${scope.prefix}.${methodName}()`, ok: false, reason: null };
+    attempts.push(attempt);
+    const found = findMethod(scope.container, methodName);
+    if (!found.ok) {
+      attempt.reason = describeMissingMethod(scope.prefix, methodName, found.reason);
+      continue;
+    }
+    attempt.method = describeMethodShape(found.value);
+    let returned;
+    try {
+      returned = found.value.call(scope.container);
+    } catch (error) {
+      attempt.reason = `threw: ${describeCause(error)}`;
+      continue;
+    }
+    if (!Array.isArray(returned)) {
+      attempt.reason = `${methodName}() returned ${describeValue(returned)}, not an array`;
+      continue;
+    }
+    attempt.ok = true;
+    return { ok: true, requirements: returned, source: attempt.id, attempts };
+  }
+
+  return { ok: false, requirements: null, source: null, attempts };
+}
+
+const REQUIREMENT_LOOKUP_SUMMARY =
+  'eligibilityRequirements, requirements, requirementsList, elgReq, getRequirements(), and one level' +
+  ' down in challenge, sbcChallenge, data.challenge, data.sbcChallenge';
+
+const carriesChallengeRequirements = (value) =>
+  isRecordObject(value) && resolveChallengeRequirements(value).ok;
+
+/**
+ * The subject-resolution half of the requirements check: a candidate is the
+ * challenge only when it carries requirements itself, not one level down. The
+ * nested locations stay the job of `readChallenge`/`loadChallengePayload`; if
+ * this accepted a nested location, `panel-argument` would swallow every
+ * `{ challenge }` wrapper and the chain's specific strategies could never
+ * answer, which would hide which shape the panel really used.
+ */
+const carriesTopLevelRequirements = (value) => {
+  if (!isRecordObject(value)) return false;
+  for (const property of CHALLENGE_REQUIREMENT_PROPERTIES) {
+    const read = readDataProperty(value, property);
+    if (read.ok && Array.isArray(read.value)) return true;
+  }
+  const found = findMethod(value, CHALLENGE_FIELDS.getRequirements);
+  if (!found.ok) return false;
+  try {
+    return Array.isArray(found.value.call(value));
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The ordered challenge-load strategies, most likely first. The #51 finding
+ * showed the challenge is loaded through an observable: the primary call is
+ * `services.SBC.loadChallenge(challenge)`, called with the challenge the panel
+ * argument already resolved and with no arguments when it resolved none. The
+ * DAO variant takes the challenge **id** only — the in-progress flag's value
+ * is not verified, and this project never invents an argument value — and the
+ * payload the panel argument already carried is the last resort, so the
+ * fixture path keeps working when no service answers.
+ *
+ * Every entry is a candidate to feature-detect, not a verified signature; each
+ * one keeps its `{id, ok, reason}` record and, where a callable method was
+ * reached, the method's `{arity, constructor, excerpt, truncated}` shape.
+ */
+export const CHALLENGE_LOAD_STRATEGIES = Object.freeze([
+  Object.freeze({ id: 'services.SBC.loadChallenge+subject', container: 'services', target: 'SBC', method: 'loadChallenge', argument: 'subject' }),
+  Object.freeze({ id: 'services.SBC.loadChallenge', container: 'services', target: 'SBC', method: 'loadChallenge' }),
+  Object.freeze({ id: 'services.SBC.sbcDAO.loadChallenge+id', container: 'services', target: 'SBC.sbcDAO', method: 'loadChallenge', argument: 'challengeId' }),
+  Object.freeze({ id: 'subject.payload', source: 'subject' }),
+]);
+
+const describeArgumentFailure = (strategy, subjectResult) => {
+  if (strategy.argument === 'subject') {
+    return 'the panel argument carried no challenge payload to pass to loadChallenge';
+  }
+  if (subjectResult?.ok === true) {
+    return 'the panel argument payload carries no finite challengeId';
+  }
+  return 'the panel argument carried no challenge payload to take a challengeId from';
+};
+
+/**
+ * Loads the full challenge payload for the challenge the panel resolved.
+ *
+ * Each strategy goes through the observable bridge: a returned observable is
+ * subscribed and unsubscribed with a timeout, a promise is awaited under the
+ * same timeout, and a plain value is carried as-is. A loaded payload is
+ * accepted when any documented requirements location carries an array, so the
+ * loaded shape is reported by the same lookup as the panel shape.
+ *
+ * @param {object|undefined} pageWindow the page's `window`
+ * @param {{ ok: boolean, payload: object|null }} subjectResult the
+ *   `resolveChallengeSubject` result
+ * @param {{ observableTimeoutMs?: number }} [options] subscription timeout,
+ *   injectable for tests
+ * @returns {Promise<{ ok: boolean, payload: object|null, strategy: string|null,
+ *   attempts: Array<{id: string, ok: boolean, reason: string|null,
+ *   method?: object}> }>}
+ */
+export async function loadChallengePayload(pageWindow, subjectResult, options = {}) {
+  const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
+  const attempts = [];
+  const subjectPayload =
+    subjectResult?.ok === true &&
+    subjectResult.payload !== null &&
+    typeof subjectResult.payload === 'object'
+      ? subjectResult.payload
+      : null;
+
+  for (const strategy of CHALLENGE_LOAD_STRATEGIES) {
+    const attempt = { id: strategy.id, ok: false, reason: null };
+    attempts.push(attempt);
+
+    if (strategy.source === 'subject') {
+      if (subjectPayload !== null && carriesChallengeRequirements(subjectPayload)) {
+        attempt.ok = true;
+        return { ok: true, payload: subjectPayload, strategy: strategy.id, attempts };
+      }
+      attempt.reason =
+        subjectPayload === null
+          ? 'the panel argument carried no challenge payload'
+          : 'the panel argument payload carries no requirements array in a documented location';
+      continue;
+    }
+
+    const base = resolveStrategyBase(pageWindow, strategy);
+    if (!base.ok) {
+      attempt.reason = base.reason;
+      continue;
+    }
+    const found = findMethod(base.value, strategy.method);
+    if (!found.ok) {
+      attempt.reason = describeMissingMethod(base.name, strategy.method, found.reason);
+      continue;
+    }
+    attempt.method = describeMethodShape(found.value);
+
+    let callArguments;
+    if (strategy.argument === 'subject') {
+      if (subjectPayload === null) {
+        attempt.reason = describeArgumentFailure(strategy, subjectResult);
+        continue;
+      }
+      callArguments = [subjectPayload];
+    } else if (strategy.argument === 'challengeId') {
+      const challengeId = subjectPayload?.[CHALLENGE_FIELDS.challengeId];
+      if (!Number.isFinite(challengeId)) {
+        attempt.reason = describeArgumentFailure(strategy, subjectResult);
+        continue;
+      }
+      callArguments = [challengeId];
+    } else {
+      callArguments = [];
+    }
+
+    const call = await callReadMethod(found, base.value, callArguments, strategy.id, timeoutMs);
+    if (!call.ok) {
+      attempt.reason = call.reason;
+      continue;
+    }
+    const event = call.event;
+    if (!carriesChallengeRequirements(event.payload)) {
+      attempt.reason = `returned no challenge payload carrying requirements (got ${describeValue(
+        event.payload
+      )})`;
+      continue;
+    }
+    attempt.ok = true;
+    return { ok: true, payload: event.payload, strategy: strategy.id, attempts };
+  }
+
+  return { ok: false, payload: null, strategy: null, attempts };
+}
 
 const describeSubject = (subject) =>
   subject === null ? 'null' : Array.isArray(subject) ? 'an array' : typeof subject;
@@ -1556,7 +2175,10 @@ const resolveFirstStrategy = (strategies, subject, pageWindow, accept) => {
 
 /**
  * Reads the challenge payload out of the SBC detail panel argument, then out
- * of the live service containers.
+ * of the live service containers. A value is accepted when any documented
+ * requirements location carries an array (`resolveChallengeRequirements`); the
+ * reason for a rejected candidate names that lookup, so a live report says
+ * what was missing rather than only that the candidate failed.
  *
  * @param {*} subject the argument passed to `initWithSBCSet`
  * @param {object|undefined} [pageWindow] the page's `window`, needed for the
@@ -1569,23 +2191,43 @@ export function resolveChallengeSubject(subject, pageWindow) {
     if (typeof value !== 'object' || Array.isArray(value)) {
       return `${label} is not an object (got ${describeSubject(value)})`;
     }
-    if (!Array.isArray(value[CHALLENGE_FIELDS.requirements])) {
-      return `${label} has no ${CHALLENGE_FIELDS.requirements} array`;
+    if (!carriesTopLevelRequirements(value)) {
+      return `${label} carries no requirements array (looked for ${REQUIREMENT_LOOKUP_SUMMARY})`;
     }
     return null;
   });
 }
 
 /**
+ * Candidate methods on EA's search view model that request the active squad's
+ * definition ids. The #51 finding documented the request as a method on
+ * `UTBucketedItemSearchViewModel`; the exact name is not verified, so both the
+ * `request` and `get` spellings are feature-detected, each recorded with its
+ * reason. Whichever answers through the observable bridge supplies the active
+ * squad payload.
+ */
+export const ACTIVE_SQUAD_METHODS = Object.freeze([
+  'requestActiveSquadDefinitionIds',
+  'getActiveSquadDefinitionIds',
+]);
+
+/**
  * Ordered strategies for reading the challenge *squad* payload out of the
  * argument the SBC detail panel receives and, when it carries none, out of the
  * `services.Squad` and `services.SBC` containers. The challenge definition and
  * the squad state may arrive on the same subject (the challenge read already
- * feature-detects `elgReq`), so this reader independently looks for the
+ * feature-detects requirements), so this reader independently looks for the
  * `{ challengeId, squad: { players: [...] } }` wrapper the writer consumes. The
  * captured fixture `test/fixtures/sbs-challenge-25-squad.json` is that shape.
+ *
+ * The first entry is the squad carried by the loaded challenge payload (#51);
+ * the last two entries are the search view model's active-squad definition-id
+ * request, called with no arguments through the observable bridge. Every entry
+ * keeps its `{id, ok, reason}` record and, when a callable method was reached,
+ * its method shape.
  */
 export const CHALLENGE_SQUAD_STRATEGIES = Object.freeze([
+  Object.freeze({ id: 'challenge-load.squad', source: 'loaded' }),
   Object.freeze({ id: 'panel-argument', path: [] }),
   Object.freeze({ id: 'panel-argument.data', path: ['data'] }),
   Object.freeze({ id: 'panel-argument.challenge', path: ['challenge'] }),
@@ -1595,10 +2237,18 @@ export const CHALLENGE_SQUAD_STRATEGIES = Object.freeze([
   Object.freeze({ id: 'services.Squad.squadDao.activeSquad', container: 'services', target: 'Squad.squadDao', path: ['activeSquad'] }),
   Object.freeze({ id: 'services.SBC.repository.activeSquad', container: 'services', target: 'SBC.repository', path: ['activeSquad'] }),
   Object.freeze({ id: 'services.SBC.repository.challengeSquad', container: 'services', target: 'SBC.repository', path: ['challengeSquad'] }),
+  ...ACTIVE_SQUAD_METHODS.map((method) =>
+    Object.freeze({
+      id: `${EA_GLOBALS.searchViewModel}.${method}+observable`,
+      container: 'window',
+      target: 'searchViewModel',
+      method,
+    })
+  ),
 ]);
 
 const carriesChallengeSquad = (value) => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (!isRecordObject(value)) return false;
   const squad = value[CHALLENGE_SQUAD_FIELDS.squad];
   return (
     squad !== null &&
@@ -1608,21 +2258,91 @@ const carriesChallengeSquad = (value) => {
 };
 
 /**
- * Reads the challenge squad out of the SBC detail panel argument and the live
- * service containers. Mirrors `resolveChallengeSubject`: it never guesses,
- * returns the winning strategy id and an attempt record with a reason for every
- * candidate tried, and returns a null payload when no candidate carries a
- * `squad.players` array.
+ * Reads the challenge squad out of the loaded challenge payload, the SBC detail
+ * panel argument and the live service containers.
+ *
+ * Property strategies mirror `resolveChallengeSubject`: they never guess, keep
+ * an attempt record with a reason for every candidate tried, and return a null
+ * payload when no candidate carries a `squad.players` array. The final
+ * candidates call the search view model's active-squad definition-id request
+ * through the observable bridge, because #51 showed EA's read methods return
+ * observables rather than values.
  *
  * @param {*} subject the argument passed to `initWithSBCSet`
  * @param {object|undefined} [pageWindow] the page's `window`, needed for the
  *   `services.<Domain>` strategies
- * @returns {{ ok: boolean, payload: object|null, strategy: string|null,
- *   attempts: Array<{id: string, ok: boolean, reason: string|null}> }}
+ * @param {object|null} [loadedPayload] the `loadChallengePayload` payload,
+ *   whose `squad` is the first documented source
+ * @param {{ observableTimeoutMs?: number }} [options] subscription timeout,
+ *   injectable for tests
+ * @returns {Promise<{ ok: boolean, payload: object|null, strategy: string|null,
+ *   attempts: Array<{id: string, ok: boolean, reason: string|null,
+ *   method?: object}> }>}
  */
-export function resolveChallengeSquad(subject, pageWindow) {
-  return resolveFirstStrategy(CHALLENGE_SQUAD_STRATEGIES, subject, pageWindow, (value, label) => {
-    if (carriesChallengeSquad(value)) return null;
-    return `${label} has no ${CHALLENGE_SQUAD_FIELDS.squad}.${CHALLENGE_SQUAD_FIELDS.players} array`;
-  });
+export async function resolveChallengeSquad(
+  subject,
+  pageWindow,
+  loadedPayload = null,
+  options = {}
+) {
+  const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
+  const attempts = [];
+
+  for (const strategy of CHALLENGE_SQUAD_STRATEGIES) {
+    const attempt = { id: strategy.id, ok: false, reason: null };
+    attempts.push(attempt);
+
+    if (strategy.source === 'loaded') {
+      if (carriesChallengeSquad(loadedPayload)) {
+        attempt.ok = true;
+        return { ok: true, payload: loadedPayload, strategy: strategy.id, attempts };
+      }
+      attempt.reason = 'the loaded challenge payload carries no squad.players array';
+      continue;
+    }
+
+    if (strategy.method !== undefined) {
+      const instance = resolveSearchViewModelInstance(pageWindow);
+      if (!instance.ok) {
+        attempt.reason = instance.reason;
+        continue;
+      }
+      const found = findMethod(instance.value, strategy.method);
+      if (!found.ok) {
+        attempt.reason = describeMissingMethod(instance.name, strategy.method, found.reason);
+        continue;
+      }
+      attempt.method = describeMethodShape(found.value);
+      const call = await callReadMethod(found, instance.value, [], strategy.id, timeoutMs);
+      if (!call.ok) {
+        attempt.reason = call.reason;
+        continue;
+      }
+      const event = call.event;
+      if (!carriesChallengeSquad(event.payload)) {
+        attempt.reason = `returned no ${CHALLENGE_SQUAD_FIELDS.squad}.${CHALLENGE_SQUAD_FIELDS.players} array (got ${describeValue(
+          event.payload
+        )})`;
+        continue;
+      }
+      attempt.ok = true;
+      return { ok: true, payload: event.payload, strategy: strategy.id, attempts };
+    }
+
+    const resolved = readStrategyValue(subject, pageWindow, strategy);
+    if (!resolved.ok) {
+      attempt.reason = resolved.reason;
+      continue;
+    }
+    if (!carriesChallengeSquad(resolved.value)) {
+      attempt.reason = `${strategy.id.replace('panel-argument', 'panel argument')} has no ${
+        CHALLENGE_SQUAD_FIELDS.squad
+      }.${CHALLENGE_SQUAD_FIELDS.players} array`;
+      continue;
+    }
+    attempt.ok = true;
+    return { ok: true, payload: resolved.value, strategy: strategy.id, attempts };
+  }
+
+  return { ok: false, payload: null, strategy: null, attempts };
 }

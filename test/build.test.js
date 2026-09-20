@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CHALLENGE_LOAD_STRATEGIES,
   CHALLENGE_SQUAD_STRATEGIES,
   CHALLENGE_SUBJECT_STRATEGIES,
   CLUB_ITEM_STRATEGIES,
@@ -28,6 +29,13 @@ describe('the build marker', () => {
     expect(marker.readers.challenge).toEqual(CHALLENGE_SUBJECT_STRATEGIES.map((entry) => entry.id));
     expect(marker.readers.club).toEqual(CLUB_ITEM_STRATEGIES.map((entry) => entry.id));
     expect(marker.readers.squad).toEqual(CHALLENGE_SQUAD_STRATEGIES.map((entry) => entry.id));
+  });
+
+  it('states the #51 build id and compiles the challenge-load chain into the marker', () => {
+    expect(BUILD_ID).toBe('fsl-build/3');
+    expect(buildMarker().readers.challengeLoad).toEqual(
+      CHALLENGE_LOAD_STRATEGIES.map((entry) => entry.id)
+    );
   });
 
   it('is carried in the diagnostic report and moves with the supplied marker', () => {
