@@ -153,7 +153,12 @@ web-app user entirely.
    and it is already implemented. It is where the accuracy of a solve's cost comes
    from in the normal case, because an SBC is solved from the club.
 2. **`marketAverage` can be absent** (5/42 in the fixture, `-1` from EA). A missing
-   price stays unknown — never zero. `prices.js` already enforces this.
+   price stays unknown — never zero. `prices.js` normalises absence to `null`, and since
+   issue #60 a card with no value from any source is estimated at the P60 of the
+   same-rating market values in the same batch (the rule described in SBC Monkey's public
+   documentation; borrowed as a published fact, no affiliation). The estimate carries its
+   own `priceSource`, so it is never presented as a quote, and too few same-rating values
+   leaves the card unknown rather than guessed at.
 3. **Concept cards cannot be priced automatically.** EA holds no price data for a
    card the user does not own, and no external source is reachable. An unpriced
    concept card must be reported as unknown rather than guessed at.
