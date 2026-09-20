@@ -23,6 +23,15 @@
  * A name that matches the shared paste-safety list is reported as
  * `<redacted>`, so a hidden field stays distinguishable from an absent one.
  *
+ * Who made a call is decided from the **innermost** stack frame that is not
+ * this module's own machinery: the wrapper and `capture` are skipped, because
+ * our frames are not evidence about the caller. A call EA's code nests beneath
+ * our own invocation is therefore attributed to EA, while our direct calls
+ * still read as ours. Every record also carries `nested`, true when the call
+ * happened during another observed call, so a nested EA call is stated by the
+ * log rather than inferred from a stack. The nesting depth is released in a
+ * `finally`, so a throw cannot leave the flag set.
+ *
  * Observers are removable: `remove()` restores every wrapped method to exactly
  * the function it replaced and drops the wrappers, so nothing is left
  * installed. Recording is bounded by `callCap`, with the dropped count carried
@@ -45,18 +54,23 @@ const WRAPPED_BY_OBSERVER = Symbol('fslObservedMethod');
 
 /**
  * Classifies the frame that made a call as our code or EA's, using the stack
- * only: the frames belonging to this module are dropped and the first
- * remaining frame decides. The stack itself is never recorded, so no page URL
- * or EA source location can reach a pasted report.
+ * only: every frame belonging to this module is dropped — the wrapper and
+ * `capture` included, since they are not evidence about the caller — and the
+ * **innermost** remaining frame decides. A call EA's code nests beneath our own
+ * invocation is therefore attributed to EA, because EA's frame is the one that
+ * issued it, while our direct calls still read as ours. A frame that proves
+ * neither yields `unknown`, never `extension`. The stack itself is never
+ * recorded, so no page URL or EA source location can reach a pasted report.
  */
 const defaultClassifyOrigin = (stack) => {
   if (typeof stack !== 'string' || stack.length === 0) return 'unknown';
-  const frames = stack
+  const caller = stack
     .split('\n')
     .slice(1)
-    .filter((line) => !line.includes('observer.js'));
-  if (frames.some((line) => line.includes('chrome-extension://'))) return 'extension';
-  if (frames.some((line) => /https?:\/\//.test(line))) return 'ea';
+    .find((line) => !line.includes('observer.js'));
+  if (caller === undefined) return 'unknown';
+  if (caller.includes('chrome-extension://')) return 'extension';
+  if (/https?:\/\//.test(caller)) return 'ea';
   return 'unknown';
 };
 
@@ -171,8 +185,9 @@ const renderArgument = (argument) => {
 
 /**
  * One console line for one recorded call: the method, the argument count, who
- * made the call, whether `this` was the wrapped target, and the shape of every
- * argument. Values appear only where the allowlist permits them.
+ * made the call, whether it happened during another observed call, whether
+ * `this` was the wrapped target, and the shape of every argument. Values appear
+ * only where the allowlist permits them.
  *
  * @param {object} call one entry from the observer report's `calls`
  * @returns {string} one line, never a newline
@@ -181,6 +196,7 @@ export function formatObserverCall(call) {
   const argumentsPart = call.args.map((argument, index) => `arg${index}=${renderArgument(argument)}`);
   return (
     `${call.method} args=${call.argumentCount} origin=${call.origin}` +
+    ` nested=${call.nested === true ? 'true' : 'false'}` +
     ` this=${call.thisMatchesTarget ? 'target' : call.thisType}` +
     `${call.threw ? ' threw' : ''}` +
     (argumentsPart.length === 0 ? '' : ` ${argumentsPart.join(' ')}`)
@@ -192,8 +208,9 @@ export function formatObserverCall(call) {
  * them all, and `report` returns what was captured:
  *
  *   {
- *     calls: [{ method, argumentCount, origin, thisType, thisMatchesTarget,
- *               threw, args: [{ type, keys?, values?, length?, empty? }] }],
+ *     calls: [{ method, argumentCount, origin, nested, thisType,
+ *               thisMatchesTarget, threw, args: [{ type, keys?, values?,
+ *               length?, empty? }] }],
  *     dropped: number,
  *     truncated: boolean,
  *     methods: [{ id, installed, reason }],
@@ -223,8 +240,12 @@ export function createMethodObserver(options = {}) {
   let dropped = 0;
   let methods = [];
   let installed = [];
+  // How many observed calls are currently in progress. Zero means the next call
+  // is top-level; anything above means it happened during another observed call
+  // and is recorded as nested. Released in the wrapper's `finally`.
+  let depth = 0;
 
-  const capture = (id, holder, thisValue, args) => {
+  const capture = (id, holder, thisValue, args, nested) => {
     if (calls.length >= callCap) {
       dropped += 1;
       return null;
@@ -233,6 +254,7 @@ export function createMethodObserver(options = {}) {
       method: id,
       argumentCount: args.length,
       origin: classifyOrigin(readStack()),
+      nested,
       thisType:
         thisValue === null ? 'null' : thisValue === undefined ? 'undefined' : typeof thisValue,
       thisMatchesTarget: thisValue === holder,
@@ -275,9 +297,11 @@ export function createMethodObserver(options = {}) {
 
     const original = read.value;
     const wrapped = function (...args) {
+      const nested = depth > 0;
+      depth += 1;
       let record = null;
       try {
-        record = capture(target.id, holder, this, args);
+        record = capture(target.id, holder, this, args, nested);
       } catch {
         record = null;
       }
@@ -286,6 +310,8 @@ export function createMethodObserver(options = {}) {
       } catch (error) {
         if (record !== null) record.threw = true;
         throw error;
+      } finally {
+        depth -= 1;
       }
     };
     Object.defineProperty(wrapped, 'length', { value: original.length, configurable: true });

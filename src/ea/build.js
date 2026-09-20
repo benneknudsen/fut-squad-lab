@@ -39,9 +39,12 @@ import {
  * called them. Incremented by #65: the criteria handed to EA now carry
  * `untradeables` as the reference's string and the named page size, the club
  * DAO's stats cache is reset when the page provides it, and the criteria
- * diagnostic names the fields this project sets.
+ * diagnostic names the fields this project sets. Incremented by #67: the
+ * observer now classifies origin from the innermost frame that is not its own
+ * machinery, so a call EA nests inside our invocation is labelled EA's, and
+ * every record states whether it was nested.
  */
-export const BUILD_ID = 'fsl-build/7';
+export const BUILD_ID = 'fsl-build/8';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact
