@@ -37,7 +37,24 @@
  * for whichever requirement shares its slot. The comparison semantics
  * (`GREATER` means the measured quantity must be >= the value, `LOWER` <=,
  * `EXACT` ===) and the provenance of the scope numbers are documented beside
- * the pinned scope table in the test data.
+ * the pinned scope table in the test data. A name the caller's table supplies
+ * is matched loosely (`minimum`, `MIN` and `GREATER` all mean a minimum;
+ * `maximum`, `MAX`, `LOWER` and `LESS` all mean a maximum) and canonicalised
+ * when it is one of the four known operators; an unknown name is passed through
+ * unchanged. A slot with **no** scope entry takes `DEFAULT_SCOPE`, the minimum
+ * operator: EA treats a count with no scope as "at least N", never "exactly N".
+ *
+ * A raw entry may carry EA's own `count` field. A `count` of `-1` is a sentinel,
+ * not a requirement of minus one: it marks the target as living in the entry's
+ * `eligibilityValue`, and a bare `-1` (as count or as value) fails naming the
+ * sentinel rather than decoding. A count of `0` or more is validated but does
+ * not replace the value, because the flattened `elgReq` entry's
+ * `eligibilityValue` is the target the rest of this module emits.
+ *
+ * A descriptor may carry a `classify` tag; `PLAYER_RARITY_GROUP` values are
+ * resolved through the adapter's `decodeRarityGroup` because the same key can
+ * mean a geographic region, TOTS or TOTW-or-TOTS. An undecodable value fails
+ * loudly with the key named.
  *
  * `PLAYER_QUALITY` is passed through as opaque scoped data: the constraint
  * carries `kind`, `value` and `scope` faithfully, and this module assumes no
@@ -56,6 +73,13 @@
  * no network, no knowledge of HTTP or EA class names.
  */
 
+import {
+  RARITY_GROUP_CLASSIFIER,
+  RARITY_GROUP_MEANINGS,
+  decodeRarityGroup,
+  decodeScopeName,
+} from '../ea/adapter.js';
+
 const ROLES = Object.freeze({
   COUNT: 'count',
   MATCH: 'match',
@@ -66,6 +90,14 @@ const ROLES = Object.freeze({
 const KNOWN_ROLES = new Set(Object.values(ROLES));
 
 const DEFAULT_OPERATION = 'AND';
+
+/**
+ * The comparison a requirement takes when its slot carries no SCOPE entry. EA's
+ * model treats a count with no scope as "at least N", so the default is the
+ * minimum operator, never "exactly N". Exported so callers and tests can name
+ * the default instead of re-spelling it.
+ */
+export const DEFAULT_SCOPE = 'GREATER';
 
 const fail = (message) => {
   throw new Error(`normaliseRequirements: ${message}`);
@@ -136,15 +168,61 @@ const decodeEntry = (entry, index, keys) => {
         ` must be an integer, received ${eligibilityValue}`
     );
   }
+  if (entry.count !== undefined && (!Number.isInteger(entry.count) || entry.count < -1)) {
+    fail(
+      `entry ${index} in eligibilitySlot ${eligibilitySlot} carries an invalid count` +
+        ` ${JSON.stringify(entry.count)}`
+    );
+  }
+  // EA's -1 sentinel: a count of -1 means "the target lives in the value, not in
+  // the count", so a positive eligibilityValue supplies it. A bare -1 anywhere
+  // (count or value) is never a requirement of minus one, and fails naming the
+  // sentinel instead of being emitted.
+  if ((entry.count === -1 || eligibilityValue === -1) && eligibilityValue <= 0) {
+    fail(
+      `entry ${index} in eligibilitySlot ${eligibilitySlot} carries the -1 sentinel` +
+        ` (count ${JSON.stringify(entry.count)}, eligibilityValue ${JSON.stringify(
+          eligibilityValue
+        )}); the target must come from a positive eligibilityValue, and -1 is never a requirement`
+    );
+  }
 
   return {
     key: eligibilityKey,
     kind: descriptor.kind,
     role: descriptor.role,
     field: descriptor.field,
-    value: eligibilityValue,
+    value: resolveClassifiedValue(entry, descriptor, eligibilityKey, eligibilitySlot, eligibilityValue),
     slot: eligibilitySlot,
   };
+};
+
+/**
+ * Resolves an entry's emitted value. A descriptor may carry a `classify` tag
+ * telling the decoder the values need a second decode before they can become a
+ * match value; the only such classifier is `PLAYER_RARITY_GROUP`, whose
+ * `decodeRarityGroup` turns the label and value into a region key, `TOTS` or
+ * `TOTW_OR_TOTS`. An unknown classifier, or a value the classifier cannot
+ * resolve, fails with the key named — never a guessed group.
+ */
+const resolveClassifiedValue = (entry, descriptor, eligibilityKey, eligibilitySlot, value) => {
+  if (descriptor.classify === undefined) return value;
+  if (descriptor.classify !== RARITY_GROUP_CLASSIFIER) {
+    fail(
+      `eligibilityKey ${eligibilityKey} names the unsupported classifier` +
+        ` ${JSON.stringify(descriptor.classify)} in the keys mapping`
+    );
+  }
+  const label = typeof entry.label === 'string' && entry.label.length > 0 ? entry.label : null;
+  const group = decodeRarityGroup(label, value);
+  if (group.meaning === null) {
+    fail(
+      `eligibilityKey ${eligibilityKey} (${descriptor.type}) in eligibilitySlot` +
+        ` ${eligibilitySlot} cannot be decoded: value ${value} and label` +
+        ` ${JSON.stringify(label)} name neither a geographic region, TOTS nor TOTW-or-TOTS`
+    );
+  }
+  return group.meaning === RARITY_GROUP_MEANINGS.REGION ? group.region : group.meaning;
 };
 
 const groupBySlot = (entries) => {
@@ -158,9 +236,9 @@ const groupBySlot = (entries) => {
 
 const readScope = (slot, entries, scopes) => {
   const scopeEntries = entries.filter((entry) => entry.role === ROLES.SCOPE);
-  if (scopeEntries.length === 0) {
-    fail(`requirement in eligibilitySlot ${slot} has no scope modifier`);
-  }
+  // No scope entry means "at least N": EA's default is the minimum operator,
+  // never "exactly N". The default is explicit and exported as DEFAULT_SCOPE.
+  if (scopeEntries.length === 0) return DEFAULT_SCOPE;
   if (scopeEntries.length > 1) {
     fail(`Multiple scope entries in eligibilitySlot ${slot}`);
   }
@@ -177,7 +255,10 @@ const readScope = (slot, entries, scopes) => {
         ` received ${JSON.stringify(operator) ?? 'undefined'}`
     );
   }
-  return operator;
+  // Known names are matched loosely and canonicalised (MIN/GREATER -> GREATER,
+  // MAX/LOWER/LESS -> LOWER, ...); an unknown name keeps the caller's own
+  // vocabulary instead of being forced into one of the four operators.
+  return decodeScopeName(operator) ?? operator;
 };
 
 const buildPlayerCountConstraint = (slot, scope, counts, matches, scalars) => {

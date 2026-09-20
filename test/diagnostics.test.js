@@ -164,8 +164,18 @@ describe('crossCheckEligibilityModel', () => {
       challengeFixture.elgReq
     );
 
+    // The live enum here is built from the pinned observation set, which
+    // predates issue #53: the names the model gained after that observation are
+    // reported as missing from this live read, exactly as the model requires.
     expect(report.pinned.present).toBe(15);
-    expect(report.pinned.missing).toEqual([]);
+    expect(report.pinned.missing).toEqual([
+      'PLAYER_RARITY_GROUP',
+      'PLAYER_MIN_OVR',
+      'PLAYER_EXACT_OVR',
+      'PLAYER_MAX_OVR',
+      'PLAYER_TRADABILITY',
+      'ALL_PLAYERS_CHEMISTRY_POINTS',
+    ]);
     expect(report.unknown).toEqual([]);
     expect(report.renamed).toEqual([]);
     expect(report.undecodable).toEqual([]);
@@ -322,7 +332,16 @@ describe('solve-service staged diagnostics', () => {
     expect(byId.squad).toMatchObject({ ok: true, reason: null });
     expect(byId.eligibility).toMatchObject({ ok: true, reason: null });
     expect(byId.eligibility.detail.resolved).toBe(15);
-    expect(byId.eligibility.detail.crossCheck.pinned.missing).toEqual([]);
+    // The fake live enum is the 15-member pinned observation set; the six model
+    // names issue #53 added are absent from it by construction.
+    expect(byId.eligibility.detail.crossCheck.pinned.missing).toEqual([
+      'PLAYER_RARITY_GROUP',
+      'PLAYER_MIN_OVR',
+      'PLAYER_EXACT_OVR',
+      'PLAYER_MAX_OVR',
+      'PLAYER_TRADABILITY',
+      'ALL_PLAYERS_CHEMISTRY_POINTS',
+    ]);
     expect(byId.solve.detail).toMatchObject({
       cost: 4200,
       costComplete: true,
