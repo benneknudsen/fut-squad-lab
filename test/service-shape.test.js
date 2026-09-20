@@ -226,6 +226,112 @@ describe('describeServiceShape paste safety', () => {
   });
 });
 
+describe('describeServiceShape service domains', () => {
+  it('describes each services.<Domain> object one level down with its values and methods', () => {
+    function UTClubDAO() {}
+    UTClubDAO.prototype.getClubItems = function () {};
+    UTClubDAO.prototype.getStats = function () {};
+
+    const shape = describeServiceShape({
+      services: {
+        Club: { clubDao: new UTClubDAO() },
+        User: { currentUserId: 7 },
+      },
+    });
+
+    const [club, user] = shape.serviceDomains.entries;
+    expect(shape.serviceDomains.entries.map((entry) => entry.name)).toEqual(['Club', 'User']);
+    expect(shape.serviceDomains.omitted).toBe(0);
+    expect(club).toEqual({
+      name: 'Club',
+      signature: 'obj{clubDao}',
+      ownProperties: ['clubDao: obj{}'],
+      values: [
+        { name: 'clubDao', signature: 'obj{}', prototypeMethods: ['getClubItems', 'getStats'] },
+      ],
+      omitted: 0,
+    });
+    expect(user.ownProperties).toEqual(['currentUserId: number']);
+    expect(user.values).toEqual([]);
+  });
+
+  it('caps domains and the values inside them and reports each omitted count', () => {
+    const bigDomain = {};
+    for (let index = 0; index < 100; index += 1) bigDomain[`value${index}`] = {};
+
+    const services = { Big: bigDomain };
+    for (let index = 0; index < 100; index += 1) services[`domain${index}`] = {};
+
+    const shape = describeServiceShape({ services });
+    const big = shape.serviceDomains.entries.find((entry) => entry.name === 'Big');
+
+    expect(shape.serviceDomains.entries.length).toBeLessThan(101);
+    expect(shape.serviceDomains.entries.length + shape.serviceDomains.omitted).toBe(101);
+    expect(big.values.length).toBeLessThan(100);
+    expect(big.values.length + big.omitted).toBe(100);
+  });
+
+  it('never invokes a domain getter or a domain method while describing it', () => {
+    const getterSpy = vi.fn(() => ({}));
+    const methodSpy = vi.fn();
+
+    function UTClubDAO() {}
+    UTClubDAO.prototype.getClubItems = methodSpy;
+
+    const club = { clubDao: new UTClubDAO(), plain: 1 };
+    Object.defineProperty(club, 'heldDao', {
+      enumerable: true,
+      get: getterSpy,
+    });
+
+    const shape = describeServiceShape({ services: { Club: club } });
+    const [entry] = shape.serviceDomains.entries;
+
+    expect(entry.ownProperties).toContain('heldDao: accessor(get)');
+    expect(entry.values).toContainEqual({
+      name: 'heldDao',
+      signature: 'accessor(get)',
+      prototypeMethods: [],
+    });
+    expect(entry.values).toContainEqual({
+      name: 'clubDao',
+      signature: 'obj{}',
+      prototypeMethods: ['getClubItems'],
+    });
+    expect(getterSpy).not.toHaveBeenCalled();
+    expect(methodSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the domain description free of values and sensitive names', () => {
+    const shape = describeServiceShape({
+      services: {
+        sessionToken: { itemData: [{ id: 1 }] },
+        httpClient: {
+          platform: 'pc',
+          sessionCookie: 'live-cookie-value',
+          itemData: [{ id: 1, assetId: 2, marketAverage: 9000, discardValue: 500 }],
+        },
+      },
+    });
+    const json = JSON.stringify(shape);
+
+    expect(json).not.toMatch(FORBIDDEN);
+    expect(json).not.toContain('live-cookie-value');
+    expect(json).not.toContain('987654321');
+    expect(shape.serviceDomains.entries.map((entry) => entry.name)).toEqual([
+      '<redacted>',
+      'httpClient',
+    ]);
+    expect(shape.serviceDomains.entries[0].ownProperties).toEqual(['<redacted>: array[1]']);
+    const httpClient = shape.serviceDomains.entries.find((entry) => entry.name === 'httpClient');
+    expect(httpClient.ownProperties).toEqual([
+      '<redacted>: string("...")',
+      '<redacted>: string("...")',
+      '<redacted>: array[1]',
+    ]);
+  });
+});
+
 describe('the staged diagnostic carries the service shape on a failed club read', () => {
   const solveReport = async (pageWindow, clubResult) => {
     const service = createSolveService({
@@ -294,4 +400,10 @@ describe('the service shape report never reaches the network', () => {
       expect(source).not.toMatch(networkCalls);
     });
   }
+
+  it('the club and challenge strategy chains in src/ea/adapter.js contain no network call', () => {
+    const source = readFileSync(new URL('../src/ea/adapter.js', import.meta.url), 'utf8');
+
+    expect(source).not.toMatch(networkCalls);
+  });
 });

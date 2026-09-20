@@ -137,7 +137,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
       };
       const finish = (outcome) => ({ ...outcome, stages: [...stages] });
 
-      const subjectResult = resolveSubject(subject);
+      const subjectResult = resolveSubject(subject, pageWindow);
       record(
         'bridge',
         subjectResult.ok === true,
@@ -218,7 +218,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
         });
       }
 
-      const squadResult = resolveSquad(subject);
+      const squadResult = resolveSquad(subject, pageWindow);
       record(
         'squad',
         squadResult.ok === true,
