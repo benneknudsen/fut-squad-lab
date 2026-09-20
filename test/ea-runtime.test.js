@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   CHALLENGE_FIELDS,
@@ -124,20 +124,27 @@ describe('isClubPayload', () => {
   });
 });
 
-// The order is the contract: the repository instance in the service locator is
-// the most likely home of a club read, the service instance next, then the
-// locator and the globals themselves.
+// The order is the contract, most-specific first: the instance paths the #44
+// live shape report proved (`services.<Domain>` containers and their DAOs), the
+// repository/service search names the report proved, the legacy
+// `services.UTSBCRepository` entry kept for page builds that still expose it,
+// then the window classes, which are constructors and are refused as instances.
 const EXPECTED_CLUB_STRATEGY_ORDER = [
+  'services.Club.clubDao.getClubItems',
+  'services.Club.clubDao.search',
+  'services.Club.clubRepository.search',
+  'services.Club.clubService.search',
+  'services.Item.itemDao.getClubItems',
+  'services.Item.itemDao.search',
+  'services.SBC.itemRepository.getClubItems',
+  'services.SBC.itemRepository.search',
+  'services.SBC.repository.getClubItems',
+  'services.SBC.repository.search',
+  'services.SBC.sbcDAO.getClubItems',
+  'services.SBC.sbcDAO.search',
+  'services.Item.marketRepository.getClubItems',
+  'services.Item.marketRepository.search',
   'services.UTSBCRepository.getClubItems',
-  'services.UTSBCRepository.getClub',
-  'services.UTSBCRepository.getClubPlayers',
-  'services.UTSBCRepository.searchClub',
-  'services.UTSBCService.getClubItems',
-  'services.UTSBCService.getClub',
-  'services.UTSBCService.getClubPlayers',
-  'services.UTSBCService.searchClub',
-  'services.getClubItems',
-  'services.getClub',
   'window.UTSBCRepository.getClubItems',
   'window.UTSBCRepository.getClub',
   'window.UTSBCService.getClubItems',
@@ -158,23 +165,23 @@ describe('resolveClubItems', () => {
     const items = [{ id: 1 }];
     const pageWindow = {
       services: {
-        UTSBCRepository: { getClubItems: () => ({ itemData: items }) },
+        Club: { clubDao: { getClubItems: () => ({ itemData: items }) } },
       },
     };
     const result = await resolveClubItems(pageWindow);
     expect(result.ok).toBe(true);
     expect(result.items).toBe(items);
-    expect(result.strategy).toBe('services.UTSBCRepository.getClubItems');
+    expect(result.strategy).toBe('services.Club.clubDao.getClubItems');
     expect(result.attempts).toEqual([
-      { id: 'services.UTSBCRepository.getClubItems', ok: true, reason: null },
+      { id: 'services.Club.clubDao.getClubItems', ok: true, reason: null },
     ]);
   });
 
-  it('accepts a bare item array and a promise result', async () => {
+  it('accepts a bare item array and a promise result from clubDao', async () => {
     const items = [{ id: 7 }];
     const pageWindow = {
       services: {
-        UTSBCRepository: { getClubItems: async () => items },
+        Club: { clubDao: { getClubItems: async () => items } },
       },
     };
     const result = await resolveClubItems(pageWindow);
@@ -185,15 +192,15 @@ describe('resolveClubItems', () => {
     const items = [{ id: 2 }];
     const pageWindow = {
       services: {
-        UTSBCRepository: { getClub: () => ({ itemData: items }) },
+        Club: { clubDao: { search: () => ({ itemData: items }) } },
       },
     };
     const result = await resolveClubItems(pageWindow);
-    expect(result.strategy).toBe('services.UTSBCRepository.getClub');
+    expect(result.strategy).toBe('services.Club.clubDao.search');
     expect(result.attempts[0]).toEqual({
-      id: 'services.UTSBCRepository.getClubItems',
+      id: 'services.Club.clubDao.getClubItems',
       ok: false,
-      reason: 'UTSBCRepository has no getClubItems method',
+      reason: 'Club.clubDao has no getClubItems method',
     });
     expect(result.attempts[1].ok).toBe(true);
   });
@@ -202,16 +209,18 @@ describe('resolveClubItems', () => {
     const items = [{ id: 3 }];
     const pageWindow = {
       services: {
-        UTSBCRepository: {
-          getClubItems: () => {
-            throw new Error('needs a search payload');
+        Club: {
+          clubDao: {
+            getClubItems: () => {
+              throw new Error('needs a search payload');
+            },
+            search: () => ({ itemData: items }),
           },
-          getClub: () => ({ itemData: items }),
         },
       },
     };
     const result = await resolveClubItems(pageWindow);
-    expect(result.strategy).toBe('services.UTSBCRepository.getClub');
+    expect(result.strategy).toBe('services.Club.clubDao.search');
     expect(result.attempts[0].reason).toBe('threw: needs a search payload');
   });
 
@@ -219,14 +228,16 @@ describe('resolveClubItems', () => {
     const items = [{ id: 4 }];
     const pageWindow = {
       services: {
-        UTSBCRepository: {
-          getClubItems: () => ({ pagination: {} }),
-          getClub: () => ({ itemData: items }),
+        Club: {
+          clubDao: {
+            getClubItems: () => ({ pagination: {} }),
+            search: () => ({ itemData: items }),
+          },
         },
       },
     };
     const result = await resolveClubItems(pageWindow);
-    expect(result.strategy).toBe('services.UTSBCRepository.getClub');
+    expect(result.strategy).toBe('services.Club.clubDao.search');
     expect(result.attempts[0].reason).toMatch(/itemData/);
   });
 
@@ -242,7 +253,7 @@ describe('resolveClubItems', () => {
       expect(typeof attempt.reason).toBe('string');
       expect(attempt.reason.length).toBeGreaterThan(0);
     }
-    expect(result.attempts[0].reason).toContain('services');
+    expect(result.attempts[0].reason).toContain('Club');
   });
 
   it('names the missing locator when the page exposes no services object', async () => {
@@ -251,9 +262,22 @@ describe('resolveClubItems', () => {
     expect(result.attempts[0].reason).not.toMatch(/undefined has no/);
   });
 
-  it('names the missing constructor when the locator lacks the class instance', async () => {
+  it('names the missing nested path when the locator lacks the domain', async () => {
     const result = await resolveClubItems({ services: {} });
-    expect(result.attempts[0].reason).toContain('UTSBCRepository');
+    expect(result.attempts[0].reason).toContain('Club');
+    expect(result.attempts[0].reason).not.toMatch(/undefined/);
+  });
+
+  it('refuses a window class as a constructor and never calls its prototype method', async () => {
+    const prototypeGet = vi.fn(() => ({ itemData: [{ id: 9 }] }));
+    function UTSBCRepository() {}
+    UTSBCRepository.prototype.getClubItems = prototypeGet;
+    const result = await resolveClubItems({ services: {}, UTSBCRepository });
+    const attempt = result.attempts.find(
+      (entry) => entry.id === 'window.UTSBCRepository.getClubItems'
+    );
+    expect(attempt.reason).toMatch(/constructor, not an instance/);
+    expect(prototypeGet).not.toHaveBeenCalled();
   });
 
   it('accepts a page window with no argument at all without throwing', async () => {
