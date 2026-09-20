@@ -6,8 +6,9 @@
  *
  * The stages run in the documented order:
  *
- *   challenge -> club -> challenge squad -> eligibility (once per session)
- *   -> runSolve -> applySolution -> writeSolution
+ *   challenge subject -> challenge load -> challenge -> club -> challenge squad
+ *   -> eligibility (once per session) -> runSolve -> applySolution
+ *   -> writeSolution
  *
  * Every stage records an outcome as data on the returned `stages` list, as
  * `{ id, ok, reason, detail }`, so the page bridge can render one staged
@@ -41,6 +42,7 @@ import {
   EA_GLOBALS,
   SCOPE_VALUES,
   crossCheckEligibilityModel,
+  loadChallengePayload,
   readEligibilityKeys,
   resolveChallengeSquad,
   resolveChallengeSubject,
@@ -88,6 +90,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
   }
 
   const resolveSubject = steps.resolveChallengeSubject ?? resolveChallengeSubject;
+  const loadChallengeFn = steps.loadChallenge ?? loadChallengePayload;
   const readChallengeFn = steps.readChallenge ?? readChallenge;
   const resolveClub = steps.resolveClubItems ?? resolveClubItems;
   const readClubItemsFn = steps.readClubItems ?? readClubItems;
@@ -155,20 +158,27 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
       const finish = (outcome) => ({ ...outcome, stages: [...stages] });
 
       const subjectResult = resolveSubject(subject, pageWindow);
+      const loadResult = await loadChallengeFn(pageWindow, subjectResult);
       record(
         'bridge',
-        subjectResult.ok === true,
-        subjectResult.ok === true
+        loadResult.ok === true,
+        loadResult.ok === true
           ? null
-          : 'the panel argument carried no challenge payload; the panel shape may have changed',
-        { strategy: subjectResult.strategy, attempts: subjectResult.attempts }
+          : subjectResult.ok !== true
+            ? 'the panel argument carried no challenge payload; the panel shape may have changed'
+            : `the challenge payload could not be loaded; tried ${describeAttempts(loadResult.attempts)}`,
+        {
+          strategy: loadResult.strategy ?? null,
+          attempts: loadResult.attempts,
+          subject: { strategy: subjectResult.strategy ?? null, attempts: subjectResult.attempts },
+        }
       );
 
       let challenge = null;
       let challengeError = null;
-      if (subjectResult.ok) {
+      if (loadResult.ok) {
         try {
-          challenge = readChallengeFn(subjectResult.payload);
+          challenge = readChallengeFn(loadResult.payload);
         } catch (error) {
           challengeError = toError(error);
         }
@@ -182,6 +192,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
                 challengeId: challenge.challengeId,
                 name: challenge.name,
                 formation: challenge.formation,
+                requirementsFrom: challenge.requirementsFrom ?? null,
                 constraints: countConstraints(challenge),
               }
         );
@@ -200,6 +211,10 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
           items: clubRecords.length,
           strategy: clubResult.strategy ?? null,
           attempts: clubResult.attempts,
+          pages: clubResult.pages ?? null,
+          capped: clubResult.capped === true,
+          capReason: clubResult.capReason ?? null,
+          criteria: clubResult.criteria ?? null,
           // The shape report runs on failure only: a read that answered
           // carries none (#44). A shape failure is a recorded reason, never a
           // lost solve (#50).
@@ -215,11 +230,13 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
         }),
         challengeStrategy: subjectResult.strategy,
         challengeAttempts: subjectResult.attempts,
+        loadStrategy: loadResult.strategy,
+        loadAttempts: loadResult.attempts,
         clubStrategy: clubResult.strategy,
         clubAttempts: clubResult.attempts,
       };
 
-      if (subjectResult.ok !== true || challengeError !== null) {
+      if (loadResult.ok !== true || challengeError !== null) {
         return finish({
           ok: false,
           stage: 'challenge',
@@ -238,7 +255,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {} } = {}
         });
       }
 
-      const squadResult = resolveSquad(subject, pageWindow);
+      const squadResult = await resolveSquad(subject, pageWindow, loadResult.payload);
       record(
         'squad',
         squadResult.ok === true,

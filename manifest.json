@@ -36,6 +36,7 @@
         "src/ea/build.js",
         "src/ea/challenge-reader.js",
         "src/ea/club-reader.js",
+        "src/ea/observable.js",
         "src/ea/summary.js",
         "src/ea/solve-runner.js",
         "src/ea/solve-service.js",
