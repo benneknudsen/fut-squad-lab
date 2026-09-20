@@ -127,6 +127,50 @@ export function describeOwnProperties(target) {
 }
 
 /**
+ * Lists every own enumerable property as `{ name, type }`, and for a string
+ * whether it is empty, without ever carrying a value into the output:
+ *
+ *   { name: 'filters', type: 'object' }
+ *   { name: 'label',   type: 'string', empty: false }
+ *   { name: 'count',   type: 'undefined' }
+ *
+ * `undefined` and `null` get their own type instead of being flattened, so a
+ * caller can tell "the field is missing" from "the field holds no value". An
+ * accessor is named `accessor(get)` and never invoked, because this runs in the
+ * player's authenticated session. Names go through the one redaction list, so a
+ * field whose name matches `SENSITIVE_NAME` stays visible as `<redacted>` and is
+ * never confused with an absent one.
+ *
+ * @param {*} target the object to describe
+ * @returns {Array<{name: string, type: string, empty?: boolean}>} one entry per
+ *   own enumerable property, in key order
+ */
+export function describeOwnPropertyTypes(target) {
+  if (!isRecord(target) && typeof target !== 'function') return [];
+  return Object.keys(target).map((name) => {
+    const redacted = redactName(name);
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(target, name);
+    } catch {
+      return { name: redacted, type: 'unreadable' };
+    }
+    if (descriptor !== undefined && typeof descriptor.get === 'function') {
+      return { name: redacted, type: 'accessor(get)' };
+    }
+    const value = descriptor?.value;
+    if (value === undefined) return { name: redacted, type: 'undefined' };
+    if (value === null) return { name: redacted, type: 'null' };
+    if (typeof value === 'string') {
+      return { name: redacted, type: 'string', empty: value.length === 0 };
+    }
+    if (Array.isArray(value)) return { name: redacted, type: `array[${value.length}]` };
+    if (typeof value === 'object') return { name: redacted, type: 'object' };
+    return { name: redacted, type: typeof value };
+  });
+}
+
+/**
  * Names the prototype's methods, walking the chain up to (not including)
  * `Object.prototype`, so a method or getter that returns the view can be
  * spotted. A constructor function is accepted directly and contributes its
