@@ -41,6 +41,7 @@ import {
   SQUAD_WRITE_STRATEGIES,
   resolveStrategyBase,
 } from './adapter.js';
+import { CALL_KINDS, EA_CALL_FAILURE_NAME, defaultPacer } from './pacing.js';
 
 const F = CHALLENGE_SQUAD_FIELDS;
 
@@ -279,7 +280,23 @@ const mutateSlots = async (entity, entries, slotMethods) => {
 
 const attemptRecord = (strategy) => ({ id: strategy.id, ok: false, reason: null });
 
-const runPlainStrategy = async (pageWindow, strategy, payload) => {
+/**
+ * The pacer every write call runs through (#52): the caller's injected one, or
+ * the shared default so a direct call is paced too.
+ */
+const resolvePacer = (options) =>
+  options !== null && typeof options === 'object' && options.pacer !== undefined
+    ? options.pacer
+    : defaultPacer();
+
+/**
+ * The attempt reason for a failed paced call; observable-shaped failures keep
+ * their own message, thrown ones keep the pre-#52 `threw: ...` form.
+ */
+const failureReason = (error) =>
+  error?.name === EA_CALL_FAILURE_NAME ? error.message : `threw: ${messageOf(error)}`;
+
+const runPlainStrategy = async (pageWindow, strategy, payload, pacer) => {
   const base = resolveStrategyBase(pageWindow, strategy);
   if (!base.ok) return { ok: false, reason: base.reason };
   const method = base.value[strategy.method];
@@ -295,20 +312,24 @@ const runPlainStrategy = async (pageWindow, strategy, payload) => {
     };
   }
   try {
-    await method.call(base.value, payload);
+    await pacer.run(strategy.id, () => method.call(base.value, payload), {
+      kind: CALL_KINDS.SAVE,
+    });
   } catch (error) {
-    return { ok: false, reason: `threw: ${messageOf(error)}` };
+    return { ok: false, reason: failureReason(error) };
   }
   return { ok: true };
 };
 
-const runSlotStrategy = async (pageWindow, strategy, payload) => {
+const runSlotStrategy = async (pageWindow, strategy, payload, pacer) => {
   const base = resolveStrategyBase(pageWindow, strategy);
   if (!base.ok) return { ok: false, reason: base.reason };
   const entries = payload?.[F.squad]?.[F.players];
   if (!Array.isArray(entries)) {
     return { ok: false, reason: `payload carries no squad.${F.players} array` };
   }
+  // `getSlots` and the slot mutators are local entity operations, not service
+  // calls; only the save at the end leaves the page and is paced.
   const baseResult = await mutateSlots(base.value, entries, strategy.slotMethods);
   if (!baseResult.ok) return baseResult;
 
@@ -317,9 +338,11 @@ const runSlotStrategy = async (pageWindow, strategy, payload) => {
     return { ok: false, reason: `${base.name} has no ${strategy.method} method` };
   }
   try {
-    await save.call(base.value, payload);
+    await pacer.run(`${strategy.id} save`, () => save.call(base.value, payload), {
+      kind: CALL_KINDS.SAVE,
+    });
   } catch (error) {
-    return { ok: false, reason: `save threw: ${messageOf(error)}` };
+    return { ok: false, reason: `save ${failureReason(error)}` };
   }
   return { ok: true, slotStrategy: baseResult.slotMethod };
 };
@@ -334,20 +357,25 @@ const runSlotStrategy = async (pageWindow, strategy, payload) => {
  * tell a missing method from a rejected payload. It never forges an HTTP
  * request and never calls `submitChallenge`.
  *
+ * Every service call goes through the paced queue (#52): the injected pacer, or
+ * the shared default when none is supplied.
+ *
  * @param {object|undefined} pageWindow the page's `window`
  * @param {object} payload the squad payload to write
+ * @param {{ pacer?: object }} [options] the queue every EA call runs through
  * @returns {Promise<{ ok: boolean, strategy: string|null, attempts: Array<object>,
  *   slotStrategy?: string }>}
  */
-export async function writeSolution(pageWindow, payload) {
+export async function writeSolution(pageWindow, payload, options = {}) {
+  const pacer = resolvePacer(options);
   const attempts = [];
   for (const strategy of SQUAD_WRITE_STRATEGIES) {
     const attempt = attemptRecord(strategy);
     attempts.push(attempt);
     const outcome =
       strategy.slotMethods === undefined
-        ? await runPlainStrategy(pageWindow, strategy, payload)
-        : await runSlotStrategy(pageWindow, strategy, payload);
+        ? await runPlainStrategy(pageWindow, strategy, payload, pacer)
+        : await runSlotStrategy(pageWindow, strategy, payload, pacer);
     if (!outcome.ok) {
       attempt.reason = outcome.reason;
       continue;

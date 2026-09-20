@@ -14,6 +14,9 @@ import {
   resolveEaGlobal,
   resolveEaGlobals,
 } from '../src/ea/adapter.js';
+import { createTestPacer } from './helpers/pacing.js';
+
+const testPacer = createTestPacer();
 
 // The adapter is imported by the pure solver, so these tests run in Node where
 // `window` does not exist. Every runtime read takes an explicit `pageWindow`
@@ -173,7 +176,7 @@ describe('resolveClubItems', () => {
         Club: { clubDao: { getClubItems: () => ({ itemData: items }) } },
       },
     };
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
     expect(result.ok).toBe(true);
     expect(result.items).toBe(items);
     expect(result.strategy).toBe('services.Club.clubDao.getClubItems');
@@ -207,7 +210,7 @@ describe('resolveClubItems', () => {
       },
     };
 
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
 
     expect(result.ok).toBe(true);
     expect(result.strategy).toBe('services.Club.clubDao.getClubItems+{}');
@@ -238,7 +241,7 @@ describe('resolveClubItems', () => {
       },
     };
 
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
     const zeroArgument = result.attempts.find(
       (attempt) => attempt.id === 'services.Club.clubDao.getClubItems'
     );
@@ -267,7 +270,7 @@ describe('resolveClubItems', () => {
       },
     };
 
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
     const attempt = result.attempts.find(
       (entry) => entry.id === 'services.Club.clubDao.getClubItems'
     );
@@ -284,7 +287,7 @@ describe('resolveClubItems', () => {
     const clubDao = {};
     Object.defineProperty(clubDao, 'getClubItems', { get: getterSpy });
 
-    const result = await resolveClubItems({ services: { Club: { clubDao } } });
+    const result = await resolveClubItems({ services: { Club: { clubDao } } }, { pacer: testPacer });
 
     expect(getterSpy).not.toHaveBeenCalled();
     const attempt = result.attempts.find(
@@ -300,7 +303,7 @@ describe('resolveClubItems', () => {
         Club: { clubDao: { getClubItems: async () => items } },
       },
     };
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
     expect(result.items).toBe(items);
   });
 
@@ -311,7 +314,7 @@ describe('resolveClubItems', () => {
         Club: { clubDao: { search: () => ({ itemData: items }) } },
       },
     };
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
     expect(result.strategy).toBe('services.Club.clubDao.search');
     const byId = (id) => result.attempts.find((attempt) => attempt.id === id);
     expect(byId('services.Club.clubDao.getClubItems')).toEqual({
@@ -341,7 +344,7 @@ describe('resolveClubItems', () => {
         },
       },
     };
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
     expect(result.strategy).toBe('services.Club.clubDao.search');
     const attempt = result.attempts.find((entry) => entry.id === 'services.Club.clubDao.getClubItems');
     expect(attempt.reason).toBe('threw: needs a search payload');
@@ -359,7 +362,7 @@ describe('resolveClubItems', () => {
         },
       },
     };
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
     expect(result.strategy).toBe('services.Club.clubDao.search');
     const attempt = result.attempts.find((entry) => entry.id === 'services.Club.clubDao.getClubItems');
     expect(attempt.reason).toMatch(/itemData/);
@@ -367,7 +370,7 @@ describe('resolveClubItems', () => {
 
   it('reports every candidate in order with a reason when none succeed, and never guesses a size', async () => {
     const pageWindow = { services: {} };
-    const result = await resolveClubItems(pageWindow);
+    const result = await resolveClubItems(pageWindow, { pacer: testPacer });
     expect(result.ok).toBe(false);
     expect(result.strategy).toBeNull();
     expect(result.items).toEqual([]);
@@ -381,13 +384,13 @@ describe('resolveClubItems', () => {
   });
 
   it('names the missing locator when the page exposes no services object', async () => {
-    const result = await resolveClubItems({});
+    const result = await resolveClubItems({}, { pacer: testPacer });
     expect(result.attempts[0].reason).toContain('services');
     expect(result.attempts[0].reason).not.toMatch(/undefined has no/);
   });
 
   it('names the missing nested path when the locator lacks the domain', async () => {
-    const result = await resolveClubItems({ services: {} });
+    const result = await resolveClubItems({ services: {} }, { pacer: testPacer });
     expect(result.attempts[0].reason).toContain('Club');
     expect(result.attempts[0].reason).not.toMatch(/undefined/);
   });
@@ -396,7 +399,7 @@ describe('resolveClubItems', () => {
     const prototypeGet = vi.fn(() => ({ itemData: [{ id: 9 }] }));
     function UTSBCRepository() {}
     UTSBCRepository.prototype.getClubItems = prototypeGet;
-    const result = await resolveClubItems({ services: {}, UTSBCRepository });
+    const result = await resolveClubItems({ services: {}, UTSBCRepository }, { pacer: testPacer });
     const attempt = result.attempts.find(
       (entry) => entry.id === 'window.UTSBCRepository.getClubItems'
     );
@@ -405,7 +408,7 @@ describe('resolveClubItems', () => {
   });
 
   it('accepts a page window with no argument at all without throwing', async () => {
-    const result = await resolveClubItems(undefined);
+    const result = await resolveClubItems(undefined, { pacer: testPacer });
     expect(result.ok).toBe(false);
     expect(result.attempts).toHaveLength(CLUB_ITEM_STRATEGIES.length);
   });

@@ -28,9 +28,11 @@ import {
  * The marker for this build. Incremented by #51: the read layer moved to EA's
  * observable calling convention, the club read became a paged search and the
  * challenge read gained the load and active-squad chains, so a report from an
- * older build compiled different chains.
+ * older build compiled different chains. Incremented by #52: every EA call now
+ * goes through the pacing queue, so a report must state the pacing build and
+ * carry the run's wait and retry counts.
  */
-export const BUILD_ID = 'fsl-build/3';
+export const BUILD_ID = 'fsl-build/4';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact
