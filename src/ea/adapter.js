@@ -1820,6 +1820,80 @@ const describeMissingMethod = (owner, method, reason) =>
 export const CLUB_SEARCH_PAGE_SIZE = 100;
 export const CLUB_SEARCH_PAGE_CAP = 50;
 
+/**
+ * The field names this project sets on every club search criteria it hands EA,
+ * in the order it sets them: the two request-shaping fields the reference
+ * initialises (`untradeables`, `count`) plus the `offset` this project's
+ * pagination owns. The criteria diagnostic reports them by name and type, so
+ * the next live log shows what was handed over instead of leaving it inferred
+ * (#65).
+ */
+export const CLUB_SEARCH_SET_FIELDS = Object.freeze(['untradeables', 'count', 'offset']);
+
+/**
+ * The two values EA's `untradeables` criteria field carries. They are
+ * **strings**, deliberately: the reference implementation passes `"true"` and
+ * `"false"` as text, and EA lower-cases the value itself. An absent field is
+ * exactly what threw `Cannot read properties of undefined (reading
+ * 'toLowerCase')` (#65), so a future reader must not "correct" these to
+ * booleans — a boolean would silently look right to a careless test and fail
+ * in EA the same way `undefined` did.
+ */
+export const CLUB_SEARCH_UNTRADEABLES_VALUES = Object.freeze({
+  ONLY: 'true',
+  NOT_ONLY: 'false',
+});
+
+/**
+ * The club DAO method that clears EA's cached club statistics before a search.
+ * The reference implementation calls it before searching. Our shape reports
+ * proved the `services.Club.clubDao` path exists but never proved this method
+ * is on it, so absence is normal and reported, never an error. A reset that
+ * throws is reported too: a stats-cache failure must not lose the club read.
+ */
+const CLUB_STATS_CACHE_TARGET = Object.freeze({
+  container: 'services',
+  target: 'Club.clubDao',
+  method: 'resetStatsCache',
+});
+
+const resetClubStatsCache = (pageWindow) => {
+  const base = resolveStrategyBase(pageWindow, CLUB_STATS_CACHE_TARGET);
+  if (!base.ok) return 'absent';
+  const found = findMethod(base.value, CLUB_STATS_CACHE_TARGET.method);
+  if (!found.ok) return 'absent';
+  try {
+    found.value.call(base.value);
+    return 'reset';
+  } catch (error) {
+    return `threw: ${describeCause(error)}`;
+  }
+};
+
+/**
+ * Builds one search page's criteria: a copy of the criteria read from EA's
+ * search view model, with this project's fields set. The view model's own
+ * object is never mutated, so a page walk cannot corrupt the page's search
+ * state. `untradeables` and `count` follow the reference's initialisation;
+ * `offset` advances with the page walk.
+ *
+ * @param {object} criteria the criteria read from EA's view model
+ * @param {{ offset: number, onlyUntradeables?: boolean }} page
+ * @returns {object} the criteria to hand EA
+ */
+const buildClubSearchCriteria = (criteria, { offset, onlyUntradeables }) => ({
+  ...criteria,
+  untradeables:
+    onlyUntradeables === true
+      ? CLUB_SEARCH_UNTRADEABLES_VALUES.ONLY
+      : CLUB_SEARCH_UNTRADEABLES_VALUES.NOT_ONLY,
+  count: CLUB_SEARCH_PAGE_SIZE,
+  offset,
+});
+
+const describeSetFields = (criteria) =>
+  CLUB_SEARCH_SET_FIELDS.map((name) => ({ name, type: typeof criteria[name] }));
+
 /** The view model property that carries the club search criteria. */
 const SEARCH_CRITERIA_PROPERTY = 'searchCriteria';
 
@@ -2059,7 +2133,7 @@ export const readSearchCriteria = (pageWindow) => {
   return { ok: false, criteria: null, strategy: null, source: null, shape: null, attempts };
 };
 
-const summarizeCriteria = (resolution) =>
+const summarizeCriteria = (resolution, applied = null) =>
   resolution === null
     ? null
     : {
@@ -2068,6 +2142,7 @@ const summarizeCriteria = (resolution) =>
         source: resolution.source ?? null,
         shape: resolution.shape ?? null,
         attempts: resolution.attempts,
+        ...(applied === null ? {} : applied),
       };
 
 /**
@@ -2179,13 +2254,15 @@ const describeCriteriaSource = (resolution) =>
 
 /**
  * Names what one page call was handed: the criteria strategy that produced the
- * object, the two request numbers this project sets, and every criteria key by
- * name and type — never a value. This is what a timed-out observable reports
- * instead of leaving its reader to guess which argument EA refused (#61).
+ * object, the fields this project sets with their types, and every criteria key
+ * by name and type — never a value, except the two request numbers #64's
+ * allowlist already covers. This is what a timed-out observable reports instead
+ * of leaving its reader to guess which argument EA refused (#61, #65).
  */
 const describeCalledWith = (resolution, pageCriteria) =>
   `called with criteria from ${describeCriteriaSource(resolution)}:` +
   ` count=${pageCriteria.count}, offset=${pageCriteria.offset},` +
+  ` set [${describeSetFields(pageCriteria).map(renderCriteriaEntry).join(', ')}],` +
   ` keys [${describeCriteriaKeys(resolution.shape)}]`;
 
 /**
@@ -2206,20 +2283,34 @@ const describeSearchCallFailure = (error, resolution, pageCriteria) => {
 /**
  * Subscribes to one page of a club search per offset until a page yields no
  * items, then reports how many pages ran and whether the cap, not exhaustion,
- * stopped the walk. Every page is one paced call.
+ * stopped the walk. Every page is one paced call. EA's club stats cache is
+ * reset first when the page provides `resetStatsCache`; absence and a throwing
+ * reset are reported, never fatal.
  *
  * A failed page throws with `describeSearchCallFailure`'s report, so the
  * attempt reason distinguishes an EA-side throw from a missing method and
- * carries the criteria shape the page was called with (#61).
+ * carries the criteria fields and shape the page was called with (#61, #65).
  */
-const runPagedSearch = async ({ base, found, resolution, strategy, timeoutMs, pacer }) => {
+const runPagedSearch = async ({
+  pageWindow,
+  base,
+  found,
+  resolution,
+  strategy,
+  timeoutMs,
+  pacer,
+  onlyUntradeables,
+}) => {
   const criteria = resolution.criteria;
+  const statsCache = resetClubStatsCache(pageWindow);
   const items = [];
   let offset = 0;
   let pages = 0;
+  let setFields = [];
   while (pages < CLUB_SEARCH_PAGE_CAP) {
     pages += 1;
-    const pageCriteria = { ...criteria, count: CLUB_SEARCH_PAGE_SIZE, offset };
+    const pageCriteria = buildClubSearchCriteria(criteria, { offset, onlyUntradeables });
+    setFields = describeSetFields(pageCriteria);
     const label = `${strategy.id} page ${pages}`;
     let event;
     try {
@@ -2238,7 +2329,7 @@ const runPagedSearch = async ({ base, found, resolution, strategy, timeoutMs, pa
     }
     const pageItems = clubItemsOf(event.payload);
     items.push(...pageItems);
-    if (pageItems.length === 0) return { items, pages, capped: false, capReason: null };
+    if (pageItems.length === 0) return { items, pages, capped: false, capReason: null, setFields, statsCache };
     offset += pageItems.length;
   }
   return {
@@ -2248,6 +2339,8 @@ const runPagedSearch = async ({ base, found, resolution, strategy, timeoutMs, pa
     capReason:
       `the page cap of ${CLUB_SEARCH_PAGE_CAP} was reached before the search stopped yielding` +
       ` items; the club may be larger than the ${pages} pages read`,
+    setFields,
+    statsCache,
   };
 };
 
@@ -2266,19 +2359,23 @@ const runPagedSearch = async ({ base, found, resolution, strategy, timeoutMs, pa
  * the strategy reached a callable method, including one that then threw. The
  * pagination report carries `pages`, `capped` and `capReason`; the criteria
  * report carries the view-model probes, the producing strategy, whether it came
- * from an instance or the prototype, and the criteria' key names and types —
- * never a value (#61). A criteria object with nothing set is refused before EA
- * is called, and a search page's failure reason distinguishes EA throwing on
- * our criteria from the method being missing.
+ * from an instance or the prototype, the criteria' key names and types — never
+ * a value — and the names and types of the fields this project sets on the
+ * criteria it hands EA (#61, #65). A criteria object with nothing set is
+ * refused before EA is called, and a search page's failure reason distinguishes
+ * EA throwing on our criteria from the method being missing.
  *
  * When nothing succeeds, `items` is an empty array — never a guessed count —
  * and every attempt's reason names what was missing or wrong.
  *
  * @param {object|undefined} pageWindow the page's `window`
- * @param {{ observableTimeoutMs?: number, pacer?: object }} [options]
+ * @param {{ observableTimeoutMs?: number, pacer?: object,
+ *   onlyUntradeables?: boolean }} [options]
  *   `observableTimeoutMs` is injectable so tests need not wait out the default;
  *   `pacer` is the queue every EA call runs through, defaulting to the shared
- *   paced queue (#52)
+ *   paced queue (#52); `onlyUntradeables` asks EA for untradeables-only
+ *   (`"true"`) rather than the other value (`"false"`), matching the
+ *   reference's option of the same name (#65)
  * @returns {Promise<{ ok: boolean, items: Array<object>, strategy: string|null,
  *   attempts: Array<{id: string, ok: boolean, reason: string|null,
  *   method?: object}>, pages: number, capped: boolean, capReason: string|null,
@@ -2287,6 +2384,7 @@ const runPagedSearch = async ({ base, found, resolution, strategy, timeoutMs, pa
 export async function resolveClubItems(pageWindow, options = {}) {
   const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
   const pacer = resolvePacer(options);
+  const onlyUntradeables = options.onlyUntradeables === true;
   const attempts = [];
   let criteriaResolution = null;
   const resolveCriteriaOnce = () => {
@@ -2319,12 +2417,14 @@ export async function resolveClubItems(pageWindow, options = {}) {
       }
       try {
         const search = await runPagedSearch({
+          pageWindow,
           base: base.value,
           found,
           resolution,
           strategy,
           timeoutMs,
           pacer,
+          onlyUntradeables,
         });
         attempt.ok = true;
         return {
@@ -2335,7 +2435,10 @@ export async function resolveClubItems(pageWindow, options = {}) {
           pages: search.pages,
           capped: search.capped,
           capReason: search.capReason,
-          criteria: summarizeCriteria(resolution),
+          criteria: summarizeCriteria(resolution, {
+            setFields: search.setFields,
+            statsCache: search.statsCache,
+          }),
         };
       } catch (error) {
         attempt.reason = describeCause(error);
