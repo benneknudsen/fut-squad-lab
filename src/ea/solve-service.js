@@ -370,8 +370,13 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
     },
 
     /**
-     * Cancels the run's waits and queued calls (#52). The in-flight EA call
-     * still settles through its own observable timeout; nothing new starts.
+     * Cancels the run's waits and queued calls (#52). A queued call rejects
+     * immediately; the in-flight EA call is not aborted and still settles its
+     * own entry, with its result or with a failure. A read settles through the
+     * observable bridge's own timeout; a save has no such timeout and settles
+     * through the pacer's per-call task bound (`DEFAULT_TASK_TIMEOUT_MS` in
+     * `src/ea/pacing.js`), so a save whose promise never settles cannot wedge
+     * the queue. A cancelled pacer arms no further wait.
      */
     cancel() {
       calls.cancel();
