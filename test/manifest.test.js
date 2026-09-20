@@ -1,9 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { findUnlistedModules } from './helpers/import-graph.js';
+
 const manifest = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
 const rawManifest = readFileSync(new URL('../manifest.json', import.meta.url), 'utf8');
+const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
 const EA_MATCH = 'https://www.ea.com/*';
 const scriptFor = (jsPath) =>
@@ -84,6 +88,24 @@ describe('manifest.json', () => {
     ]) {
       expect(war.resources).toContain(module);
     }
+  });
+
+  it('lists every module reachable from the declared entry points', () => {
+    const [war] = manifest.web_accessible_resources;
+    const entryPoints = [
+      ...manifest.content_scripts.flatMap((entry) => entry.js),
+      ...war.resources,
+    ];
+    const missing = findUnlistedModules({
+      root: repoRoot,
+      entries: entryPoints,
+      listed: entryPoints,
+    });
+
+    expect(
+      missing,
+      'reachable modules missing from web_accessible_resources.resources',
+    ).toEqual([]);
   });
 
   it('points the icons at files that exist', () => {
