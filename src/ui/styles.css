@@ -46,3 +46,32 @@
   opacity: 0.55;
   cursor: default;
 }
+
+/* ============================================================================
+   Fallback mount (#42). When the panel view shape is not recognised, the
+   control is pinned to the bottom-left corner instead of being appended below
+   EA's full-height app. This is a diagnostic fallback, not the intended
+   design: the real panel mount replaces it once the shape the diagnostic
+   reports names the property that carries the view. Bottom-left stays clear of
+   EA's primary action, which sits bottom-right, and of the account chrome in
+   the top corners. The box is content-sized and transparent to pointer events
+   except for the toolbar, so it never swallows a click on the page beneath.
+   ========================================================================== */
+
+.fsl-root[data-fsl-fallback] {
+  position: fixed;
+  left: var(--fsl-sp-6);
+  bottom: var(--fsl-sp-6);
+  z-index: var(--fsl-z-popover);
+  max-width: var(--fsl-panel-min);
+  border: 1px solid var(--fsl-border-strong);
+  border-radius: var(--fsl-r-3);
+  box-shadow: var(--fsl-shadow-popover);
+  pointer-events: none;
+}
+
+.fsl-root[data-fsl-fallback] .fsl-toolbar {
+  padding: var(--fsl-sp-2);
+  border-bottom: 0;
+  pointer-events: auto;
+}
