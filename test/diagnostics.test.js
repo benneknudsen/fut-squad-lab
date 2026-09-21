@@ -52,7 +52,7 @@ const emptySquad = () =>
 
 const solutionFromClub = (start = 0) => ({
   squad: {
-    players: club.itemData
+    players: club.items
       .slice(start, start + 11)
       .map((item) => ({ id: item.id, assetId: item.assetId })),
   },
@@ -74,7 +74,7 @@ const createSteps = (overrides = {}) => ({
   readChallenge: vi.fn(() => challengeFixture),
   resolveClubItems: vi.fn(async () => ({
     ok: true,
-    items: club.itemData,
+    items: club.items,
     strategy: 'fake-club-reader',
     attempts: [{ id: 'fake-club-reader', ok: true, reason: null }],
   })),
@@ -378,6 +378,62 @@ describe('solve-service staged diagnostics', () => {
     ]);
   });
 
+  it('carries the club payload field the read used into the club stage detail', async () => {
+    const steps = createSteps({
+      resolveClubItems: vi.fn(async () => ({
+        ok: true,
+        items: club.items,
+        strategy: 'fake-club-reader',
+        field: 'items',
+        endOfList: true,
+        attempts: [{ id: 'fake-club-reader', ok: true, reason: null }],
+      })),
+    });
+    const service = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+    const clubStage = stageById(outcome.stages, 'club');
+
+    expect(clubStage.detail).toMatchObject({ field: 'items', endOfList: true });
+  });
+
+  it('carries the set-API selection counts into the bridge detail and the read', async () => {
+    const selection = {
+      ok: true,
+      sets: 2,
+      seen: 7,
+      open: 3,
+      chosenId: 25,
+      inProgress: true,
+      reason: 'saw 7 challenges, 3 open; chose challenge 25 (in progress)',
+    };
+    const steps = createSteps({
+      loadChallenge: vi.fn(async () => ({
+        ok: true,
+        payload: challengeFixture,
+        strategy: 'services.SBC.requestSets+requestChallengesForSet+getChallenges',
+        attempts: [
+          {
+            id: 'services.SBC.requestSets+requestChallengesForSet+getChallenges',
+            ok: true,
+            reason: null,
+            selection,
+          },
+        ],
+        selection,
+      })),
+    });
+    const service = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+    const bridge = stageById(outcome.stages, 'bridge');
+
+    expect(bridge.detail.selection).toEqual(selection);
+    expect(outcome.read.loadSelection).toEqual(selection);
+    expect(outcome.read.summary).toContain('saw 7 challenges');
+    expect(outcome.read.summary).toContain('chose 25');
+  });
+
   // The expected outcome vector per stage, in DIAGNOSTIC_STAGES order. null
   // means the pipeline never reached it. The club read runs before the
   // challenge-failure return in solve-service (the read summary needs it), so
@@ -653,7 +709,7 @@ const createDiagnosticsWindow = () => {
   };
   const solution = {
     squad: {
-      players: club.itemData.slice(0, 11).map((item) => ({
+      players: club.items.slice(0, 11).map((item) => ({
         id: item.id,
         assetId: item.assetId,
         cardState: 'untradeable',
@@ -680,7 +736,7 @@ const createDiagnosticsWindow = () => {
     SBCEligibilityKey: liveEnumFromPinned(),
     document: { body: createFakeNode(), createElement: () => createFakeNode() },
     services: {
-      UTSBCRepository: { getClubItems: async () => ({ itemData: club.itemData }) },
+      UTSBCRepository: { getClubItems: async () => ({ items: club.items }) },
     },
     console: {
       log: vi.fn((...args) => logs.push(args.join(' '))),

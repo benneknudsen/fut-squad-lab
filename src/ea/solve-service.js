@@ -183,6 +183,12 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
         {
           strategy: loadResult.strategy ?? null,
           attempts: loadResult.attempts,
+          // The #72 set-API selection counts: how many sets and challenges were
+          // seen and which challenge was chosen, so the next live log can say
+          // whether this build picked the challenge the player meant.
+          selection: loadResult.selection ?? null,
+          loadVia: loadResult.loadVia ?? null,
+          squadBackfilled: loadResult.squadBackfilled === true,
           subject: { strategy: subjectResult.strategy ?? null, attempts: subjectResult.attempts },
         }
       );
@@ -227,6 +233,10 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
           pages: clubResult.pages ?? null,
           capped: clubResult.capped === true,
           capReason: clubResult.capReason ?? null,
+          // The field the live page carried (#72); null on a failed read, so
+          // the diagnostic shows the field name only when one was read.
+          field: clubResult.field ?? null,
+          endOfList: clubResult.endOfList === true,
           criteria: clubResult.criteria ?? null,
           // The shape report runs on failure only: a read that answered
           // carries none (#44). A shape failure is a recorded reason, never a
@@ -254,11 +264,13 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
           challenge,
           clubResult: clubResult.ok ? { ...clubResult, items: clubRecords } : clubResult,
           challengeFailure,
+          selection: loadResult.selection ?? null,
         }),
         challengeStrategy: subjectResult.strategy,
         challengeAttempts: subjectResult.attempts,
         loadStrategy: loadResult.strategy,
         loadAttempts: loadResult.attempts,
+        loadSelection: loadResult.selection ?? null,
         clubStrategy: clubResult.strategy,
         clubAttempts: clubResult.attempts,
       };

@@ -26,7 +26,7 @@ import { PINNED_ELIGIBILITY_KEYS, withEligibility } from './helpers/eligibility.
 // in test/fixtures/eligibility-observation.js and are supplied here through the
 // shared `withEligibility` helper.
 
-const POOL = buildPool(normaliseClub(clubFixture.itemData));
+const POOL = buildPool(normaliseClub(clubFixture.items));
 
 const CHEMISTRY_RULE_SET = normaliseChemistryProfile({
   ...profilesFixture,

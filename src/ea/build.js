@@ -48,8 +48,12 @@ import {
  * restored after the read, the observable is subscribed as
  * `observe(subscriber, callback)` and unsubscribed through the callback
  * observer, and the read summary names the challenge read failure.
+ * Incremented by #72: the club payload's item array is now read from the live
+ * field with its end-of-list rule and a page-size offset, and the challenge is
+ * read through the SBC set API walk before the panel-argument fallbacks, so a
+ * report must state which field and which selection this build made.
  */
-export const BUILD_ID = 'fsl-build/9';
+export const BUILD_ID = 'fsl-build/10';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact

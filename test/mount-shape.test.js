@@ -228,7 +228,7 @@ const createFallbackWindow = () => {
   const pageWindow = {
     document,
     console: { log: vi.fn(), info: vi.fn(), warn: vi.fn() },
-    services: { UTSBCRepository: { getClubItems: async () => ({ itemData: [] }) } },
+    services: { UTSBCRepository: { getClubItems: async () => ({ items: [] }) } },
     UTSBCSquadDetailPanelViewController,
     postMessage(message) {
       messages.push(message);

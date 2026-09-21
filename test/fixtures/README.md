@@ -13,7 +13,7 @@ these, not against hand-written guesses.
 | `sbs-set-10-challenges.json` | `GET /sbs/setId/10/challenges` | The `elgReq[]` requirement model |
 | `sbs-set-16-challenges.json` | `GET /sbs/setId/16/challenges` | A second challenge set, for variety |
 | `sbs-challenge-25-squad.json` | `POST /sbs/challenge/25` | The empty squad template a solution is written into |
-| `club-items.json` | `POST /club` | The club item format |
+| `club-items.json` | `POST /club` | The club item format (`items` envelope, issue #72) |
 | `chemistry-profiles.json` | `GET /chemistry/profiles` | FC27 chemistry rules |
 | `chemistry-teamlinks.json` | `GET /chemistry/teamlinks` | Linked clubs (cross-team club counting) |
 | `chemistry-observed-squad.json` | `GET /squad/active` (derived) | **EA's own chemistry numbers** for a real squad — the only ground truth we have for the scoring layer |

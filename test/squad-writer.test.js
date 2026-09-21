@@ -11,7 +11,7 @@ import { createTestPacer } from './helpers/pacing.js';
 
 const testPacer = createTestPacer();
 
-const rawItems = club.itemData;
+const rawItems = club.items;
 
 const emptyEntry = (index) => ({
   index,

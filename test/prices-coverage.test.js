@@ -30,7 +30,7 @@ import set16 from './fixtures/sbs-set-16-challenges.json';
 // weighted contribution of the untradeable cards these squads contain: 769 ->
 // 1199.5, 2062.4 -> 2934, and the invalid set10 solve 829 -> 1304.5.
 
-const POOL = buildPool(normaliseClub(clubFixture.itemData));
+const POOL = buildPool(normaliseClub(clubFixture.items));
 
 const CHEMISTRY_RULE_SET = normaliseChemistryProfile({
   ...profilesFixture,

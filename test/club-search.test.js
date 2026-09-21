@@ -48,14 +48,14 @@ const pagedSearch = (pages) => {
     calls.push(criteria);
     snapshots.push({ ...criteria });
     const page = pages[calls.length - 1] ?? [];
-    return observableOf({ itemData: page });
+    return observableOf({ items: page });
   };
   return { calls, snapshots, search };
 };
 
 const windowWithCriteria = (extra = {}) => ({
   UTBucketedItemSearchViewModel: { searchCriteria: { filters: { owned: true } } },
-  services: { Club: { search: () => observableOf({ itemData: [] }) }, ...extra },
+  services: { Club: { search: () => observableOf({ items: [] }) }, ...extra },
 });
 
 describe('CLUB_ITEM_STRATEGIES search entry', () => {
@@ -123,7 +123,11 @@ describe('resolveClubItems search path', () => {
 
     expect(result.items.map((item) => item.id)).toEqual([1, 2, 3]);
     expect(result.pages).toBe(3);
-    expect(snapshots.map((criteria) => criteria.offset)).toEqual([0, 2, 3]);
+    expect(snapshots.map((criteria) => criteria.offset)).toEqual([
+      0,
+      CLUB_SEARCH_PAGE_SIZE,
+      2 * CLUB_SEARCH_PAGE_SIZE,
+    ]);
     expect(snapshots.every((criteria) => criteria.count === CLUB_SEARCH_PAGE_SIZE)).toBe(true);
   });
 
@@ -201,13 +205,13 @@ describe('resolveClubItems search path', () => {
   });
 
   it('feeds the real fixture items through the existing normaliser', async () => {
-    const { search } = pagedSearch([club.itemData, []]);
+    const { search } = pagedSearch([club.items, []]);
 
     const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } }, services: { Club: { search } } }, { pacer: testPacer });
     const records = readClubItems(result.items);
 
     expect(result.ok).toBe(true);
-    expect(records).toHaveLength(club.itemData.length);
+    expect(records).toHaveLength(club.items.length);
     expect(records[0]).toMatchObject({ id: 116927068448054, preferredPosition: 'CAM', duplicate: false });
   });
 
@@ -224,7 +228,7 @@ describe('resolveClubItems search path', () => {
     const result = await resolveClubItems(pageWindow, { pacer: testPacer });
 
     expect(result.strategy).toBe('services.Item.searchStorageItems+searchCriteria');
-    expect(result.attempts[0].reason).toMatch(/itemData/);
+    expect(result.attempts[0].reason).toMatch(/items/);
   });
 
   it('keeps the recorded attempts in chain order with {id, ok, reason}', async () => {
@@ -388,7 +392,7 @@ describe('the criteria report (#61)', () => {
     const result = await resolveClubItems(
       {
         UTBucketedItemSearchViewModel: { searchCriteria: { marketAverage: 987654 } },
-        services: { Club: { search: () => observableOf({ itemData: [] }) } },
+        services: { Club: { search: () => observableOf({ items: [] }) } },
       },
       { pacer: testPacer }
     );
@@ -519,7 +523,7 @@ describe('the criteria object handed to EA (#70)', () => {
     const seen = [];
     const search = (received) => {
       seen.push(received.type.toLowerCase());
-      return observableOf({ itemData: [] });
+      return observableOf({ items: [] });
     };
 
     const result = await resolveClubItems(
@@ -561,7 +565,7 @@ describe('the criteria object handed to EA (#70)', () => {
     const own = await resolveClubItems(
       {
         UTBucketedItemSearchViewModel,
-        services: { Club: { search: () => observableOf({ itemData: [] }) } },
+        services: { Club: { search: () => observableOf({ items: [] }) } },
       },
       { pacer: testPacer }
     );
@@ -641,7 +645,7 @@ describe('the criteria object handed to EA (#70)', () => {
         offset: received.offset,
         untradeables: received.untradeables,
       });
-      return observableOf({ itemData: seen.length === 1 ? [{ id: 1 }] : [] });
+      return observableOf({ items: seen.length === 1 ? [{ id: 1 }] : [] });
     };
 
     const result = await resolveClubItems(
@@ -675,6 +679,6 @@ describe('the criteria object handed to EA (#70)', () => {
     );
 
     expect(ownCriteria.count).toBe(CLUB_SEARCH_PAGE_SIZE);
-    expect(ownCriteria.offset).toBe(1);
+    expect(ownCriteria.offset).toBe(CLUB_SEARCH_PAGE_SIZE);
   });
 });

@@ -91,6 +91,25 @@ describe('buildReadSummary', () => {
     expect(summary).toContain('services.SBC.loadChallenge+subject: method missing');
   });
 
+  it('names the set-API selection counts when the load resolved one', () => {
+    const summary = buildReadSummary({
+      challenge,
+      clubResult: successClub,
+      selection: { ok: true, sets: 2, seen: 7, open: 3, chosenId: 25, inProgress: true },
+    });
+
+    expect(summary).toContain('saw 7 challenges');
+    expect(summary).toContain('3 open');
+    expect(summary).toContain('chose 25');
+  });
+
+  it('does not print selection counts when the load recorded none', () => {
+    const summary = buildReadSummary({ challenge, clubResult: successClub, selection: null });
+
+    expect(summary).not.toContain('saw ');
+    expect(summary).not.toContain('undefined');
+  });
+
   it('keeps the summary unchanged when a challenge was read', () => {
     const summary = buildReadSummary({
       challenge,

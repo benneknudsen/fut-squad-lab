@@ -30,7 +30,7 @@ import {
 // ever changes that, so this file cannot silently stop covering those states.
 // Every other record below comes through the real adapter and `normaliseClub`.
 
-const fixtureRawItems = club.itemData;
+const fixtureRawItems = club.items;
 
 // A complete raw club item; every field the adapter requires is present.
 const raw = (overrides = {}) => ({

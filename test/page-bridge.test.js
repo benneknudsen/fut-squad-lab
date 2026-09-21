@@ -86,7 +86,7 @@ const createFakeWindow = ({ withController = true, withHook = true } = {}) => {
     document,
     services: {
       UTSBCRepository: {
-        getClubItems: async () => ({ itemData: club.itemData }),
+        getClubItems: async () => ({ items: club.items }),
       },
     },
     postMessage(message) {
