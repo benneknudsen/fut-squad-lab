@@ -12,37 +12,44 @@ import { createTestPacer } from './helpers/pacing.js';
 
 const testPacer = createTestPacer();
 
-// A fake EA observable: `observe` stores the callback and hands back an
-// observer whose `unobserve` counts calls, `emit` fires every stored callback.
-// Real EA observables can fire more than once; these fakes can too.
+// A fake EA observable: `observe` takes the subscriber first and the callback
+// second, as the live contract does (#70). The callback receives the observer
+// and the event, and `unobserve` is called with the subscriber the caller owns.
+// `emit` fires every stored callback. Real EA observables can fire more than
+// once; these fakes can too.
 const makeObservable = () => {
-  const state = { callbacks: [], unsubscribed: 0, subscribed: 0 };
+  const state = { callbacks: [], unsubscribed: 0, subscribed: 0, subscriber: null };
   return {
     state,
-    observe(callback) {
+    observe(subscriber, callback) {
       state.subscribed += 1;
-      state.callbacks.push(callback);
-      return {
-        unobserve() {
+      state.subscriber = subscriber;
+      const observer = {
+        unobserve(target) {
           state.unsubscribed += 1;
+          state.unobserveArgument = target;
         },
       };
+      state.callbacks.push({ callback, observer });
+      return observer;
     },
     emit(event) {
-      for (const callback of [...state.callbacks]) callback(event);
+      for (const entry of [...state.callbacks]) entry.callback(entry.observer, event);
     },
   };
 };
 
 const neverFires = () => {
-  const state = { subscribed: 0, unsubscribed: 0 };
+  const state = { subscribed: 0, unsubscribed: 0, subscriber: null };
   return {
     state,
-    observe() {
+    observe(subscriber) {
       state.subscribed += 1;
+      state.subscriber = subscriber;
       return {
-        unobserve() {
+        unobserve(target) {
           state.unsubscribed += 1;
+          state.unobserveArgument = target;
         },
       };
     },
@@ -91,15 +98,71 @@ describe('observeOnce', () => {
     expect(observable.state.unsubscribed).toBe(1);
   });
 
-  it('timed out with an explicit reason and unsubscribes instead of hanging', async () => {
+  it('subscribes with observe(subscriber, callback) and unsubscribes through the callback observer', async () => {
+    const captured = { subscriber: null, observer: null, callback: null, unobserved: [] };
+    const returned = { unobserve: vi.fn() };
+    const observable = {
+      observe(subscriber, callback) {
+        captured.subscriber = subscriber;
+        captured.callback = callback;
+        captured.observer = {
+          unobserve(target) {
+            captured.unobserved.push(target);
+          },
+        };
+        return returned;
+      },
+    };
+    const payload = { itemData: [{ id: 1 }] };
+    const promise = observeOnce(observable, { timeoutMs: 100 });
+
+    expect(typeof captured.callback).toBe('function');
+    expect(typeof captured.subscriber).toBe('object');
+    expect(captured.subscriber).not.toBeNull();
+    expect(captured.subscriber).not.toBe(observable);
+
+    captured.callback(captured.observer, {
+      data: payload,
+      error: null,
+      response: null,
+      status: 200,
+      success: true,
+    });
+    const event = await promise;
+
+    expect(event.payload).toBe(payload);
+    expect(captured.unobserved).toEqual([captured.subscriber]);
+    expect(returned.unobserve).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the observable own unobserve with the subscriber when the callback carries no observer', async () => {
+    const state = { subscriber: null, unobserved: [] };
+    const observable = {
+      observe(subscriber, callback) {
+        state.subscriber = subscriber;
+        callback(null, { data: { done: true } });
+        return {};
+      },
+      unobserve(target) {
+        state.unobserved.push(target);
+      },
+    };
+
+    const event = await observeOnce(observable, { timeoutMs: 100 });
+
+    expect(event.payload).toEqual({ done: true });
+    expect(state.unobserved).toEqual([state.subscriber]);
+  });
+
+  it('timed out names the two-argument subscription it used, and unsubscribes with the subscriber', async () => {
     const observable = neverFires();
+    const error = await observeOnce(observable, { timeoutMs: 20 }).catch((reason) => reason);
 
-    await expect(observeOnce(observable, { timeoutMs: 20 })).rejects.toThrow(
-      /timed out after 20ms/
-    );
-
+    expect(error.message).toMatch(/timed out after 20ms/);
+    expect(error.message).toContain('observe(subscriber, callback)');
     expect(observable.state.subscribed).toBe(1);
     expect(observable.state.unsubscribed).toBe(1);
+    expect(observable.state.unobserveArgument).toBe(observable.state.subscriber);
   });
 
   it('names the returned observable shape when it times out', async () => {
@@ -142,14 +205,15 @@ describe('observeOnce', () => {
 
   it('accepts a synchronous first callback fired inside observe', async () => {
     const state = { unsubscribed: 0 };
+    const observer = {
+      unobserve() {
+        state.unsubscribed += 1;
+      },
+    };
     const observable = {
-      observe(callback) {
-        callback({ data: { synced: true } });
-        return {
-          unobserve() {
-            state.unsubscribed += 1;
-          },
-        };
+      observe(subscriber, callback) {
+        callback(observer, { data: { synced: true } });
+        return { unobserve: vi.fn() };
       },
     };
 

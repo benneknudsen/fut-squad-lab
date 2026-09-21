@@ -77,6 +77,31 @@ describe('buildReadSummary', () => {
     expect(summary).toContain('42 club items');
   });
 
+  it('names the challenge read failure when no challenge was read', () => {
+    const summary = buildReadSummary({
+      challenge: null,
+      clubResult: successClub,
+      challengeFailure:
+        'subject: panel-argument.data: payload is string, not an object;' +
+        ' load: services.SBC.loadChallenge+subject: method missing',
+    });
+
+    expect(summary).toMatch(/challenge not detected/i);
+    expect(summary).toContain('panel-argument.data: payload is string, not an object');
+    expect(summary).toContain('services.SBC.loadChallenge+subject: method missing');
+  });
+
+  it('keeps the summary unchanged when a challenge was read', () => {
+    const summary = buildReadSummary({
+      challenge,
+      clubResult: successClub,
+      challengeFailure: 'this must not appear',
+    });
+
+    expect(summary).toContain('3 Leagues & 2 Nations');
+    expect(summary).not.toContain('this must not appear');
+  });
+
   it('names every candidate it tried when the club read failed, and never a guessed size', () => {
     const summary = buildReadSummary({ challenge, clubResult: failedClub });
     expect(summary).toMatch(/club read failed/);

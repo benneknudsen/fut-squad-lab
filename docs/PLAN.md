@@ -117,6 +117,43 @@ Plus `teamChemLinks`, which maps linked clubs (e.g. men's/women's sides of the s
 
 The web app applies a squad with `PUT /ut/game/fc27/squad/{id}` (1.7 KB body) — captured in the recon. Squad shape: `{ id, formation, rating, chemistry, players: [ { index, itemData, chemistry, loyaltyBonus } ], managerId, squadType, ... }`.
 
+### 1.7 Reader interfaces for the club search (#70)
+
+Two interface facts about EA's club read were established while chasing why the
+`fsl-build/8` live run read 0 club items. Both are contracts, not preferences.
+
+- **The search criteria must be handed to EA as the live object, never as a
+  copy.** A `UTBucketedItemSearchViewModel` criteria is a class instance whose
+  public fields (`type`, `category`, `position`, …) live on the prototype,
+  backed by own `_`-prefixed fields. Spreading it into a plain object keeps only
+  the own backing fields, so EA's own search threw
+  `Cannot read properties of undefined (reading 'toLowerCase')` on the missing
+  `type`. The reference takes the criteria object itself, sets `untradeables`,
+  `count` and `offset` on it, and passes that same object to
+  `services.Club.search`. This project constructs **its own**
+  `new UTBucketedItemSearchViewModel()` and reads `searchCriteria` from that
+  instance, so EA's live club-UI criteria are never mutated. When the class is
+  unavailable, the criteria resolved from the live page are used instead, and
+  the fields this project set are restored after the read — on success, failure
+  and timeout alike — so a solve never leaves EA's own club search with this
+  project's page size.
+- **EA's observable is subscribed as `observe(subscriber, callback)`.** The
+  first argument is a subscriber object the caller owns; the callback receives
+  `(observer, event)`, where the observer releases the subscription with
+  `observer.unobserve(subscriber)`, and the event carries
+  `{ data, error, response, status, success }` with the payload as
+  `response ?? data`. Calling `observe(callback)` with one argument never fires
+  and burns the whole 5 s timeout — the `fsl-build/8` log's
+  `observeOnce: … timed out after 5000ms` — even though the returned value was a
+  real EA observable (`observe=function, unobserve=function`). A silent
+  single-argument retry must not be added: a wrong subscription has to fail
+  loudly.
+
+Both facts are what `fsl-build/9` implements (#70). Do not "tidy" the criteria
+back into a copy or reintroduce a one-argument subscription: either change
+reintroduces the defect it fixed. The `fsl-build/9` live run is the confirmation
+that EA accepts the object and fires the callback.
+
 ---
 
 ## 2. Design decisions
