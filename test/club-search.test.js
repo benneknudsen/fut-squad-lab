@@ -15,16 +15,19 @@ const testPacer = createTestPacer();
 // Issue #51: the club read is a paged `services.Club.search(criteria)` call
 // whose result is an observable. These tests build fake EA observables — they
 // fire once, synchronously, and expose `unobserve` — and assert the criteria
-// shape, the page walk and the fallbacks with their reasons.
+// shape, the page walk and the fallbacks with their reasons. Issue #70: the
+// fake observable takes the subscriber first and the callback second, as EA's
+// own observable does.
 
 const observableOf = (data, state = { unsubscribed: 0 }) => ({
-  observe(callback) {
-    callback({ data, error: null, response: null, status: 200, success: true });
-    return {
+  observe(subscriber, callback) {
+    const observer = {
       unobserve() {
         state.unsubscribed += 1;
       },
     };
+    callback(observer, { data, error: null, response: null, status: 200, success: true });
+    return observer;
   },
   state,
 });
@@ -37,12 +40,17 @@ const neverFires = () => ({
 
 const pagedSearch = (pages) => {
   const calls = [];
+  // What EA actually saw at call time: the criteria object is handed over live
+  // and restored after the walk (#70), so a post-read inspection would show the
+  // restored values, not the ones the page was called with.
+  const snapshots = [];
   const search = (criteria) => {
     calls.push(criteria);
+    snapshots.push({ ...criteria });
     const page = pages[calls.length - 1] ?? [];
     return observableOf({ itemData: page });
   };
-  return { calls, search };
+  return { calls, snapshots, search };
 };
 
 const windowWithCriteria = (extra = {}) => ({
@@ -62,7 +70,7 @@ describe('CLUB_ITEM_STRATEGIES search entry', () => {
 
 describe('resolveClubItems search path', () => {
   it('builds the search criteria from the EA view model and calls the subscription', async () => {
-    const { calls, search } = pagedSearch([[{ id: 1 }], []]);
+    const { snapshots, search } = pagedSearch([[{ id: 1 }], []]);
     const pageWindow = { UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } }, services: { Club: { search } } };
 
     const result = await resolveClubItems(pageWindow, { pacer: testPacer });
@@ -71,9 +79,9 @@ describe('resolveClubItems search path', () => {
     expect(result.strategy).toBe('services.Club.search+searchCriteria');
     expect(result.pages).toBe(2);
     expect(result.capped).toBe(false);
-    expect(calls[0].count).toBe(CLUB_SEARCH_PAGE_SIZE);
-    expect(calls[0].offset).toBe(0);
-    expect(calls[0].ownedOnly).toBe(true);
+    expect(snapshots[0].count).toBe(CLUB_SEARCH_PAGE_SIZE);
+    expect(snapshots[0].offset).toBe(0);
+    expect(snapshots[0].ownedOnly).toBe(true);
     expect(result.attempts[0].method.arity).toBe(1);
     expect(result.criteria).toMatchObject({ ok: true, strategy: expect.stringContaining('UTBucketedItemSearchViewModel') });
   });
@@ -98,25 +106,25 @@ describe('resolveClubItems search path', () => {
     expect(calls[0].fromPrototypeFree).toBe(true);
   });
 
-  it('does not mutate the view model search criteria it copies', async () => {
-    const criteria = { ownedOnly: true };
+  it('hands the view model criteria object itself to EA and restores it after the walk', async () => {
+    const criteria = { ownedOnly: true, count: 5, offset: 7, untradeables: 'true' };
     const { calls, search } = pagedSearch([[{ id: 1 }], []]);
     await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: criteria }, services: { Club: { search } } }, { pacer: testPacer });
 
-    expect(Object.hasOwn(criteria, 'count')).toBe(false);
-    expect(Object.hasOwn(criteria, 'offset')).toBe(false);
-    expect(calls[0]).not.toBe(criteria);
+    expect(calls[0]).toBe(criteria);
+    expect(calls[1]).toBe(criteria);
+    expect(criteria).toEqual({ ownedOnly: true, count: 5, offset: 7, untradeables: 'true' });
   });
 
   it('pages until the result stops yielding items and sums every page', async () => {
-    const { calls, search } = pagedSearch([[{ id: 1 }, { id: 2 }], [{ id: 3 }], []]);
+    const { snapshots, search } = pagedSearch([[{ id: 1 }, { id: 2 }], [{ id: 3 }], []]);
 
     const result = await resolveClubItems({ UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } }, services: { Club: { search } } }, { pacer: testPacer });
 
     expect(result.items.map((item) => item.id)).toEqual([1, 2, 3]);
     expect(result.pages).toBe(3);
-    expect(calls.map((criteria) => criteria.offset)).toEqual([0, 2, 3]);
-    expect(calls.every((criteria) => criteria.count === CLUB_SEARCH_PAGE_SIZE)).toBe(true);
+    expect(snapshots.map((criteria) => criteria.offset)).toEqual([0, 2, 3]);
+    expect(snapshots.every((criteria) => criteria.count === CLUB_SEARCH_PAGE_SIZE)).toBe(true);
   });
 
   it('stops at the page cap and reports the cap instead of looping forever', async () => {
@@ -175,7 +183,7 @@ describe('resolveClubItems search path', () => {
   });
 
   it('falls through to services.Item.searchStorageItems with the same criteria', async () => {
-    const { calls, search } = pagedSearch([[{ id: 7 }], []]);
+    const { snapshots, search } = pagedSearch([[{ id: 7 }], []]);
 
     const result = await resolveClubItems(
       {
@@ -187,8 +195,8 @@ describe('resolveClubItems search path', () => {
 
     expect(result.ok).toBe(true);
     expect(result.strategy).toBe('services.Item.searchStorageItems+searchCriteria');
-    expect(calls[0].count).toBe(CLUB_SEARCH_PAGE_SIZE);
-    expect(calls[0].ownedOnly).toBe(true);
+    expect(snapshots[0].count).toBe(CLUB_SEARCH_PAGE_SIZE);
+    expect(snapshots[0].ownedOnly).toBe(true);
     expect(result.criteria.ok).toBe(true);
   });
 
@@ -403,13 +411,13 @@ describe('the criteria initialisation (#65)', () => {
   });
 
   it('sets untradeables as a string, never a boolean', async () => {
-    const { calls, search } = pagedSearch([[{ id: 1 }], []]);
+    const { snapshots, search } = pagedSearch([[{ id: 1 }], []]);
 
     const result = await resolveClubItems(searchWindow(search), { pacer: testPacer });
 
     expect(result.ok).toBe(true);
-    expect(typeof calls[0].untradeables).toBe('string');
-    expect(calls[0].untradeables).toBe('false');
+    expect(typeof snapshots[0].untradeables).toBe('string');
+    expect(snapshots[0].untradeables).toBe('false');
   });
 
   it('sets the untradeables-only path to "true" and the other path to "false"', async () => {
@@ -418,24 +426,24 @@ describe('the criteria initialisation (#65)', () => {
       pacer: testPacer,
       onlyUntradeables: true,
     });
-    expect(onlyUntradeables.calls[0].untradeables).toBe('true');
-    expect(typeof onlyUntradeables.calls[0].untradeables).toBe('string');
+    expect(onlyUntradeables.snapshots[0].untradeables).toBe('true');
+    expect(typeof onlyUntradeables.snapshots[0].untradeables).toBe('string');
 
     const notOnly = pagedSearch([[{ id: 1 }], []]);
     await resolveClubItems(searchWindow(notOnly.search), {
       pacer: testPacer,
       onlyUntradeables: false,
     });
-    expect(notOnly.calls[0].untradeables).toBe('false');
-    expect(notOnly.calls[0].untradeables).not.toBe(false);
+    expect(notOnly.snapshots[0].untradeables).toBe('false');
+    expect(notOnly.snapshots[0].untradeables).not.toBe(false);
   });
 
   it('sets count to the named page-size constant on every page', async () => {
-    const { calls, search } = pagedSearch([[{ id: 1 }, { id: 2 }], [{ id: 3 }], []]);
+    const { snapshots, search } = pagedSearch([[{ id: 1 }, { id: 2 }], [{ id: 3 }], []]);
 
     await resolveClubItems(searchWindow(search), { pacer: testPacer });
 
-    expect(calls.every((criteria) => criteria.count === CLUB_SEARCH_PAGE_SIZE)).toBe(true);
+    expect(snapshots.every((criteria) => criteria.count === CLUB_SEARCH_PAGE_SIZE)).toBe(true);
   });
 
   it('resets the club stats cache when present and treats its absence as normal', async () => {
@@ -496,5 +504,177 @@ describe('the criteria initialisation (#65)', () => {
     expect(search).not.toHaveBeenCalled();
     expect(result.criteria.ok).toBe(false);
     expect(Object.hasOwn(result.criteria, 'setFields')).toBe(false);
+  });
+});
+
+// Issue #70: EA's search reads the public criteria fields off the object it is
+// handed, and those fields live on the criteria' prototype. A spread copy keeps
+// only the own backing fields, so EA threw reading `.toLowerCase()` off
+// `undefined`. The fix hands EA the criteria object itself and restores the
+// fields this project set when the object belongs to the live page.
+describe('the criteria object handed to EA (#70)', () => {
+  it('keeps a prototype field readable on the object EA receives', async () => {
+    const criteria = Object.create({ type: 'player' });
+    criteria.ownedOnly = true;
+    const seen = [];
+    const search = (received) => {
+      seen.push(received.type.toLowerCase());
+      return observableOf({ itemData: [] });
+    };
+
+    const result = await resolveClubItems(
+      { UTBucketedItemSearchViewModel: { searchCriteria: criteria }, services: { Club: { search } } },
+      { pacer: testPacer }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(seen).toEqual(['player']);
+    expect(Object.hasOwn(criteria, 'type')).toBe(false);
+  });
+
+  it('creates its own view model criteria when the global is a class', async () => {
+    let ownCriteria = null;
+    function UTBucketedItemSearchViewModel() {
+      ownCriteria = { ownedOnly: true };
+      this.searchCriteria = ownCriteria;
+    }
+    const { calls, search } = pagedSearch([[{ id: 1 }], []]);
+
+    const result = await resolveClubItems(
+      { UTBucketedItemSearchViewModel, services: { Club: { search } } },
+      { pacer: testPacer }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.criteria.owned).toBe(true);
+    expect(calls[0]).toBe(ownCriteria);
+  });
+
+  it('reports whether the criteria came from an object we created or from the live page', async () => {
+    const live = await resolveClubItems(windowWithCriteria(), { pacer: testPacer });
+    expect(live.criteria.source).toBe('instance');
+    expect(live.criteria.owned).toBe(false);
+
+    function UTBucketedItemSearchViewModel() {
+      this.searchCriteria = { ownedOnly: true };
+    }
+    const own = await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel,
+        services: { Club: { search: () => observableOf({ itemData: [] }) } },
+      },
+      { pacer: testPacer }
+    );
+    expect(own.criteria.source).toBe('instance');
+    expect(own.criteria.owned).toBe(true);
+  });
+
+  it('restores the fields it set on live criteria after a successful walk', async () => {
+    const criteria = { ownedOnly: true, count: 5, offset: 7, untradeables: 'true' };
+    const { search } = pagedSearch([[{ id: 1 }], []]);
+
+    await resolveClubItems(
+      { UTBucketedItemSearchViewModel: { searchCriteria: criteria }, services: { Club: { search } } },
+      { pacer: testPacer }
+    );
+
+    expect(criteria).toEqual({ ownedOnly: true, count: 5, offset: 7, untradeables: 'true' });
+  });
+
+  it('restores live criteria after a failed page and after a timeout', async () => {
+    const failing = { ownedOnly: true };
+    await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel: { searchCriteria: failing },
+        services: {
+          Club: {
+            search: () => {
+              throw new Error('EA refused the search');
+            },
+          },
+        },
+      },
+      { pacer: testPacer }
+    );
+    expect(failing).toEqual({ ownedOnly: true });
+
+    const timingOut = { ownedOnly: true };
+    await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel: { searchCriteria: timingOut },
+        services: { Club: { search: () => neverFires() } },
+      },
+      { observableTimeoutMs: 20, pacer: testPacer }
+    );
+    expect(timingOut).toEqual({ ownedOnly: true });
+  });
+
+  it('restores an accessor-backed live criteria through its backing fields', async () => {
+    const criteria = Object.create({
+      get count() {
+        return this._count;
+      },
+      set count(value) {
+        this._count = value;
+      },
+      get offset() {
+        return this._offset;
+      },
+      set offset(value) {
+        this._offset = value;
+      },
+      get untradeables() {
+        return this._untradeables;
+      },
+      set untradeables(value) {
+        this._untradeables = value;
+      },
+    });
+    criteria.ownedOnly = true;
+    criteria._count = 5;
+    criteria._offset = 7;
+    criteria._untradeables = 'true';
+    const seen = [];
+    const search = (received) => {
+      seen.push({
+        count: received.count,
+        offset: received.offset,
+        untradeables: received.untradeables,
+      });
+      return observableOf({ itemData: seen.length === 1 ? [{ id: 1 }] : [] });
+    };
+
+    const result = await resolveClubItems(
+      { UTBucketedItemSearchViewModel: { searchCriteria: criteria }, services: { Club: { search } } },
+      { pacer: testPacer }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(seen[0]).toEqual({
+      count: CLUB_SEARCH_PAGE_SIZE,
+      offset: 0,
+      untradeables: 'false',
+    });
+    expect(Object.hasOwn(criteria, 'count')).toBe(false);
+    expect(criteria._count).toBe(5);
+    expect(criteria._offset).toBe(7);
+    expect(criteria._untradeables).toBe('true');
+  });
+
+  it('does not restore criteria it created itself', async () => {
+    let ownCriteria = null;
+    function UTBucketedItemSearchViewModel() {
+      ownCriteria = { ownedOnly: true };
+      this.searchCriteria = ownCriteria;
+    }
+    const { search } = pagedSearch([[{ id: 1 }], []]);
+
+    await resolveClubItems(
+      { UTBucketedItemSearchViewModel, services: { Club: { search } } },
+      { pacer: testPacer }
+    );
+
+    expect(ownCriteria.count).toBe(CLUB_SEARCH_PAGE_SIZE);
+    expect(ownCriteria.offset).toBe(1);
   });
 });

@@ -235,6 +235,34 @@ describe('createSolveService', () => {
     expect(steps.runSolve).not.toHaveBeenCalled();
   });
 
+  it('carries the recorded bridge and subject attempts into the read summary', async () => {
+    const steps = createSteps({
+      resolveChallengeSubject: vi.fn(() => ({
+        ok: false,
+        payload: null,
+        strategy: null,
+        attempts: [
+          { id: 'panel-argument.data', ok: false, reason: 'payload is string, not an object' },
+        ],
+      })),
+      loadChallenge: vi.fn(async () => ({
+        ok: false,
+        payload: null,
+        strategy: null,
+        attempts: [
+          { id: 'services.SBC.loadChallenge+subject', ok: false, reason: 'method missing' },
+        ],
+      })),
+    });
+    const { service } = createService(steps);
+
+    const outcome = await service.solve({ subject: 'nonsense' });
+
+    expect(outcome.read.summary).toMatch(/challenge not detected/);
+    expect(outcome.read.summary).toContain('panel-argument.data: payload is string, not an object');
+    expect(outcome.read.summary).toContain('services.SBC.loadChallenge+subject: method missing');
+  });
+
   it('never lets the solve path reach submitChallenge, even when every write candidate fails', async () => {
     const submitChallenge = vi.fn();
     const pageWindow = {
