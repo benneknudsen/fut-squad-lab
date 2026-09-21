@@ -292,6 +292,6 @@ describe('no real network primitive on the read path', () => {
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(result.ok).toBe(false);
-    expect(result.attempts[0].reason).toMatch(/itemData|observable|returned/i);
+    expect(result.attempts[0].reason).toMatch(/items|observable|returned/i);
   });
 });

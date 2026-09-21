@@ -88,7 +88,7 @@ The recon probe resolved all of these as real constructors **on the page's `wind
 
 ### 1.4 Item format
 
-`POST /club` returns `{ "itemData": [ ... ] }`. Each item carries everything the solver needs:
+`POST /club` returns `{ "items": [ ... ] }`. Each item carries everything the solver needs:
 
 - `rating` (84) — rating/quality constraints
 - `nation` (52), `leagueId` (31), `teamid` (1745) — nation/league/club counting
@@ -153,6 +153,42 @@ Both facts are what `fsl-build/9` implements (#70). Do not "tidy" the criteria
 back into a copy or reintroduce a one-argument subscription: either change
 reintroduces the defect it fixed. The `fsl-build/9` live run is the confirmation
 that EA accepts the object and fires the callback.
+
+### 1.8 Live reader facts from `fsl-build/9` (#72)
+
+The `fsl-build/9` live run proved both readers were looking at the wrong part
+of EA's answer. Two payload facts were established from what EA returned, in
+our own words:
+
+- **The club payload's item array is `items`.** `services.Club.search` returned
+  `{ items, retrievedAll }` and `services.Item.searchStorageItems` returned
+  `{ items, endOfList }`. The earlier `/club` recon named the same array
+  `itemData`; the live payload wins. A page walk is finished when `endOfList`
+  is present and true, otherwise when `retrievedAll` is true; a page carrying
+  neither flag keeps the walk going until an empty page or the page cap. The
+  offset advances by the requested page size (`criteria.count`), never by the
+  number of items a page happened to return, because EA may clamp or trim a
+  page. `itemData` stays named in diagnostics when a payload carries it
+  instead, but it is never read as a fallback.
+- **The challenge comes from the SBC set API, not the panel argument.** The
+  live panel hook (`initWithSBCSet`) carried no requirements in any of the
+  seven shapes the read probed. The verified path is
+  `services.SBC.requestSets()` → a `sets` array → for each set
+  `services.SBC.requestChallengesForSet(set)` → `set.getChallenges()`, a method
+  call on the set entity. A challenge entity carries `id`, `name`/`title`,
+  `isCompleted()`, `isInProgress()` and `squad`. A challenge is usable when
+  `isCompleted()` is falsy, and a throwing `isCompleted()` counts as open. With
+  several open, an in-progress one is preferred, otherwise the first. It is
+  loaded with `services.SBC.sbcDAO.loadChallenge(id, inProgress)` when that
+  method exists and the entity has an id, otherwise with
+  `services.SBC.loadChallenge(entity)` — the entity object itself, never an id.
+  Requirements are read out of the loaded payload, and the loaded `squad` is
+  written back onto the entity when the entity has none. The panel-argument
+  path stays as a reported fallback. Both calls return observables and are
+  subscribed exactly as section 1.7 describes.
+
+These are the facts `fsl-build/10` implements. A later live probe that
+contradicts either one wins over this section.
 
 ---
 

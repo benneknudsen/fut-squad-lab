@@ -27,7 +27,7 @@ const decode = (challenge) =>
 
 // The fixture pool is the real entry-point composition named by the issue:
 // trim the normalised club through `buildPool` with its defaults.
-const POOL = buildPool(normaliseClub(clubFixture.itemData));
+const POOL = buildPool(normaliseClub(clubFixture.items));
 
 const CLUB_INDEX = buildClubIndex(normaliseTeamChemLinks(linksFixture.teamChemLinks));
 

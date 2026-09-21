@@ -90,7 +90,7 @@ const createFakeWindow = ({ withEligibilityKeys = true } = {}) => {
     },
     services: {
       UTSBCRepository: {
-        getClubItems: async () => ({ itemData: club.itemData }),
+        getClubItems: async () => ({ items: club.items }),
       },
       UTSquadBuildingChallengeDAO: { saveChallenge, submitChallenge },
     },
@@ -188,7 +188,7 @@ describe('the Solve action end to end', () => {
     const payload = saveChallenge.mock.calls[0][0];
     expect(payload.challengeId).toBe(25);
     const firstSlot = payload.squad.players.find((entry) => entry.index === 0);
-    expect(firstSlot.itemData).toEqual(club.itemData.find((item) => item.id === players[0].id));
+    expect(firstSlot.itemData).toEqual(club.items.find((item) => item.id === players[0].id));
     expect(submitChallenge).not.toHaveBeenCalled();
   });
 

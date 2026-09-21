@@ -28,7 +28,7 @@ const decode = (challenge) =>
     scopes: SCOPE_VALUES,
   }).constraints;
 
-const POOL = buildPool(normaliseClub(clubFixture.itemData));
+const POOL = buildPool(normaliseClub(clubFixture.items));
 
 const CLUB_INDEX = buildClubIndex(normaliseTeamChemLinks(linksFixture.teamChemLinks));
 

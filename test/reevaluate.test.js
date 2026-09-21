@@ -29,7 +29,7 @@ const decode = (challenge) =>
     scopes: SCOPE_VALUES,
   }).constraints;
 
-const POOL = buildPool(normaliseClub(clubFixture.itemData));
+const POOL = buildPool(normaliseClub(clubFixture.items));
 
 // The pool records `buildPool` emits are unmerged; the solver prices its own
 // copies. The tests price an independent copy through the canonical path so

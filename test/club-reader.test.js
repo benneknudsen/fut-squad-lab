@@ -35,9 +35,9 @@ const EXPECTED_FIRST_RECORD = {
 const DOCUMENTED_RECORD_FIELDS = Object.keys(EXPECTED_FIRST_RECORD).sort();
 
 describe('readClubItems', () => {
-  it('reads the itemData envelope and maps every item to the stable record shape', () => {
+  it('reads the items envelope and maps every item to the stable record shape', () => {
     const records = readClubItems(club);
-    expect(club.itemData).toHaveLength(42);
+    expect(club.items).toHaveLength(42);
     expect(records).toHaveLength(42);
     expect(records[0]).toEqual(EXPECTED_FIRST_RECORD);
     for (const record of records) {
@@ -46,7 +46,7 @@ describe('readClubItems', () => {
   });
 
   it('accepts a bare item array as well as the envelope', () => {
-    const records = readClubItems(club.itemData);
+    const records = readClubItems(club.items);
     expect(records).toHaveLength(42);
     expect(records[0]).toEqual(EXPECTED_FIRST_RECORD);
   });
@@ -54,12 +54,12 @@ describe('readClubItems', () => {
   it('feeds buildPool without any further translation', () => {
     const pool = buildPool(readClubItems(club));
     expect(pool.length).toBeGreaterThan(0);
-    expect(pool.length).toBeLessThanOrEqual(club.itemData.length);
+    expect(pool.length).toBeLessThanOrEqual(club.items.length);
   });
 
   it('flags the second copy of an assetId as a duplicate', () => {
-    const [first] = club.itemData;
-    const records = readClubItems({ itemData: [first, { ...first, id: 999 }] });
+    const [first] = club.items;
+    const records = readClubItems({ items: [first, { ...first, id: 999 }] });
     expect(records.map((record) => record.duplicate)).toEqual([false, true]);
   });
 
@@ -70,14 +70,14 @@ describe('readClubItems', () => {
     expect(JSON.stringify(club)).toBe(snapshot);
   });
 
-  it('names the itemData field when the response is neither envelope nor array', () => {
-    expect(() => readClubItems({ rows: [] })).toThrow(/itemData/);
-    expect(() => readClubItems({ itemData: {} })).toThrow(/itemData/);
-    expect(() => readClubItems(null)).toThrow(/itemData/);
+  it('names the items field when the response is neither envelope nor array', () => {
+    expect(() => readClubItems({ rows: [] })).toThrow(/items/);
+    expect(() => readClubItems({ items: {} })).toThrow(/items/);
+    expect(() => readClubItems(null)).toThrow(/items/);
   });
 
   it('propagates the adapter validation naming the offending raw field', () => {
-    const { rating, ...withoutRating } = club.itemData[0];
-    expect(() => readClubItems({ itemData: [withoutRating] })).toThrow(/rating/);
+    const { rating, ...withoutRating } = club.items[0];
+    expect(() => readClubItems({ items: [withoutRating] })).toThrow(/rating/);
   });
 });
