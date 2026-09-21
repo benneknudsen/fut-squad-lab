@@ -58,18 +58,36 @@ const describeClub = (clubResult) => {
 };
 
 /**
- * @param {{ challenge: object|null, clubResult: object|null }} read
- *   `challenge` is the contract shape from `readChallenge` (or `null`), and
- *   `clubResult` the record from `resolveClubItems`
+ * The challenge half of the read summary. When no challenge was read, the
+ * failure reason the bridge and subject attempts already recorded is named in
+ * the same line (#70): "challenge not detected" alone left a live report unable
+ * to say why, while the club half carried its whole attempt list. The reason is
+ * ignored when a challenge was read, so a successful line is unchanged.
+ */
+const describeChallenge = (challenge, failure) => {
+  if (challenge !== null && challenge !== undefined) {
+    return `challenge "${challenge.name}" (id ${challenge.challengeId}, ${challenge.formation}),` +
+      ` ${countConstraints(challenge)} constraints`;
+  }
+  return typeof failure === 'string' && failure.length > 0
+    ? `challenge not detected (${failure})`
+    : 'challenge not detected';
+};
+
+/**
+ * @param {{ challenge: object|null, clubResult: object|null,
+ *   challengeFailure?: string|null }} read
+ *   `challenge` is the contract shape from `readChallenge` (or `null`),
+ *   `clubResult` the record from `resolveClubItems`, and `challengeFailure` the
+ *   already-recorded reason the challenge could not be read; it is appended to
+ *   the summary only when no challenge was read
  * @returns {string} a single diagnostic line
  */
-export function buildReadSummary({ challenge, clubResult }) {
-  const challengePart =
-    challenge === null || challenge === undefined
-      ? 'challenge not detected'
-      : `challenge "${challenge.name}" (id ${challenge.challengeId}, ${challenge.formation}),` +
-        ` ${countConstraints(challenge)} constraints`;
-  return `FUT Squad Lab [${BUILD_ID}]: ${challengePart} | ${describeClub(clubResult)}`;
+export function buildReadSummary({ challenge, clubResult, challengeFailure = null }) {
+  return `FUT Squad Lab [${BUILD_ID}]: ${describeChallenge(
+    challenge,
+    challengeFailure
+  )} | ${describeClub(clubResult)}`;
 }
 
 const describeCost = (result) => {

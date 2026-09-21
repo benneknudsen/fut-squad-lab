@@ -1532,9 +1532,11 @@ const methodThrew = (error) => {
  *
  * The #51 finding showed the read is a **search**, not a `getClubItems` call:
  * EA's service methods return observables, and the club is read by taking
- * `searchCriteria` off the `UTBucketedItemSearchViewModel`, setting the page
- * size and offset on a copy of it, and subscribing to
- * `services.Club.search(criteria)`. That search path is the entry of the
+ * `searchCriteria` off the `UTBucketedItemSearchViewModel`, preferring an
+ * instance this project constructs itself, setting the page size and offset on
+ * that criteria object, and subscribing to `services.Club.search(criteria)`.
+ * The criteria object is handed over as it is, never copied: its public fields
+ * live on the prototype (#70). That search path is the entry of the
  * chain; `services.Item.searchStorageItems` is the same call shape for the
  * unassigned/storage pile and is tried next.
  *
@@ -1871,25 +1873,57 @@ const resetClubStatsCache = (pageWindow) => {
 };
 
 /**
- * Builds one search page's criteria: a copy of the criteria read from EA's
- * search view model, with this project's fields set. The view model's own
- * object is never mutated, so a page walk cannot corrupt the page's search
- * state. `untradeables` and `count` follow the reference's initialisation;
- * `offset` advances with the page walk.
+ * Sets one search page's fields on the criteria object itself: the two
+ * request-shaping fields the reference initialises (`untradeables`, `count`)
+ * plus the `offset` this project's pagination owns. The object is never copied:
+ * EA's criteria are a class instance whose public fields live on the prototype,
+ * and a spread copy keeps only the own backing fields, so EA's own search threw
+ * reading `.toLowerCase()` off a field the copy no longer carried
+ * (`fsl-build/8`, #70). The fields go on exactly the object handed to EA, and
+ * the walk restores them afterwards when the object belongs to the live page.
  *
- * @param {object} criteria the criteria read from EA's view model
+ * @param {object} criteria the criteria object EA will be handed
  * @param {{ offset: number, onlyUntradeables?: boolean }} page
- * @returns {object} the criteria to hand EA
  */
-const buildClubSearchCriteria = (criteria, { offset, onlyUntradeables }) => ({
-  ...criteria,
-  untradeables:
+const applyClubSearchPage = (criteria, { offset, onlyUntradeables }) => {
+  criteria.untradeables =
     onlyUntradeables === true
       ? CLUB_SEARCH_UNTRADEABLES_VALUES.ONLY
-      : CLUB_SEARCH_UNTRADEABLES_VALUES.NOT_ONLY,
-  count: CLUB_SEARCH_PAGE_SIZE,
-  offset,
-});
+      : CLUB_SEARCH_UNTRADEABLES_VALUES.NOT_ONLY;
+  criteria.count = CLUB_SEARCH_PAGE_SIZE;
+  criteria.offset = offset;
+};
+
+/**
+ * Records the own state of every field `applyClubSearchPage` sets, so a
+ * criteria object owned by the live page can be put back exactly as it was. A
+ * field that was absent must end up absent again, not set to `undefined`: the
+ * live search must not keep this project's page size or offset.
+ *
+ * The class pattern EA uses exposes a public field as an accessor backed by an
+ * own `_`-prefixed field (the #70 log listed `_untradeables`), so a backing
+ * field is snapshotted too; a value set through the accessor is then restored
+ * even though the public property has no own descriptor.
+ */
+const BACKING_FIELD_PREFIX = '_';
+
+const snapshotSetFields = (criteria) => {
+  const names = CLUB_SEARCH_SET_FIELDS.flatMap((name) => [
+    name,
+    `${BACKING_FIELD_PREFIX}${name}`,
+  ]);
+  return names.map((name) => {
+    const descriptor = Object.getOwnPropertyDescriptor(criteria, name);
+    return { name, present: descriptor !== undefined, value: descriptor?.value };
+  });
+};
+
+const restoreSetFields = (criteria, snapshot) => {
+  for (const { name, present, value } of snapshot) {
+    if (present) criteria[name] = value;
+    else delete criteria[name];
+  }
+};
 
 const describeSetFields = (criteria) =>
   CLUB_SEARCH_SET_FIELDS.map((name) => ({ name, type: typeof criteria[name] }));
@@ -1899,12 +1933,13 @@ const SEARCH_CRITERIA_PROPERTY = 'searchCriteria';
 
 /**
  * How the search criteria are looked for, in order (#61). The instance probe is
- * primary: a live instance's criteria are populated, while a prototype carries
- * uninitialised defaults whose fields are `undefined` until an instance
- * populates them — the leading explanation for EA's own `.toLowerCase()` throw
- * on the criteria we handed it. The prototype probe stays as a reported
- * fallback, so a page that only carries the field on the prototype still has a
- * path and the diagnostic names which source answered.
+ * primary: when the global is a class this project constructs **its own**
+ * instance and reads `searchCriteria` from that, so EA's live club-UI criteria
+ * are never mutated (#70); when the global is already a live instance its
+ * criteria are used instead and restored after the read. The prototype probe
+ * stays as a reported fallback, so a page that only carries the field on the
+ * prototype still has a path; the diagnostic names which source answered and
+ * whether this project created the instance (`owned`).
  */
 export const CLUB_SEARCH_CRITERIA_STRATEGIES = Object.freeze([
   Object.freeze({ id: `${EA_GLOBALS.searchViewModel}.searchCriteria`, source: 'instance' }),
@@ -2081,7 +2116,7 @@ const resolveSearchViewModelInstance = (pageWindow) => {
  *
  * @param {object|undefined} pageWindow the page's `window`
  * @returns {{ ok: boolean, criteria: object|null, strategy: string|null,
- *   source: 'instance'|'prototype'|null, shape: object|null,
+ *   source: 'instance'|'prototype'|null, owned: boolean, shape: object|null,
  *   attempts: Array<{id: string, ok: boolean, reason: string|null,
  *   source?: string, constructed?: boolean, shape?: object}> }}
  */
@@ -2124,13 +2159,25 @@ export const readSearchCriteria = (pageWindow) => {
         criteria,
         strategy: attempt.id,
         source: strategy.source,
+        // `owned` is true only when the criteria live in an instance this call
+        // constructed itself; the live page's own criteria must be restored
+        // after a read (#70).
+        owned: attempt.constructed === true,
         shape: attempt.shape,
         attempts,
       };
     }
   }
 
-  return { ok: false, criteria: null, strategy: null, source: null, shape: null, attempts };
+  return {
+    ok: false,
+    criteria: null,
+    strategy: null,
+    source: null,
+    owned: false,
+    shape: null,
+    attempts,
+  };
 };
 
 const summarizeCriteria = (resolution, applied = null) =>
@@ -2140,9 +2187,10 @@ const summarizeCriteria = (resolution, applied = null) =>
         ok: resolution.ok,
         strategy: resolution.strategy,
         source: resolution.source ?? null,
+        owned: resolution.owned === true,
         shape: resolution.shape ?? null,
         attempts: resolution.attempts,
-        ...(applied === null ? {} : applied),
+        ...(applied ?? {}),
       };
 
 /**
@@ -2283,9 +2331,12 @@ const describeSearchCallFailure = (error, resolution, pageCriteria) => {
 /**
  * Subscribes to one page of a club search per offset until a page yields no
  * items, then reports how many pages ran and whether the cap, not exhaustion,
- * stopped the walk. Every page is one paced call. EA's club stats cache is
- * reset first when the page provides `resetStatsCache`; absence and a throwing
- * reset are reported, never fatal.
+ * stopped the walk. Every page is one paced call. The fields this project sets
+ * go on the criteria object itself (#70); a criteria object owned by the live
+ * page is put back exactly as it was in a `finally`, so success, a failed page
+ * and a timeout all restore it. EA's club stats cache is reset first when the
+ * page provides `resetStatsCache`; absence and a throwing reset are reported,
+ * never fatal.
  *
  * A failed page throws with `describeSearchCallFailure`'s report, so the
  * attempt reason distinguishes an EA-side throw from a missing method and
@@ -2302,46 +2353,54 @@ const runPagedSearch = async ({
   onlyUntradeables,
 }) => {
   const criteria = resolution.criteria;
+  const snapshot = resolution.owned === true ? null : snapshotSetFields(criteria);
   const statsCache = resetClubStatsCache(pageWindow);
   const items = [];
   let offset = 0;
   let pages = 0;
   let setFields = [];
-  while (pages < CLUB_SEARCH_PAGE_CAP) {
-    pages += 1;
-    const pageCriteria = buildClubSearchCriteria(criteria, { offset, onlyUntradeables });
-    setFields = describeSetFields(pageCriteria);
-    const label = `${strategy.id} page ${pages}`;
-    let event;
-    try {
-      event = await pacer.run(
-        label,
-        () => callMethodOnce(found, base, [pageCriteria], label, timeoutMs),
-        { kind: CALL_KINDS.CLUB_PAGE }
-      );
-    } catch (error) {
-      throw new Error(describeSearchCallFailure(error, resolution, pageCriteria));
+  try {
+    while (pages < CLUB_SEARCH_PAGE_CAP) {
+      pages += 1;
+      applyClubSearchPage(criteria, { offset, onlyUntradeables });
+      setFields = describeSetFields(criteria);
+      const label = `${strategy.id} page ${pages}`;
+      let event;
+      try {
+        event = await pacer.run(
+          label,
+          () => callMethodOnce(found, base, [criteria], label, timeoutMs),
+          { kind: CALL_KINDS.CLUB_PAGE }
+        );
+      } catch (error) {
+        throw new Error(describeSearchCallFailure(error, resolution, criteria));
+      }
+      if (!isClubPayload(event.payload)) {
+        throw new Error(
+          `page ${pages} returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeValue(event.payload)})`
+        );
+      }
+      const pageItems = clubItemsOf(event.payload);
+      items.push(...pageItems);
+      if (pageItems.length === 0) return { items, pages, capped: false, capReason: null, setFields, statsCache };
+      offset += pageItems.length;
     }
-    if (!isClubPayload(event.payload)) {
-      throw new Error(
-        `page ${pages} returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeValue(event.payload)})`
-      );
-    }
-    const pageItems = clubItemsOf(event.payload);
-    items.push(...pageItems);
-    if (pageItems.length === 0) return { items, pages, capped: false, capReason: null, setFields, statsCache };
-    offset += pageItems.length;
+    return {
+      items,
+      pages,
+      capped: true,
+      capReason:
+        `the page cap of ${CLUB_SEARCH_PAGE_CAP} was reached before the search stopped yielding` +
+        ` items; the club may be larger than the ${pages} pages read`,
+      setFields,
+      statsCache,
+    };
+  } finally {
+    // A live page's criteria must not keep this project's page size or offset
+    // after the walk, whatever ended it (#70). Criteria this project
+    // constructed are ours and stay as the read left them.
+    if (snapshot !== null) restoreSetFields(criteria, snapshot);
   }
-  return {
-    items,
-    pages,
-    capped: true,
-    capReason:
-      `the page cap of ${CLUB_SEARCH_PAGE_CAP} was reached before the search stopped yielding` +
-      ` items; the club may be larger than the ${pages} pages read`,
-    setFields,
-    statsCache,
-  };
 };
 
 /**
@@ -2349,9 +2408,12 @@ const runPagedSearch = async ({
  * looks like club items.
  *
  * The first two entries are the #51 search path: the criteria are read once
- * from EA's search view model, copied per page with the page size and offset
- * set, and the subscription is walked page by page. Every subsequent entry is
- * the recorded map of earlier attempts, each called through the same bridge.
+ * from EA's search view model, the page size and offset are set on that same
+ * object and the subscription is walked page by page. The object is never
+ * copied (#70): its public fields live on the prototype. Criteria this project
+ * constructed are kept; criteria owned by the live page are restored after the
+ * walk, on success, a failed page and a timeout alike. Every subsequent entry
+ * is the recorded map of earlier attempts, each called through the same bridge.
  *
  * The result carries the winning strategy id and an attempt record for every
  * candidate tried, in order: `{ id, ok, reason }`, plus `method` — the
@@ -2359,11 +2421,12 @@ const runPagedSearch = async ({
  * the strategy reached a callable method, including one that then threw. The
  * pagination report carries `pages`, `capped` and `capReason`; the criteria
  * report carries the view-model probes, the producing strategy, whether it came
- * from an instance or the prototype, the criteria' key names and types — never
- * a value — and the names and types of the fields this project sets on the
- * criteria it hands EA (#61, #65). A criteria object with nothing set is
- * refused before EA is called, and a search page's failure reason distinguishes
- * EA throwing on our criteria from the method being missing.
+ * from an instance or the prototype, whether this project created that instance
+ * (`owned`), the criteria' key names and types — never a value — and the names
+ * and types of the fields this project sets on the criteria it hands EA (#61,
+ * #65, #70). A criteria object with nothing set is refused before EA is called,
+ * and a search page's failure reason distinguishes EA throwing on our criteria
+ * from the method being missing.
  *
  * When nothing succeeds, `items` is an empty array — never a guessed count —
  * and every attempt's reason names what was missing or wrong.

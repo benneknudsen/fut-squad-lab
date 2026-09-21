@@ -21,8 +21,8 @@ const ZERO_WAIT = {
 const zeroWaitPacer = () => createPacer(ZERO_WAIT);
 
 const observableOf = ({ data = null, response = null, error = null, status = 200 } = {}) => ({
-  observe(callback) {
-    callback({ data, error, response, status, success: error === null });
+  observe(subscriber, callback) {
+    callback({ unobserve() {} }, { data, error, response, status, success: error === null });
     return { unobserve() {} };
   },
 });

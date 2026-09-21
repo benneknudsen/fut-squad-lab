@@ -42,9 +42,14 @@ import {
  * diagnostic names the fields this project sets. Incremented by #67: the
  * observer now classifies origin from the innermost frame that is not its own
  * machinery, so a call EA nests inside our invocation is labelled EA's, and
- * every record states whether it was nested.
+ * every record states whether it was nested. Incremented by #70: the club
+ * search criteria are handed to EA as the live object instead of a spread copy
+ * (its public fields live on the prototype), a live object's fields are
+ * restored after the read, the observable is subscribed as
+ * `observe(subscriber, callback)` and unsubscribed through the callback
+ * observer, and the read summary names the challenge read failure.
  */
-export const BUILD_ID = 'fsl-build/8';
+export const BUILD_ID = 'fsl-build/9';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact

@@ -236,10 +236,24 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
         }
       );
 
+      // The one-liner must name why the challenge was not read. The bridge and
+      // subject attempts are already recorded on the bridge stage, so the
+      // summary surfaces them instead of printing "challenge not detected" with
+      // no cause while the club half carries its whole attempt list (#70).
+      let challengeFailure = null;
+      if (loadResult.ok !== true) {
+        challengeFailure =
+          `subject: ${describeAttempts(subjectResult.attempts)}; load: ` +
+          describeAttempts(loadResult.attempts);
+      } else if (challengeError !== null) {
+        challengeFailure = challengeError.message;
+      }
+
       const read = {
         summary: buildReadSummary({
           challenge,
           clubResult: clubResult.ok ? { ...clubResult, items: clubRecords } : clubResult,
+          challengeFailure,
         }),
         challengeStrategy: subjectResult.strategy,
         challengeAttempts: subjectResult.attempts,

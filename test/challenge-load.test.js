@@ -25,13 +25,14 @@ const challenge = {
 const subjectResult = { ok: true, payload: challenge, strategy: 'panel-argument', attempts: [] };
 
 const observableOf = (event, state = { unsubscribed: 0 }) => ({
-  observe(callback) {
-    callback(event);
-    return {
+  observe(subscriber, callback) {
+    const observer = {
       unobserve() {
         state.unsubscribed += 1;
       },
     };
+    callback(observer, event);
+    return observer;
   },
   state,
 });
