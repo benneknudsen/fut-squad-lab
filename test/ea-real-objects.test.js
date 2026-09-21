@@ -33,10 +33,10 @@ const challengeSquad = { challengeId: 25, squad: { id: 1, players: [] } };
 
 describe('the club chain reaches the live service instances', () => {
   it('reaches services.Club.clubDao through the instance, never the window class', async () => {
-    const daoGet = vi.fn(() => ({ itemData: [{ id: 1 }] }));
-    const legacyGet = vi.fn(() => ({ itemData: [{ id: 2 }] }));
+    const daoGet = vi.fn(() => ({ items: [{ id: 1 }] }));
+    const legacyGet = vi.fn(() => ({ items: [{ id: 2 }] }));
     function UTSBCRepository() {}
-    UTSBCRepository.prototype.getClubItems = vi.fn(() => ({ itemData: [{ id: 3 }] }));
+    UTSBCRepository.prototype.getClubItems = vi.fn(() => ({ items: [{ id: 3 }] }));
 
     const pageWindow = {
       services: {
@@ -56,14 +56,14 @@ describe('the club chain reaches the live service instances', () => {
 
   it('carries clubDao items through the normaliser into stable records', async () => {
     const pageWindow = {
-      services: { Club: { clubDao: { getClubItems: async () => ({ itemData: club.itemData }) } } },
+      services: { Club: { clubDao: { getClubItems: async () => ({ items: club.items }) } } },
     };
 
     const result = await resolveClubItems(pageWindow, { pacer: testPacer });
     const records = readClubItems(result.items);
 
     expect(result.ok).toBe(true);
-    expect(records).toHaveLength(club.itemData.length);
+    expect(records).toHaveLength(club.items.length);
     expect(records[0]).toMatchObject({ id: 116927068448054, preferredPosition: 'CAM' });
   });
 

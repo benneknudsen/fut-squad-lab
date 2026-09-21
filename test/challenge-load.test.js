@@ -46,14 +46,20 @@ const neverFires = () => ({
 const responseOf = (payload) => observableOf({ data: null, response: payload, status: 200, success: true });
 
 describe('CHALLENGE_LOAD_STRATEGIES', () => {
-  it('starts with loadChallenge on the subject and records the DAO id fallback', () => {
-    expect(CHALLENGE_LOAD_STRATEGIES[0].id).toBe('services.SBC.loadChallenge+subject');
+  it('starts with the SBC set API walk and keeps the panel fallbacks behind it', () => {
+    expect(CHALLENGE_LOAD_STRATEGIES[0].id).toBe(
+      'services.SBC.requestSets+requestChallengesForSet+getChallenges'
+    );
+    expect(CHALLENGE_LOAD_STRATEGIES.some((entry) => entry.id === 'services.SBC.loadChallenge+subject')).toBe(
+      true
+    );
     expect(CHALLENGE_LOAD_STRATEGIES.some((entry) => entry.id === 'services.SBC.loadChallenge')).toBe(
       true
     );
     expect(CHALLENGE_LOAD_STRATEGIES.some((entry) => entry.id === 'services.SBC.sbcDAO.loadChallenge+id')).toBe(
       true
     );
+    expect(CHALLENGE_LOAD_STRATEGIES.at(-1).id).toBe('subject.payload');
     expect(Object.isFrozen(CHALLENGE_LOAD_STRATEGIES)).toBe(true);
     const ids = CHALLENGE_LOAD_STRATEGIES.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -81,12 +87,20 @@ describe('loadChallengePayload', () => {
     expect(result.payload).toBe(loaded);
     expect(result.strategy).toBe('services.SBC.loadChallenge+subject');
     expect(received).toEqual([[challenge]]);
-    expect(result.attempts[0]).toMatchObject({
+    const attempt = result.attempts.find(
+      (entry) => entry.id === 'services.SBC.loadChallenge+subject'
+    );
+    expect(attempt).toMatchObject({
       id: 'services.SBC.loadChallenge+subject',
       ok: true,
       reason: null,
     });
-    expect(result.attempts[0].method.arity).toBeDefined();
+    expect(attempt.method.arity).toBeDefined();
+    expect(result.attempts[0]).toMatchObject({
+      id: 'services.SBC.requestSets+requestChallengesForSet+getChallenges',
+      ok: false,
+    });
+    expect(result.attempts[0].reason).toContain('requestSets');
   });
 
   it('accepts a loaded payload whose requirements live under eligibilityRequirements', async () => {
@@ -146,7 +160,10 @@ describe('loadChallengePayload', () => {
     expect(result.ok).toBe(true);
     expect(result.strategy).toBe('services.SBC.loadChallenge');
     expect(received).toEqual([[]]);
-    expect(result.attempts[0].reason).toMatch(/no challenge payload/);
+    const attempt = result.attempts.find(
+      (entry) => entry.id === 'services.SBC.loadChallenge+subject'
+    );
+    expect(attempt.reason).toMatch(/no challenge payload/);
   });
 
   it('falls back to the panel payload the subject already carried', async () => {

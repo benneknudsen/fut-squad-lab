@@ -22,7 +22,7 @@ import { mergePrices } from '../src/solver/prices.js';
 // Synthetic raw items below go through the real adapter, so every pool test
 // covers the full path from a raw club item to a trimmed pool record.
 
-const fixtureRawItems = club.itemData;
+const fixtureRawItems = club.items;
 
 const DOCUMENTED_FIELDS = [
   'id',

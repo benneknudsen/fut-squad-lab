@@ -34,7 +34,7 @@ const BASE_ASSETS = [
   277846, 262093, 250959, 244669, 236403, 267212, 205452, 227236, 212194, 265849, 262330,
 ];
 
-const byAsset = new Map(club.itemData.map((rawItem) => [rawItem.assetId, normaliseClubItem(rawItem)]));
+const byAsset = new Map(club.items.map((rawItem) => [rawItem.assetId, normaliseClubItem(rawItem)]));
 
 const item = (assetId) => byAsset.get(assetId);
 
@@ -1144,7 +1144,7 @@ describe('validateSquad enforces the adapter stable item schema at the entry', (
   );
 
   it('rejects raw club payload items that were never normalised', () => {
-    const players = club.itemData.slice(0, 11);
+    const players = club.items.slice(0, 11);
 
     expect(() => validateSquad({ players, chemistry: 31 }, [])).toThrow(
       /squad\.players\[0\]\.nationId must be a finite number/
@@ -1154,7 +1154,7 @@ describe('validateSquad enforces the adapter stable item schema at the entry', (
 
 describe('stable field mapping through normaliseClubItem', () => {
   it('maps a captured raw club item onto the stable schema', () => {
-    const raw = club.itemData[0];
+    const raw = club.items[0];
 
     expect(normaliseClubItem(raw)).toEqual({
       id: raw.id,
@@ -1207,7 +1207,7 @@ describe('stable field mapping through normaliseClubItem', () => {
   it.each(['rating', 'nation', 'teamid'])(
     'throws when the raw item is missing %s instead of normalising it to undefined',
     (field) => {
-      expect(() => normaliseClubItem(without(club.itemData[0], field))).toThrow(
+      expect(() => normaliseClubItem(without(club.items[0], field))).toThrow(
         new RegExp(`normaliseClubItem: raw item must carry a finite ${field}`)
       );
     }

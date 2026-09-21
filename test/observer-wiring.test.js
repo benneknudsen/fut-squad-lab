@@ -10,7 +10,7 @@ const createFakeWindow = () => {
   const messages = [];
   const listeners = [];
   const logs = [];
-  const reply = { itemData: [] };
+  const reply = { items: [] };
   const originalSearch = (criteria) => reply;
 
   function UTSBCSquadDetailPanelViewController() {}

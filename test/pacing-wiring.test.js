@@ -46,7 +46,7 @@ describe('the club read goes through the queue', () => {
       UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
       services: {
         Club: {
-          search: () => observableOf({ data: { itemData: pages[page++] ?? [] } }),
+          search: () => observableOf({ data: { items: pages[page++] ?? [] } }),
         },
       },
     };
@@ -62,8 +62,8 @@ describe('the club read goes through the queue', () => {
     const pacer = zeroWaitPacer();
     const bodies = [
       observableOf({ error: new Error('rate limited'), status: 429 }),
-      observableOf({ data: { itemData: [{ id: 1 }] } }),
-      observableOf({ data: { itemData: [] } }),
+      observableOf({ data: { items: [{ id: 1 }] } }),
+      observableOf({ data: { items: [] } }),
     ];
     let call = 0;
     const pageWindow = {
@@ -258,7 +258,7 @@ describe('the solve service owns one pacer for the whole run', () => {
   it('sends a call through the shared default queue when no pacer is injected', async () => {
     const before = defaultPacer().snapshot().calls;
     const pageWindow = {
-      services: { Club: { clubDao: { getClubItems: () => ({ itemData: [] }) } } },
+      services: { Club: { clubDao: { getClubItems: () => ({ items: [] }) } } },
     };
 
     const result = await resolveClubItems(pageWindow);
