@@ -16,13 +16,14 @@ const testPacer = createTestPacer();
 const squadPayload = { challengeId: 25, squad: { id: 1, formation: 'f343', players: [] } };
 
 const observableOf = (payload, state) => ({
-  observe(callback) {
-    callback({ data: payload, error: null, response: null, status: 200, success: true });
-    return {
+  observe(subscriber, callback) {
+    const observer = {
       unobserve() {
         state.unsubscribed += 1;
       },
     };
+    callback(observer, { data: payload, error: null, response: null, status: 200, success: true });
+    return observer;
   },
 });
 
