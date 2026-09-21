@@ -1271,8 +1271,32 @@ export const CHALLENGE_REQUIREMENT_CONTAINERS = Object.freeze([
   Object.freeze(['data', 'sbcChallenge']),
 ]);
 
-/** The raw `/club` response field that carries the item array. */
-export const CLUB_ITEM_ARRAY_FIELD = 'itemData';
+/**
+ * The raw `/club` response field that carries the item array. The `fsl-build/9`
+ * live run read `{ items, retrievedAll }` from `services.Club.search` and
+ * `{ items, endOfList }` from `services.Item.searchStorageItems`, so the live
+ * payload names it `items`. The older `/club` recon named the same array
+ * `itemData`; that name is kept in `CLUB_ITEM_ARRAY_ALTERNATIVES` so diagnostics
+ * can report a payload carrying it, never so the reader can silently fall back
+ * to it. This build reads `items` only.
+ */
+export const CLUB_ITEM_ARRAY_FIELD = 'items';
+
+/**
+ * Field names a club payload was seen to carry that this build does NOT read.
+ * Diagnostics name them explicitly when a payload carries one instead of
+ * `CLUB_ITEM_ARRAY_FIELD`, so a future capture shows what EA returned rather
+ * than a guessed empty club (#72).
+ */
+export const CLUB_ITEM_ARRAY_ALTERNATIVES = Object.freeze(['itemData']);
+
+/**
+ * The end-of-list flags a club page may carry, in the reference's precedence:
+ * when `endOfList` is present it decides, otherwise `retrievedAll` does. A
+ * truthy flag means the walk is finished. A page carrying neither keeps the
+ * walk going until an empty page or the page cap ends it.
+ */
+export const CLUB_ITEM_END_OF_LIST_FIELDS = Object.freeze(['endOfList', 'retrievedAll']);
 
 /**
  * The raw `/club` item field that identifies one owned card. It is the same
@@ -1452,8 +1476,10 @@ export function resolveEaGlobals(pageWindow, keys = Object.keys(EA_GLOBALS)) {
 }
 
 /**
- * True when a value is one of the two shapes a club read may return: the
- * documented `{ itemData: [...] }` envelope, or a bare item array.
+ * True when a value is one of the two shapes a club read may return: the live
+ * `{ items: [...] }` envelope, or a bare item array. Only
+ * `CLUB_ITEM_ARRAY_FIELD` is accepted; a payload naming the array anything else
+ * is reported by `describeClubPayload`, never read as a fallback guess.
  */
 export function isClubPayload(value) {
   if (Array.isArray(value)) return true;
@@ -2295,6 +2321,35 @@ const callReadMethod = async (found, base, callArguments, label, timeoutMs, paci
 const clubItemsOf = (payload) =>
   Array.isArray(payload) ? payload : payload[CLUB_ITEM_ARRAY_FIELD];
 
+/**
+ * True when a club page says the walk is finished. `endOfList` decides when it
+ * is present, otherwise `retrievedAll` does; a page carrying neither keeps the
+ * walk going. The flags are read from the payload object, never from a bare
+ * item array.
+ */
+const isClubEndOfList = (payload) => {
+  if (!isRecordObject(payload)) return false;
+  for (const field of CLUB_ITEM_END_OF_LIST_FIELDS) {
+    if (field in payload) return payload[field] === true;
+  }
+  return false;
+};
+
+/**
+ * Names what a club page carried when it is not the expected `items` envelope:
+ * the payload's own keys plus any known alternative field name it carries, so
+ * the live log shows what EA returned instead of only that the read failed
+ * (#72). No value is read.
+ */
+const describeClubPayload = (payload) => {
+  const described = describeValue(payload);
+  if (!isRecordObject(payload)) return described;
+  const carried = CLUB_ITEM_ARRAY_ALTERNATIVES.filter((field) => Array.isArray(payload[field]));
+  return carried.length === 0
+    ? described
+    : `${described}; it carries ${carried.join(', ')}, which this build does not read`;
+};
+
 const describeCriteriaSource = (resolution) =>
   resolution.source === null || resolution.source === undefined
     ? resolution.strategy
@@ -2377,13 +2432,26 @@ const runPagedSearch = async ({
       }
       if (!isClubPayload(event.payload)) {
         throw new Error(
-          `page ${pages} returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeValue(event.payload)})`
+          `page ${pages} returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeClubPayload(
+            event.payload
+          )})`
         );
       }
       const pageItems = clubItemsOf(event.payload);
       items.push(...pageItems);
-      if (pageItems.length === 0) return { items, pages, capped: false, capReason: null, setFields, statsCache };
-      offset += pageItems.length;
+      // A page that returns nothing ends the walk, whatever its end-of-list
+      // flag says: there is no next item to ask for.
+      if (pageItems.length === 0) {
+        return { items, pages, capped: false, capReason: null, endOfList: false, setFields, statsCache };
+      }
+      if (isClubEndOfList(event.payload)) {
+        return { items, pages, capped: false, capReason: null, endOfList: true, setFields, statsCache };
+      }
+      // The offset advances by the page size this project asked EA for, never
+      // by how many items the page happened to yield: EA may clamp or trim a
+      // page, and the live `fsl-build/9` payloads carried their own
+      // `retrievedAll`/`endOfList` flag instead of implying the end.
+      offset += CLUB_SEARCH_PAGE_SIZE;
     }
     return {
       items,
@@ -2392,6 +2460,7 @@ const runPagedSearch = async ({
       capReason:
         `the page cap of ${CLUB_SEARCH_PAGE_CAP} was reached before the search stopped yielding` +
         ` items; the club may be larger than the ${pages} pages read`,
+      endOfList: false,
       setFields,
       statsCache,
     };
@@ -2498,6 +2567,8 @@ export async function resolveClubItems(pageWindow, options = {}) {
           pages: search.pages,
           capped: search.capped,
           capReason: search.capReason,
+          field: CLUB_ITEM_ARRAY_FIELD,
+          endOfList: search.endOfList,
           criteria: summarizeCriteria(resolution, {
             setFields: search.setFields,
             statsCache: search.statsCache,
@@ -2520,7 +2591,7 @@ export async function resolveClubItems(pageWindow, options = {}) {
     }
     const event = call.event;
     if (!isClubPayload(event.payload)) {
-      attempt.reason = `returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeValue(
+      attempt.reason = `returned no ${CLUB_ITEM_ARRAY_FIELD} array (got ${describeClubPayload(
         event.payload
       )})`;
       continue;
@@ -2534,6 +2605,8 @@ export async function resolveClubItems(pageWindow, options = {}) {
       pages: 1,
       capped: false,
       capReason: null,
+      field: CLUB_ITEM_ARRAY_FIELD,
+      endOfList: isClubEndOfList(event.payload),
       criteria: summarizeCriteria(criteriaResolution),
     };
   }
@@ -2545,6 +2618,8 @@ export async function resolveClubItems(pageWindow, options = {}) {
     pages: 0,
     capped: false,
     capReason: null,
+    field: null,
+    endOfList: false,
     criteria: summarizeCriteria(criteriaResolution),
   };
 }
@@ -2703,25 +2778,378 @@ const carriesTopLevelRequirements = (value) => {
 };
 
 /**
- * The ordered challenge-load strategies, most likely first. The #51 finding
- * showed the challenge is loaded through an observable: the primary call is
- * `services.SBC.loadChallenge(challenge)`, called with the challenge the panel
- * argument already resolved and with no arguments when it resolved none. The
- * DAO variant takes the challenge **id** only — the in-progress flag's value
- * is not verified, and this project never invents an argument value — and the
- * payload the panel argument already carried is the last resort, so the
- * fixture path keeps working when no service answers.
+ * The raw EA names of the SBC set API the challenge read walks (#72). The
+ * `fsl-build/9` live run proved the panel hook carries no requirements, so the
+ * challenge is read the way the reference reads it:
+ *
+ *   services.SBC.requestSets()                     -> a `sets` array
+ *   services.SBC.requestChallengesForSet(set)      -> per set
+ *   set.getChallenges()                            -> the entities of that set
+ *   services.SBC.sbcDAO.loadChallenge(id, inProgress)
+ *   services.SBC.loadChallenge(challengeEntity)    when the DAO is absent
+ *
+ * An entity carries `id`, `name`/`title`, `isCompleted()`, `isInProgress()` and
+ * `squad`; the loaded payload carries the requirements, and its `squad` is
+ * written back onto the entity when the entity has none. Every name here is EA
+ * vocabulary, which is why it lives in this one file.
+ */
+export const SBC_SET_API = Object.freeze({
+  requestSets: 'requestSets',
+  requestChallengesForSet: 'requestChallengesForSet',
+  getChallenges: 'getChallenges',
+  loadChallenge: 'loadChallenge',
+  sets: 'sets',
+  id: 'id',
+  name: 'name',
+  title: 'title',
+  isCompleted: 'isCompleted',
+  isInProgress: 'isInProgress',
+  squad: 'squad',
+  data: 'data',
+});
+
+/** The service-locator targets the set API and its DAO live on. */
+const SBC_SERVICE_TARGET = Object.freeze({ container: 'services', target: 'SBC' });
+const SBC_DAO_TARGET = Object.freeze({ container: 'services', target: 'SBC.sbcDAO' });
+
+/**
+ * Calls a no-argument predicate method on an entity and answers whether it
+ * returned true. A missing method and a throw both mean false: the reference
+ * treats a throwing `isCompleted()` as "open", which is the safe direction for
+ * a read that must never claim a challenge is finished on a broken call.
+ */
+const entityFlag = (entity, method) => {
+  const found = findMethod(entity, method);
+  if (!found.ok) return false;
+  try {
+    return found.value.call(entity) === true;
+  } catch {
+    return false;
+  }
+};
+
+const readEntityId = (entity) => {
+  const read = readDataProperty(entity, SBC_SET_API.id);
+  return read.ok && Number.isFinite(read.value) ? read.value : null;
+};
+
+/**
+ * Picks one challenge to solve out of every challenge entity the set API
+ * listed. The rule is deterministic and stated once, here:
+ *
+ * - a challenge whose `isCompleted()` is truthy is never picked — it is already
+ *   solved; a throwing `isCompleted()` is treated as open (see `entityFlag`);
+ * - when several are open, an in-progress one is preferred, because that is the
+ *   one the player has on screen;
+ * - otherwise the first open one in payload order is picked.
+ *
+ * The result always carries the counts — how many challenges were seen and how
+ * many were open — and the chosen id, so the diagnostic can state what this
+ * build selected instead of silently picking. When nothing is open the result
+ * is `ok: false` with `challenge: null` and a reason naming the counts; the
+ * caller must not fall back to a guessed challenge.
+ *
+ * @param {Array<object>} entities the challenge entities, in payload order
+ * @returns {{ ok: boolean, challenge: object|null, index: number, seen: number,
+ *   open: number, inProgress: boolean, chosenId: number|null, reason: string }}
+ */
+export function selectOpenChallenge(entities) {
+  const list = Array.isArray(entities) ? entities : [];
+  const seen = list.length;
+  const open = [];
+  for (const entity of list) {
+    if (!entityFlag(entity, SBC_SET_API.isCompleted)) open.push(entity);
+  }
+  if (open.length === 0) {
+    return {
+      ok: false,
+      challenge: null,
+      index: -1,
+      seen,
+      open: 0,
+      inProgress: false,
+      chosenId: null,
+      reason:
+        `saw ${seen} challenges but none is open; refusing to pick one (isCompleted() was` +
+        ' truthy for every one)',
+    };
+  }
+  const inProgressEntity = open.find((entity) => entityFlag(entity, SBC_SET_API.isInProgress));
+  const chosen = inProgressEntity ?? open[0];
+  const chosenId = readEntityId(chosen);
+  const isInProgress = inProgressEntity !== undefined;
+  return {
+    ok: true,
+    challenge: chosen,
+    index: list.indexOf(chosen),
+    seen,
+    open: open.length,
+    inProgress: isInProgress,
+    chosenId,
+    reason:
+      `saw ${seen} challenges, ${open.length} open; chose challenge ${
+        chosenId === null ? 'without an id' : chosenId
+      }${isInProgress ? ' (in progress)' : ''}`,
+  };
+}
+
+/**
+ * Reads the entity list off one set entity by calling `set.getChallenges()`.
+ * The method is called on the entity, never read as a property, because that is
+ * how the reference obtains the challenges. A missing method, a throw and a
+ * non-array result each keep their own reason.
+ */
+const readSetChallenges = (set) => {
+  const found = findMethod(set, SBC_SET_API.getChallenges);
+  if (!found.ok) {
+    return {
+      ok: false,
+      reason: describeMissingMethod('the set entity', SBC_SET_API.getChallenges, found.reason),
+    };
+  }
+  let returned;
+  try {
+    returned = found.value.call(set);
+  } catch (error) {
+    return { ok: false, reason: `${SBC_SET_API.getChallenges}() threw: ${describeCause(error)}` };
+  }
+  if (!Array.isArray(returned)) {
+    return {
+      ok: false,
+      reason: `${SBC_SET_API.getChallenges}() returned ${describeValue(returned)}, not an array`,
+    };
+  }
+  return { ok: true, value: returned };
+};
+
+/** The loaded squad the backfill writes onto the entity, or null when absent. */
+const readLoadedSquad = (payload) => {
+  const direct = readDataProperty(payload, SBC_SET_API.squad);
+  if (direct.ok && isRecordObject(direct.value)) return direct.value;
+  const data = readDataProperty(payload, SBC_SET_API.data);
+  if (!data.ok || !isRecordObject(data.value)) return null;
+  const nested = readDataProperty(data.value, SBC_SET_API.squad);
+  return nested.ok && isRecordObject(nested.value) ? nested.value : null;
+};
+
+/**
+ * Writes the loaded payload's squad back onto the challenge entity when the
+ * entity has none, so the later squad read sees the same state the reference
+ * does. This is an in-memory write to the entity EA already handed us, not a
+ * squad write: nothing here can submit or save anything. An entity that
+ * already carries a squad is left untouched.
+ */
+const backfillLoadedSquad = (challenge, payload) => {
+  if (!isRecordObject(challenge)) return false;
+  const existing = readDataProperty(challenge, SBC_SET_API.squad);
+  const hasSquad = existing.ok ? existing.value !== null : existing.reason !== null;
+  if (hasSquad) return false;
+  const squad = readLoadedSquad(payload);
+  if (squad === null) return false;
+  try {
+    challenge[SBC_SET_API.squad] = squad;
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Walks the SBC set API to a loaded challenge payload: request the sets, list
+ * each set's challenges through `requestChallengesForSet` and
+ * `set.getChallenges()`, select the open challenge, then load it by id through
+ * the DAO when that method exists and the entity has an id, otherwise by the
+ * entity itself. The set entities may already carry their challenges for the
+ * live page; the request is still made first because the reference makes it and
+ * that is the only verified way the entities are populated.
+ *
+ * A set whose listing fails is recorded and skipped; a payload that arrives
+ * without requirements is rejected by the caller's own check. Every reason
+ * names the call and the argument it used, never a guessed one.
+ */
+const loadChallengeFromSetApi = async ({ pageWindow, strategy, timeoutMs, pacer }) => {
+  const base = resolveStrategyBase(pageWindow, SBC_SERVICE_TARGET);
+  if (!base.ok) return { ok: false, reason: base.reason, selection: null };
+
+  const requestSets = findMethod(base.value, SBC_SET_API.requestSets);
+  if (!requestSets.ok) {
+    return {
+      ok: false,
+      reason: describeMissingMethod(base.name, SBC_SET_API.requestSets, requestSets.reason),
+      selection: null,
+    };
+  }
+  const setsCall = await callReadMethod(
+    requestSets,
+    base.value,
+    [],
+    `${strategy.id} ${SBC_SET_API.requestSets}`,
+    timeoutMs,
+    { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
+  );
+  if (!setsCall.ok) return { ok: false, reason: setsCall.reason, selection: null };
+
+  const setsPayload = setsCall.event.payload;
+  const sets = isRecordObject(setsPayload) ? setsPayload[SBC_SET_API.sets] : undefined;
+  if (!Array.isArray(sets)) {
+    return {
+      ok: false,
+      reason: `${SBC_SET_API.requestSets} returned no ${SBC_SET_API.sets} array (got ${describeValue(
+        setsPayload
+      )})`,
+      selection: null,
+    };
+  }
+
+  const requestChallenges = findMethod(base.value, SBC_SET_API.requestChallengesForSet);
+  if (!requestChallenges.ok) {
+    return {
+      ok: false,
+      reason: describeMissingMethod(
+        base.name,
+        SBC_SET_API.requestChallengesForSet,
+        requestChallenges.reason
+      ),
+      selection: null,
+    };
+  }
+
+  const entities = [];
+  const failures = [];
+  for (const [index, set] of sets.entries()) {
+    const label = `${strategy.id} set ${index + 1}`;
+    const listing = await callReadMethod(
+      requestChallenges,
+      base.value,
+      [set],
+      label,
+      timeoutMs,
+      { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
+    );
+    if (!listing.ok) {
+      failures.push(`${label}: ${listing.reason}`);
+      continue;
+    }
+    const challenges = readSetChallenges(set);
+    if (!challenges.ok) {
+      failures.push(`${label}: ${challenges.reason}`);
+      continue;
+    }
+    entities.push(...challenges.value);
+  }
+
+  const selection = selectOpenChallenge(entities);
+  // The reason is pasted into a support report, so a page where every set
+  // failed listing must not produce one line per set: the count plus the first
+  // few reasons is enough to act on.
+  const failureNote =
+    failures.length === 0
+      ? ''
+      : `; ${failures.length} of ${sets.length} sets could not be listed [${failures
+          .slice(0, 3)
+          .join('; ')}${failures.length > 3 ? '; …' : ''}]`;
+  if (!selection.ok) {
+    return {
+      ok: false,
+      reason: `${selection.reason}${failureNote}`,
+      sets: sets.length,
+      selection,
+    };
+  }
+
+  const chosen = selection.challenge;
+  const entityId = readEntityId(chosen);
+  const daoBase = resolveStrategyBase(pageWindow, SBC_DAO_TARGET);
+  const daoLoad = daoBase.ok ? findMethod(daoBase.value, SBC_SET_API.loadChallenge) : { ok: false };
+  let call;
+  let via;
+  if (daoLoad.ok && entityId !== null) {
+    via = `${SBC_DAO_TARGET.target}.${SBC_SET_API.loadChallenge}`;
+    call = await callReadMethod(
+      daoLoad,
+      daoBase.value,
+      [entityId, selection.inProgress],
+      `${strategy.id} ${via}`,
+      timeoutMs,
+      { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
+    );
+  } else {
+    const found = findMethod(base.value, SBC_SET_API.loadChallenge);
+    if (!found.ok) {
+      return {
+        ok: false,
+        reason: describeMissingMethod(base.name, SBC_SET_API.loadChallenge, found.reason),
+        sets: sets.length,
+        selection,
+      };
+    }
+    via = `${SBC_SERVICE_TARGET.target}.${SBC_SET_API.loadChallenge}`;
+    call = await callReadMethod(
+      found,
+      base.value,
+      [chosen],
+      `${strategy.id} ${via}`,
+      timeoutMs,
+      { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
+    );
+  }
+  if (!call.ok) return { ok: false, reason: call.reason, sets: sets.length, selection };
+
+  return {
+    ok: true,
+    payload: call.event.payload,
+    challenge: chosen,
+    via,
+    sets: sets.length,
+    selection,
+  };
+};
+
+/**
+ * The ordered challenge-load strategies, most likely first. The `fsl-build/9`
+ * live run proved the panel hook carries no requirements, so the primary entry
+ * is the SBC set API walk (#72): `requestSets` -> `requestChallengesForSet` ->
+ * `set.getChallenges()` -> the open challenge -> `sbcDAO.loadChallenge(id,
+ * inProgress)` when available, else `services.SBC.loadChallenge(entity)`. The
+ * #51 panel-argument calls stay behind it as reported fallbacks: the panel
+ * argument is known empty live, so a future EA build that starts filling it
+ * stays visible in the diagnostic. The payload the panel argument already
+ * carried is the last resort, so the fixture path keeps working when no service
+ * answers.
  *
  * Every entry is a candidate to feature-detect, not a verified signature; each
  * one keeps its `{id, ok, reason}` record and, where a callable method was
  * reached, the method's `{arity, constructor, excerpt, truncated}` shape.
  */
 export const CHALLENGE_LOAD_STRATEGIES = Object.freeze([
+  Object.freeze({
+    id: 'services.SBC.requestSets+requestChallengesForSet+getChallenges',
+    setApi: true,
+  }),
   Object.freeze({ id: 'services.SBC.loadChallenge+subject', container: 'services', target: 'SBC', method: 'loadChallenge', argument: 'subject' }),
   Object.freeze({ id: 'services.SBC.loadChallenge', container: 'services', target: 'SBC', method: 'loadChallenge' }),
   Object.freeze({ id: 'services.SBC.sbcDAO.loadChallenge+id', container: 'services', target: 'SBC.sbcDAO', method: 'loadChallenge', argument: 'challengeId' }),
   Object.freeze({ id: 'subject.payload', source: 'subject' }),
 ]);
+
+/**
+ * The diagnostic form of a selection: the counts and the chosen id only, never
+ * the live challenge entity, so a pasted attempt can carry what was selected
+ * without carrying an EA object. The counts are what the next live log needs to
+ * say whether this build picked the challenge the player meant.
+ */
+const summarizeSelection = (selection, sets) =>
+  selection === null || selection === undefined
+    ? null
+    : {
+        ok: selection.ok === true,
+        seen: selection.seen,
+        open: selection.open,
+        inProgress: selection.inProgress === true,
+        chosenId: selection.chosenId ?? null,
+        sets: sets ?? 0,
+        reason: selection.reason,
+      };
 
 const describeArgumentFailure = (strategy, subjectResult) => {
   if (strategy.argument === 'subject') {
@@ -2734,13 +3162,18 @@ const describeArgumentFailure = (strategy, subjectResult) => {
 };
 
 /**
- * Loads the full challenge payload for the challenge the panel resolved.
+ * Loads the full challenge payload for the challenge the player is looking at.
  *
- * Each strategy goes through the observable bridge: a returned observable is
- * subscribed and unsubscribed with a timeout, a promise is awaited under the
- * same timeout, and a plain value is carried as-is. A loaded payload is
- * accepted when any documented requirements location carries an array, so the
- * loaded shape is reported by the same lookup as the panel shape.
+ * The primary strategy is the #72 SBC set API walk: request the sets, list each
+ * set's challenges, select the open one (deterministic rule in
+ * `selectOpenChallenge`), load it, and backfill its `squad` onto the entity when
+ * the entity has none. The #51 panel-argument strategies stay behind it as
+ * reported fallbacks. Every strategy goes through the observable bridge: a
+ * returned observable is subscribed and unsubscribed with a timeout, a promise
+ * is awaited under the same timeout, and a plain value is carried as-is. A
+ * loaded payload is accepted when any documented requirements location carries
+ * an array, so the loaded shape is reported by the same lookup as the panel
+ * shape.
  *
  * @param {object|undefined} pageWindow the page's `window`
  * @param {{ ok: boolean, payload: object|null }} subjectResult the
@@ -2750,7 +3183,9 @@ const describeArgumentFailure = (strategy, subjectResult) => {
  *   EA call runs through, defaulting to the shared paced queue (#52)
  * @returns {Promise<{ ok: boolean, payload: object|null, strategy: string|null,
  *   attempts: Array<{id: string, ok: boolean, reason: string|null,
- *   method?: object}> }>}
+ *   method?: object, selection?: object}>, selection?: object,
+ *   loadVia?: string, squadBackfilled?: boolean }>} the set-API selection
+ *   counts and the load path ride on the result when that strategy answered
  */
 export async function loadChallengePayload(pageWindow, subjectResult, options = {}) {
   const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
@@ -2766,6 +3201,33 @@ export async function loadChallengePayload(pageWindow, subjectResult, options = 
   for (const strategy of CHALLENGE_LOAD_STRATEGIES) {
     const attempt = { id: strategy.id, ok: false, reason: null };
     attempts.push(attempt);
+
+    if (strategy.setApi === true) {
+      const outcome = await loadChallengeFromSetApi({ pageWindow, strategy, timeoutMs, pacer });
+      attempt.sets = outcome.sets ?? 0;
+      attempt.selection = summarizeSelection(outcome.selection, outcome.sets);
+      if (!outcome.ok) {
+        attempt.reason = outcome.reason;
+        continue;
+      }
+      if (!carriesChallengeRequirements(outcome.payload)) {
+        attempt.reason = `returned no challenge payload carrying requirements (got ${describeValue(
+          outcome.payload
+        )})`;
+        continue;
+      }
+      const squadBackfilled = backfillLoadedSquad(outcome.challenge, outcome.payload);
+      attempt.ok = true;
+      return {
+        ok: true,
+        payload: outcome.payload,
+        strategy: strategy.id,
+        attempts,
+        selection: outcome.selection,
+        loadVia: outcome.via,
+        squadBackfilled,
+      };
+    }
 
     if (strategy.source === 'subject') {
       if (subjectPayload !== null && carriesChallengeRequirements(subjectPayload)) {

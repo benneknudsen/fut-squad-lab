@@ -23,7 +23,7 @@ const send = (data) => worker.onmessage({ data });
 const request = (id, operation, payload) => send({ kind: 'request', id, operation, payload });
 const only = (kind) => posted.filter((message) => message.kind === kind);
 
-const POOL = buildPool(normaliseClub(clubFixture.itemData));
+const POOL = buildPool(normaliseClub(clubFixture.items));
 const CHEMISTRY_RULE_SET = normaliseChemistryProfile({
   ...profilesFixture,
   mappings: [{ profileId: 4, rarityIds: [0, 69] }],

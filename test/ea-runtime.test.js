@@ -114,14 +114,14 @@ describe('resolveEaGlobals', () => {
 });
 
 describe('isClubPayload', () => {
-  it('accepts an itemData envelope and a bare item array', () => {
-    expect(isClubPayload({ itemData: [] })).toBe(true);
+  it('accepts an items envelope and a bare item array', () => {
+    expect(isClubPayload({ items: [] })).toBe(true);
     expect(isClubPayload([])).toBe(true);
   });
 
-  it('rejects an envelope whose itemData is not an array', () => {
-    expect(isClubPayload({ itemData: {} })).toBe(false);
-    expect(isClubPayload({ items: [] })).toBe(false);
+  it('rejects the older itemData envelope, a non-array items field and non-objects', () => {
+    expect(isClubPayload({ itemData: [] })).toBe(false);
+    expect(isClubPayload({ items: {} })).toBe(false);
     expect(isClubPayload(null)).toBe(false);
     expect(isClubPayload('club')).toBe(false);
   });
@@ -169,11 +169,11 @@ describe('CLUB_ITEM_STRATEGIES', () => {
 });
 
 describe('resolveClubItems', () => {
-  it('uses the first candidate and reports its id when it returns an itemData envelope', async () => {
+  it('uses the first candidate and reports its id when it returns an items envelope', async () => {
     const items = [{ id: 1 }];
     const pageWindow = {
       services: {
-        Club: { clubDao: { getClubItems: () => ({ itemData: items }) } },
+        Club: { clubDao: { getClubItems: () => ({ items: items }) } },
       },
     };
     const result = await resolveClubItems(pageWindow, { pacer: testPacer });
@@ -203,7 +203,7 @@ describe('resolveClubItems', () => {
             getClubItems(...args) {
               received.push(args);
               if (args.length === 0) throw new Error('requires a query object');
-              return { itemData: items };
+              return { items: items };
             },
           },
         },
@@ -283,7 +283,7 @@ describe('resolveClubItems', () => {
   });
 
   it('refuses an accessor method without invoking the getter', async () => {
-    const getterSpy = vi.fn(() => () => ({ itemData: [] }));
+    const getterSpy = vi.fn(() => () => ({ items: [] }));
     const clubDao = {};
     Object.defineProperty(clubDao, 'getClubItems', { get: getterSpy });
 
@@ -311,7 +311,7 @@ describe('resolveClubItems', () => {
     const items = [{ id: 2 }];
     const pageWindow = {
       services: {
-        Club: { clubDao: { search: () => ({ itemData: items }) } },
+        Club: { clubDao: { search: () => ({ items: items }) } },
       },
     };
     const result = await resolveClubItems(pageWindow, { pacer: testPacer });
@@ -339,7 +339,7 @@ describe('resolveClubItems', () => {
             getClubItems: () => {
               throw new Error('needs a search payload');
             },
-            search: () => ({ itemData: items }),
+            search: () => ({ items: items }),
           },
         },
       },
@@ -357,7 +357,7 @@ describe('resolveClubItems', () => {
         Club: {
           clubDao: {
             getClubItems: () => ({ pagination: {} }),
-            search: () => ({ itemData: items }),
+            search: () => ({ items: items }),
           },
         },
       },
@@ -365,7 +365,7 @@ describe('resolveClubItems', () => {
     const result = await resolveClubItems(pageWindow, { pacer: testPacer });
     expect(result.strategy).toBe('services.Club.clubDao.search');
     const attempt = result.attempts.find((entry) => entry.id === 'services.Club.clubDao.getClubItems');
-    expect(attempt.reason).toMatch(/itemData/);
+    expect(attempt.reason).toMatch(/items/);
   });
 
   it('reports every candidate in order with a reason when none succeed, and never guesses a size', async () => {
@@ -396,7 +396,7 @@ describe('resolveClubItems', () => {
   });
 
   it('refuses a window class as a constructor and never calls its prototype method', async () => {
-    const prototypeGet = vi.fn(() => ({ itemData: [{ id: 9 }] }));
+    const prototypeGet = vi.fn(() => ({ items: [{ id: 9 }] }));
     function UTSBCRepository() {}
     UTSBCRepository.prototype.getClubItems = prototypeGet;
     const result = await resolveClubItems({ services: {}, UTSBCRepository }, { pacer: testPacer });

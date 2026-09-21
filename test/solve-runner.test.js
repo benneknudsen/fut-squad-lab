@@ -10,7 +10,7 @@ import set10 from './fixtures/sbs-set-10-challenges.json';
 import { SCOPE_VALUES as FIXTURE_SCOPE_VALUES } from './helpers/eligibility.js';
 
 const challenge = set10.challenges.find((entry) => entry.challengeId === 25);
-const records = normaliseClub(club.itemData);
+const records = normaliseClub(club.items);
 const priced = mergePrices(records, null);
 const pool = priced.slice(0, 20);
 const keys = Object.freeze({ 8: Object.freeze({ type: 'LEAGUE_COUNT', kind: 'LEAGUE_COUNT', role: 'scalar' }) });
@@ -26,7 +26,7 @@ const fakeResult = (players) => ({
 
 const solveInput = (overrides = {}) => ({
   challenge,
-  clubItems: club.itemData,
+  clubItems: club.items,
   externalPrices: null,
   keys,
   scopes: SCOPE_VALUES,
@@ -48,7 +48,7 @@ describe('runSolve', () => {
     const steps = {
       readClubItems: (items) => {
         order.push('normaliseClub');
-        expect(items).toBe(club.itemData);
+        expect(items).toBe(club.items);
         return records;
       },
       mergePrices: (input, external) => {

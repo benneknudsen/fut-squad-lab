@@ -30,7 +30,7 @@ const fixtureRawLinks = teamLinks.teamChemLinks;
 const fixtureLinks = normaliseTeamChemLinks(fixtureRawLinks);
 const fixtureIndex = buildClubIndex(fixtureLinks);
 
-const fixtureRawItems = club.itemData;
+const fixtureRawItems = club.items;
 const rawItemById = new Map(fixtureRawItems.map((rawItem) => [rawItem.id, rawItem]));
 const recordFor = (id) => normaliseClubItem(rawItemById.get(id));
 

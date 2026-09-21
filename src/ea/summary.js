@@ -51,7 +51,14 @@ const describeAttempts = (attempts, empty) =>
 
 const describeClub = (clubResult) => {
   if (clubResult?.ok === true) {
-    return `${clubResult.items.length} club items via ${clubResult.strategy}`;
+    // The payload field is named (#72) because the club read now rejects a
+    // payload shaped around any other field: a live log must state which field
+    // the page actually carried, not only how many items were read.
+    const field =
+      typeof clubResult.field === 'string' && clubResult.field.length > 0
+        ? `, field ${clubResult.field}`
+        : '';
+    return `${clubResult.items.length} club items${field} via ${clubResult.strategy}`;
   }
   const attempts = clubResult?.attempts ?? [];
   return `club read failed (0 items); tried ${describeAttempts(attempts, 'no strategy was attempted')}`;
@@ -62,12 +69,26 @@ const describeClub = (clubResult) => {
  * failure reason the bridge and subject attempts already recorded is named in
  * the same line (#70): "challenge not detected" alone left a live report unable
  * to say why, while the club half carried its whole attempt list. The reason is
- * ignored when a challenge was read, so a successful line is unchanged.
+ * ignored when a challenge was read, so a successful line is unchanged unless
+ * the load recorded a selection.
+ *
+ * The set-API selection counts (#72) are appended when the load recorded them:
+ * how many challenges were seen, how many were open and which one was chosen,
+ * so the next live log states whether this build picked the challenge the
+ * player meant. A selection without counts prints nothing.
  */
-const describeChallenge = (challenge, failure) => {
+const describeSelection = (selection) => {
+  if (selection === null || selection === undefined || typeof selection !== 'object') return '';
+  if (selection.ok !== true || !Number.isFinite(selection.seen)) return '';
+  const open = Number.isFinite(selection.open) ? `, ${selection.open} open` : '';
+  const chosen = Number.isFinite(selection.chosenId) ? `; chose ${selection.chosenId}` : '';
+  return `; saw ${selection.seen} challenges${open}${chosen}`;
+};
+
+const describeChallenge = (challenge, failure, selection) => {
   if (challenge !== null && challenge !== undefined) {
     return `challenge "${challenge.name}" (id ${challenge.challengeId}, ${challenge.formation}),` +
-      ` ${countConstraints(challenge)} constraints`;
+      ` ${countConstraints(challenge)} constraints${describeSelection(selection)}`;
   }
   return typeof failure === 'string' && failure.length > 0
     ? `challenge not detected (${failure})`
@@ -76,17 +97,19 @@ const describeChallenge = (challenge, failure) => {
 
 /**
  * @param {{ challenge: object|null, clubResult: object|null,
- *   challengeFailure?: string|null }} read
+ *   challengeFailure?: string|null, selection?: object|null }} read
  *   `challenge` is the contract shape from `readChallenge` (or `null`),
  *   `clubResult` the record from `resolveClubItems`, and `challengeFailure` the
  *   already-recorded reason the challenge could not be read; it is appended to
- *   the summary only when no challenge was read
+ *   the summary only when no challenge was read. `selection` is the #72 set-API
+ *   selection summary, appended to the line when the challenge was read.
  * @returns {string} a single diagnostic line
  */
-export function buildReadSummary({ challenge, clubResult, challengeFailure = null }) {
+export function buildReadSummary({ challenge, clubResult, challengeFailure = null, selection = null }) {
   return `FUT Squad Lab [${BUILD_ID}]: ${describeChallenge(
     challenge,
-    challengeFailure
+    challengeFailure,
+    selection
   )} | ${describeClub(clubResult)}`;
 }
 
