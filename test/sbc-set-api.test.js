@@ -26,6 +26,16 @@ const observableOf = (payload) => ({
   },
 });
 
+const failingObservableOf = (error, status) => ({
+  observe(subscriber, callback) {
+    callback(
+      { unobserve() {} },
+      { data: null, error, response: null, status, success: false }
+    );
+    return { unobserve() {} };
+  },
+});
+
 const loadedPayload = {
   challengeId: 25,
   name: '3 Leagues & 2 Nations',
@@ -158,6 +168,30 @@ describe('the challenge is read through the SBC set API (#72)', () => {
     expect(received).toHaveLength(1);
     expect(received[0][0]).toBe(entity);
     expect(received[0][0]).not.toBe(25);
+  });
+
+  it('labels a failed requestChallengesForSet with the set id and the HTTP status', async () => {
+    const set = {
+      id: 29,
+      getChallenges() {
+        throw new Error('the listing failed, so this must not be reached');
+      },
+    };
+    const pageWindow = {
+      services: {
+        SBC: {
+          requestSets: () => observableOf({ sets: [set] }),
+          requestChallengesForSet: () => failingObservableOf(new Error('Upgrade Required'), 426),
+        },
+      },
+    };
+
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+
+    expect(result.ok).toBe(false);
+    const reason = result.attempts[0].reason;
+    expect(reason).toMatch(/set id 29/);
+    expect(reason).toMatch(/HTTP 426/);
   });
 
   it('writes the loaded squad back onto the challenge entity when it has none', async () => {

@@ -11,6 +11,7 @@ import {
   summarizeWritePlan,
 } from '../src/ea/summary.js';
 import { crossCheckEligibilityModel, readEligibilityKeys } from '../src/ea/adapter.js';
+import { readClubItems } from '../src/ea/club-reader.js';
 import { createSolveService } from '../src/ea/solve-service.js';
 import { startPageBridge } from '../src/page-bridge-app.js';
 import club from './fixtures/club-items.json';
@@ -556,6 +557,66 @@ describe('solve-service staged diagnostics', () => {
     });
   }
 
+  it('records a stage that throws with its error message and leaves the later stages unrecorded', async () => {
+    const steps = createSteps({
+      readClubItems: vi.fn(() => {
+        throw new Error(
+          'normaliseClubItem: raw item must carry a finite assetId; rejected field assetId;' +
+            ' it carries keys [id]; the /club payload shape may have changed'
+        );
+      }),
+    });
+    const service = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.stage).toBe('club');
+    expect(outcome.error.message).toMatch(/finite assetId/);
+    expect(outcome.stages.map((stage) => stage.id)).toEqual(['bridge', 'challenge', 'club']);
+    const club = stageById(outcome.stages, 'club');
+    expect(club.ok).toBe(false);
+    expect(club.reason).toMatch(/finite assetId/);
+    const report = buildDiagnosticsReport(outcome.stages);
+    expect(report.ok).toBe(false);
+    expect(report.stoppedAt).toBe('club');
+    expect(report.stages.slice(3).every((stage) => stage.ok === null)).toBe(true);
+  });
+
+  it('names the club array field, page and offending index when an item cannot be normalised', async () => {
+    const { assetId, ...withoutAssetId } = club.items[0];
+    const steps = createSteps({
+      resolveClubItems: vi.fn(async () => ({
+        ok: true,
+        items: [club.items[1], withoutAssetId],
+        strategy: 'fake-club-reader',
+        field: 'items',
+        pages: 2,
+        pageItems: [1, 1],
+        attempts: [{ id: 'fake-club-reader', ok: true, reason: null }],
+      })),
+      readClubItems,
+    });
+    const service = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+    const clubStage = stageById(outcome.stages, 'club');
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.stage).toBe('club');
+    expect(clubStage.ok).toBe(false);
+    expect(clubStage.detail.field).toBe('items');
+    expect(clubStage.detail.clubRead).toMatchObject({
+      field: 'items',
+      index: 1,
+      pageIndex: 2,
+      pageItems: 1,
+      itemIndexInPage: 0,
+    });
+    expect(clubStage.reason).toMatch(/assetId/);
+    expect(clubStage.reason).toMatch(/page 2/);
+  });
+
   it('reports a valid:false solution as a solve that ran, with the payload stage stopping the write', async () => {
     const invalid = {
       ...solutionFromClub(),
@@ -694,11 +755,12 @@ const createFakeNode = () => {
   return node;
 };
 
-const createDiagnosticsWindow = () => {
+const createDiagnosticsWindow = (options = {}) => {
   const view = createFakeNode();
   const messages = [];
   const listeners = [];
   const logs = [];
+  const clubResponse = options.clubResponse ?? { items: club.items };
   const network = {
     fetch: vi.fn(() => {
       throw new Error('the diagnostic path must not fetch');
@@ -736,7 +798,7 @@ const createDiagnosticsWindow = () => {
     SBCEligibilityKey: liveEnumFromPinned(),
     document: { body: createFakeNode(), createElement: () => createFakeNode() },
     services: {
-      UTSBCRepository: { getClubItems: async () => ({ items: club.items }) },
+      UTSBCRepository: { getClubItems: async () => clubResponse },
     },
     console: {
       log: vi.fn((...args) => logs.push(args.join(' '))),
@@ -840,8 +902,39 @@ describe('the page bridge exposes one documented diagnostic global', () => {
     });
 
     const block = formatDiagnosticsBlock(pageWindow.__FSL_DIAGNOSE__());
-    expect(logs).toContain(block);
+    expect(logs.filter((line) => line === block)).toHaveLength(1);
     expect(block).toContain('__FSL_DIAGNOSE__');
+  });
+
+  it('still logs the block exactly once when a read throws', async () => {
+    const { pageWindow, view, dispatchMessage, logs } = createDiagnosticsWindow({
+      clubResponse: { items: [{ id: 116927068448054 }] },
+    });
+    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+    dispatchMessage(COPY_MESSAGE);
+    const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
+    controller.initWithSBCSet({ ...challengeFixture, squad: challengeSquadFixture.squad });
+    mountedButton(view).click();
+
+    await vi.waitFor(() => {
+      expect(pageWindow.__FSL_DIAGNOSE__()).not.toBeNull();
+    });
+
+    const report = pageWindow.__FSL_DIAGNOSE__();
+    const club = report.stages.find((stage) => stage.id === 'club');
+    expect(report.ok).toBe(false);
+    expect(report.stoppedAt).toBe('club');
+    expect(club.ok).toBe(false);
+    expect(club.reason).toMatch(/assetId/);
+    expect(club.detail.clubRead).toMatchObject({
+      field: 'items',
+      index: 0,
+      pageIndex: 1,
+      pageItems: 1,
+      itemIndexInPage: 0,
+    });
+    const block = formatDiagnosticsBlock(report);
+    expect(logs.filter((line) => line === block)).toHaveLength(1);
   });
 
   it('carries the observer captures in the pasted report, names and types only', async () => {
