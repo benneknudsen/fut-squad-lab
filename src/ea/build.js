@@ -64,8 +64,13 @@ import {
  * `start`), sends no `untradeables` field in the whole-club mode, and the
  * diagnostic carries the observed-EA-criteria diff field by field, so a live
  * report states what EA itself sent next to what this build sent.
+ * Incremented by #77: the challenge read now takes the requirements off the
+ * set-challenges payload when the selected challenge carries a non-empty
+ * `elgReq` (no load at all), and only otherwise loads the challenge — DAO by id
+ * with the entity's own `isInProgress()`, then the entity itself — so a report
+ * must state which of the two shapes answered.
  */
-export const BUILD_ID = 'fsl-build/12';
+export const BUILD_ID = 'fsl-build/13';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact

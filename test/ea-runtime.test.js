@@ -7,6 +7,7 @@ import {
   EA_ENDPOINTS,
   EA_GLOBALS,
   EA_PANEL_HOOK,
+  SBC_SET_API,
   isClubPayload,
   requireEaGlobal,
   resolveChallengeSubject,
@@ -60,6 +61,14 @@ describe('EA naming tables', () => {
     expect(CHALLENGE_FIELDS.requirements).toBe('elgReq');
     expect(CHALLENGE_FIELDS.operation).toBe('elgOperation');
     expect(CHALLENGE_FIELDS.challengeId).toBe('challengeId');
+  });
+
+  it('names the set-API challenge entity members the read relies on (#77)', () => {
+    expect(SBC_SET_API.elgReq).toBe('elgReq');
+    expect(SBC_SET_API.elgOperation).toBe('elgOperation');
+    expect(SBC_SET_API.status).toBe('status');
+    expect(SBC_SET_API.isInProgress).toBe('isInProgress');
+    expect(SBC_SET_API.squad).toBe('squad');
   });
 });
 
