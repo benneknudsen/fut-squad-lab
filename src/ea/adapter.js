@@ -1762,15 +1762,38 @@ export const OBSERVED_METHOD_TARGETS = Object.freeze([
  * Every other argument field contributes its name and type only, and a name on
  * the shared paste-safety list is redacted. A club search criteria object
  * carries identifiers, so the allowlist is deliberately small.
+ *
+ * #76 added the fields EA's own captured `/club` request carries (`type`,
+ * `ovrMin`, `ovrMax`, `sort`, `sortBy`, `searchAltPositions`, `start`,
+ * `untradeables`) plus the `_`-prefixed backing names EA's criteria class uses
+ * for its public fields (#70), so the observed-criteria diff can report EA's
+ * own values (`"player"`, `45`, `true`) next to ours. The values stay
+ * request-shaping primitives; no item, player, price or account field is
+ * allowlisted.
  */
 export const OBSERVED_CRITERIA_VALUE_FIELDS = Object.freeze([
   'count',
   'offset',
+  'start',
+  'ovrMin',
+  'ovrMax',
+  'searchAltPositions',
+  'sort',
   'sortBy',
+  'type',
+  'untradeables',
+  '_count',
+  '_offset',
+  '_start',
+  '_ovrMin',
+  '_ovrMax',
+  '_searchAltPositions',
+  '_sort',
+  '_sortBy',
   '_type',
+  '_untradeables',
   '_category',
   '_position',
-  '_sort',
   '_zone',
   'isExactSearch',
   'preferredPositionOnly',
@@ -1861,39 +1884,158 @@ const describeMissingMethod = (owner, method, reason) =>
     : `${owner} exposes ${method} as ${reason}`;
 
 /**
- * The page size and the page cap for a paged club search. The size is this
- * project's request, not a verified EA limit: the search advances by the
- * number of items each page actually yielded, so a clamped or smaller page is
- * still walked correctly, and a server that rejects the size fails the search
- * attempt loudly with its own reason. The cap is the "never loop forever"
- * bound: reaching it is reported as a cap, never as an exhausted club.
+ * The page size and the page cap for a paged club search (#76).
+ *
+ * The size is EA's own: the captured EA request
+ * (`test/fixtures/club-search-request.json`) asks for 91 items, so a
+ * whole-club read asks for the same page size EA itself uses. It is still this
+ * project's request, not a verified server limit: the search advances by the
+ * requested page size, so a clamped or smaller page is still walked correctly,
+ * and a server that rejects the size fails the search attempt loudly with its
+ * own reason. The cap is the "never loop forever" bound: reaching it is
+ * reported as a cap, never as an exhausted club.
  */
-export const CLUB_SEARCH_PAGE_SIZE = 100;
+export const CLUB_SEARCH_PAGE_SIZE = 91;
 export const CLUB_SEARCH_PAGE_CAP = 50;
 
 /**
- * The field names this project sets on every club search criteria it hands EA,
- * in the order it sets them: the two request-shaping fields the reference
- * initialises (`untradeables`, `count`) plus the `offset` this project's
- * pagination owns. The criteria diagnostic reports them by name and type, so
- * the next live log shows what was handed over instead of leaving it inferred
- * (#65).
+ * The request-shaping criteria a whole-club search adopts from EA's own
+ * captured request body (#76). Every entry is a field EA's own `/club` request
+ * carried, with EA's own value: `type` `"player"`, an OVR window of 45–99, the
+ * `ovr` descending sort and alternate positions included. Nothing here is
+ * invented — `test/fixtures/club-search-request.json` is the capture, and a
+ * test pins this table to it field by field.
  */
-export const CLUB_SEARCH_SET_FIELDS = Object.freeze(['untradeables', 'count', 'offset']);
+export const CLUB_SEARCH_WHOLE_CLUB_FIELDS = Object.freeze([
+  Object.freeze({ name: 'type', value: 'player' }),
+  Object.freeze({ name: 'ovrMin', value: 45 }),
+  Object.freeze({ name: 'ovrMax', value: 99 }),
+  Object.freeze({ name: 'sortBy', value: 'ovr' }),
+  Object.freeze({ name: 'sort', value: 'desc' }),
+  Object.freeze({ name: 'searchAltPositions', value: true }),
+]);
 
 /**
- * The two values EA's `untradeables` criteria field carries. They are
- * **strings**, deliberately: the reference implementation passes `"true"` and
- * `"false"` as text, and EA lower-cases the value itself. An absent field is
- * exactly what threw `Cannot read properties of undefined (reading
- * 'toLowerCase')` (#65), so a future reader must not "correct" these to
- * booleans — a boolean would silently look right to a careless test and fail
- * in EA the same way `undefined` did.
+ * The paging field EA's own captured request carries (#76). The captured
+ * request body names `start`, while a known-working third-party implementation
+ * drives the same search through `criteria.offset`, so whether EA's criteria
+ * object reads `offset` and maps it onto the wire's `start`, or reads `start`
+ * directly, cannot be settled from the capture alone. `resolveClubSearchPaging`
+ * therefore resolves the name per criteria object and reports this captured
+ * field as the fallback with its reason — never a silent guess between the
+ * two.
+ */
+export const CLUB_SEARCH_OBSERVED_PAGE_FIELD = 'start';
+
+/**
+ * The paging field names a criteria object may expose, in the order this
+ * project resolves them. `offset` is the field a known-working implementation
+ * sets on its criteria; `start` is the field EA's own captured request body
+ * names.
+ */
+export const CLUB_SEARCH_PAGING_FIELDS = Object.freeze(['offset', 'start']);
+
+/**
+ * The field names this project may set or clear on a club search criteria in
+ * any mode, so a criteria object owned by the live page can be snapshotted and
+ * put back exactly as it was (#70): the whole-club fields, the page count,
+ * both paging candidates and the untradeables filter.
+ */
+export const CLUB_SEARCH_SET_FIELDS = Object.freeze([
+  'type',
+  'ovrMin',
+  'ovrMax',
+  'sortBy',
+  'sort',
+  'searchAltPositions',
+  'count',
+  'offset',
+  'start',
+  'untradeables',
+]);
+
+/**
+ * The one value EA's `untradeables` criteria field carries when this project
+ * asks for untradeables-only. It is a **string**, deliberately: the reference
+ * implementation passes `"true"` as text, and EA lower-cases the value itself.
+ * The whole-club mode sets no `untradeables` field at all, because EA's own
+ * captured request does not carry one (#76); a boolean would silently look
+ * right to a careless test and a `"false"` value would be a field EA would not
+ * have sent itself.
  */
 export const CLUB_SEARCH_UNTRADEABLES_VALUES = Object.freeze({
   ONLY: 'true',
-  NOT_ONLY: 'false',
 });
+
+/**
+ * True when a property descriptor with this name exists anywhere along the
+ * object's prototype chain. Accessors count as present and are never invoked.
+ */
+const hasProperty = (target, name) => {
+  let current = target;
+  while (current !== null && current !== undefined) {
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(current, name);
+    } catch {
+      return false;
+    }
+    if (descriptor !== undefined) return true;
+    try {
+      current = Object.getPrototypeOf(current);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+};
+
+const hasOwnPropertyDescriptor = (target, name) => {
+  try {
+    return Object.getOwnPropertyDescriptor(target, name) !== undefined;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Resolves which paging field the criteria object itself exposes, by reading
+ * property descriptors along the prototype chain and never invoking an
+ * accessor. A criteria class stores its public fields on the prototype backed
+ * by own `_`-prefixed fields (#70), so an own `_offset` or `_start` counts as
+ * the public field being present.
+ *
+ * The answer is the observation: exactly one candidate present means that is
+ * the field EA's consumer reads, and it is used with `source: 'criteria'`.
+ * When none is present, the field EA's own captured request carries is used
+ * and `source: 'capture'` says so. When both are present the captured field is
+ * used and `present` plus the reason record the ambiguity, so a live log can
+ * settle it rather than a silent choice.
+ *
+ * @param {object} criteria the criteria object EA will be handed
+ * @returns {{ field: string, source: 'criteria'|'capture',
+ *   present: Array<string>, reason: string|null }}
+ */
+export const resolveClubSearchPaging = (criteria) => {
+  const present = CLUB_SEARCH_PAGING_FIELDS.filter(
+    (field) => hasProperty(criteria, field) || hasOwnPropertyDescriptor(criteria, `_${field}`)
+  );
+  if (present.length === 1) {
+    return { field: present[0], source: 'criteria', present, reason: null };
+  }
+  const reason =
+    present.length === 0
+      ? `the criteria exposes neither ${CLUB_SEARCH_PAGING_FIELDS.join(' nor ')}; using the field` +
+        ` EA's own captured /club request carries (${CLUB_SEARCH_OBSERVED_PAGE_FIELD})`
+      : `the criteria exposes both ${present.join(' and ')}; using the captured field` +
+        ` ${CLUB_SEARCH_OBSERVED_PAGE_FIELD} and reporting the ambiguity`;
+  return {
+    field: CLUB_SEARCH_OBSERVED_PAGE_FIELD,
+    source: 'capture',
+    present,
+    reason,
+  };
+};
 
 /**
  * The club DAO method that clears EA's cached club statistics before a search.
@@ -1922,25 +2064,44 @@ const resetClubStatsCache = (pageWindow) => {
 };
 
 /**
- * Sets one search page's fields on the criteria object itself: the two
- * request-shaping fields the reference initialises (`untradeables`, `count`)
- * plus the `offset` this project's pagination owns. The object is never copied:
- * EA's criteria are a class instance whose public fields live on the prototype,
- * and a spread copy keeps only the own backing fields, so EA's own search threw
- * reading `.toLowerCase()` off a field the copy no longer carried
- * (`fsl-build/8`, #70). The fields go on exactly the object handed to EA, and
- * the walk restores them afterwards when the object belongs to the live page.
+ * Sets one whole-club search page's fields on the criteria object itself: the
+ * request-shaping fields EA's own captured request carries (#76), the page
+ * count EA asks for, the resolved paging field, and — only when asked for —
+ * the untradeables filter. The object is never copied: EA's criteria are a
+ * class instance whose public fields live on the prototype, and a spread copy
+ * keeps only the own backing fields, so EA's own search threw reading
+ * `.toLowerCase()` off a field the copy no longer carried (`fsl-build/8`,
+ * #70). The fields go on exactly the object handed to EA, and the walk
+ * restores them afterwards when the object belongs to the live page.
+ *
+ * The whole-club mode clears the `untradeables` own field and its `_` backing
+ * instead of setting one, so a criteria carried over from the player's own
+ * browsing cannot filter the read: EA's own request sends no such field. A
+ * live page's object is snapshotted and restored around the walk (#70).
+ *
+ * Returns what was set, in application order, so the diagnostic names the
+ * criteria that were actually handed over.
  *
  * @param {object} criteria the criteria object EA will be handed
- * @param {{ offset: number, onlyUntradeables?: boolean }} page
+ * @param {{ offset: number, onlyUntradeables?: boolean, pagingField: string }} page
+ * @returns {Array<{ name: string, type: string, value: * }>}
  */
-const applyClubSearchPage = (criteria, { offset, onlyUntradeables }) => {
-  criteria.untradeables =
-    onlyUntradeables === true
-      ? CLUB_SEARCH_UNTRADEABLES_VALUES.ONLY
-      : CLUB_SEARCH_UNTRADEABLES_VALUES.NOT_ONLY;
-  criteria.count = CLUB_SEARCH_PAGE_SIZE;
-  criteria.offset = offset;
+const applyClubSearchPage = (criteria, { offset, onlyUntradeables, pagingField }) => {
+  const fields = [];
+  const set = (name, value) => {
+    criteria[name] = value;
+    fields.push({ name, type: typeof criteria[name], value: criteria[name] });
+  };
+  for (const field of CLUB_SEARCH_WHOLE_CLUB_FIELDS) set(field.name, field.value);
+  set('count', CLUB_SEARCH_PAGE_SIZE);
+  set(pagingField, offset);
+  if (onlyUntradeables === true) {
+    set('untradeables', CLUB_SEARCH_UNTRADEABLES_VALUES.ONLY);
+  } else {
+    delete criteria.untradeables;
+    delete criteria._untradeables;
+  }
+  return fields;
 };
 
 /**
@@ -1974,8 +2135,7 @@ const restoreSetFields = (criteria, snapshot) => {
   }
 };
 
-const describeSetFields = (criteria) =>
-  CLUB_SEARCH_SET_FIELDS.map((name) => ({ name, type: typeof criteria[name] }));
+const renderSetField = (field) => `${field.name}: ${field.type}`;
 
 /** The view model property that carries the club search criteria. */
 const SEARCH_CRITERIA_PROPERTY = 'searchCriteria';
@@ -2387,15 +2547,15 @@ const describeCriteriaSource = (resolution) =>
 
 /**
  * Names what one page call was handed: the criteria strategy that produced the
- * object, the fields this project sets with their types, and every criteria key
- * by name and type — never a value, except the two request numbers #64's
- * allowlist already covers. This is what a timed-out observable reports instead
- * of leaving its reader to guess which argument EA refused (#61, #65).
+ * object, the page count and the resolved paging field with their values, the
+ * fields this project set with their types, and every criteria key by name and
+ * type. Only request-shaping numbers, enum-like strings and booleans appear as
+ * values; every other criteria value stays out of the report (#61, #65, #76).
  */
-const describeCalledWith = (resolution, pageCriteria) =>
+const describeCalledWith = (resolution, pageCriteria, setFields, pagingField) =>
   `called with criteria from ${describeCriteriaSource(resolution)}:` +
-  ` count=${pageCriteria.count}, offset=${pageCriteria.offset},` +
-  ` set [${describeSetFields(pageCriteria).map(renderCriteriaEntry).join(', ')}],` +
+  ` count=${pageCriteria.count}, ${pagingField}=${pageCriteria[pagingField]},` +
+  ` set [${setFields.map(renderSetField).join(', ')}],` +
   ` keys [${describeCriteriaKeys(resolution.shape)}]`;
 
 /**
@@ -2406,8 +2566,8 @@ const describeCalledWith = (resolution, pageCriteria) =>
  * attempt budget, a pacer abort) keeps its own message and gains the
  * called-with report.
  */
-const describeSearchCallFailure = (error, resolution, pageCriteria) => {
-  const calledWith = describeCalledWith(resolution, pageCriteria);
+const describeSearchCallFailure = (error, resolution, pageCriteria, setFields, pagingField) => {
+  const calledWith = describeCalledWith(resolution, pageCriteria, setFields, pagingField);
   return error?.name === EA_METHOD_THREW_NAME
     ? `EA threw while calling this method with our criteria (${calledWith}): ${describeCause(error)}`
     : `${describeCause(error)}; ${calledWith}`;
@@ -2440,6 +2600,10 @@ const runPagedSearch = async ({
   const criteria = resolution.criteria;
   const snapshot = resolution.owned === true ? null : snapshotSetFields(criteria);
   const statsCache = resetClubStatsCache(pageWindow);
+  // The paging field is resolved once, from the criteria object itself, with
+  // the captured EA field as the reported fallback (#76). Every page sets the
+  // same resolved field.
+  const paging = resolveClubSearchPaging(criteria);
   const items = [];
   const pageItemCounts = [];
   let offset = 0;
@@ -2448,8 +2612,14 @@ const runPagedSearch = async ({
   try {
     while (pages < CLUB_SEARCH_PAGE_CAP) {
       pages += 1;
-      applyClubSearchPage(criteria, { offset, onlyUntradeables });
-      setFields = describeSetFields(criteria);
+      const pageFields = applyClubSearchPage(criteria, {
+        offset,
+        onlyUntradeables,
+        pagingField: paging.field,
+      });
+      // The first page's fields name the criteria handed over; later pages
+      // only move the paging value, so the diagnostic reports the template.
+      if (pages === 1) setFields = pageFields;
       const label = `${strategy.id} page ${pages}`;
       let event;
       try {
@@ -2459,7 +2629,9 @@ const runPagedSearch = async ({
           { kind: CALL_KINDS.CLUB_PAGE }
         );
       } catch (error) {
-        throw new Error(describeSearchCallFailure(error, resolution, criteria));
+        throw new Error(
+          describeSearchCallFailure(error, resolution, criteria, pageFields, paging.field)
+        );
       }
       if (!isClubPayload(event.payload)) {
         throw new Error(
@@ -2482,6 +2654,7 @@ const runPagedSearch = async ({
           capReason: null,
           endOfList: false,
           setFields,
+          paging,
           statsCache,
         };
       }
@@ -2494,6 +2667,7 @@ const runPagedSearch = async ({
           capReason: null,
           endOfList: true,
           setFields,
+          paging,
           statsCache,
         };
       }
@@ -2513,6 +2687,7 @@ const runPagedSearch = async ({
         ` items; the club may be larger than the ${pages} pages read`,
       endOfList: false,
       setFields,
+      paging,
       statsCache,
     };
   } finally {
@@ -2528,12 +2703,14 @@ const runPagedSearch = async ({
  * looks like club items.
  *
  * The first two entries are the #51 search path: the criteria are read once
- * from EA's search view model, the page size and offset are set on that same
- * object and the subscription is walked page by page. The object is never
- * copied (#70): its public fields live on the prototype. Criteria this project
- * constructed are kept; criteria owned by the live page are restored after the
- * walk, on success, a failed page and a timeout alike. Every subsequent entry
- * is the recorded map of earlier attempts, each called through the same bridge.
+ * from EA's search view model, the whole-club fields EA's own captured request
+ * carries and the page count are set on that same object, the paging field is
+ * resolved from the criteria itself (#76), and the subscription is walked page
+ * by page. The object is never copied (#70): its public fields live on the
+ * prototype. Criteria this project constructed are kept; criteria owned by the
+ * live page are restored after the walk, on success, a failed page and a
+ * timeout alike. Every subsequent entry is the recorded map of earlier
+ * attempts, each called through the same bridge.
  *
  * The result carries the winning strategy id and an attempt record for every
  * candidate tried, in order: `{ id, ok, reason }`, plus `method` — the
@@ -2557,14 +2734,15 @@ const runPagedSearch = async ({
  *   `observableTimeoutMs` is injectable so tests need not wait out the default;
  *   `pacer` is the queue every EA call runs through, defaulting to the shared
  *   paced queue (#52); `onlyUntradeables` asks EA for untradeables-only
- *   (`"true"`) rather than the other value (`"false"`), matching the
- *   reference's option of the same name (#65)
+ *   (`"true"`); the whole-club mode sends no `untradeables` field at all,
+ *   because EA's own captured request carries none (#76)
  * @returns {Promise<{ ok: boolean, items: Array<object>, strategy: string|null,
  *   attempts: Array<{id: string, ok: boolean, reason: string|null,
  *   method?: object}>, pages: number, pageItems: Array<number>, capped: boolean,
- *   capReason: string|null, criteria: object|null }>} `pageItems` is the item
- *   count of every page the walk read, in order, so a rejected item can be
- *   located in its page (#74)
+ *   capReason: string|null, paging: object|null, criteria: object|null }>}
+ *   `pageItems` is the item count of every page the walk read, in order, so a
+ *   rejected item can be located in its page (#74); `paging` names the field
+ *   the criteria exposed and the source it was resolved from (#76)
  */
 export async function resolveClubItems(pageWindow, options = {}) {
   const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
@@ -2623,8 +2801,10 @@ export async function resolveClubItems(pageWindow, options = {}) {
           capReason: search.capReason,
           field: CLUB_ITEM_ARRAY_FIELD,
           endOfList: search.endOfList,
+          paging: search.paging,
           criteria: summarizeCriteria(resolution, {
             setFields: search.setFields,
+            paging: search.paging,
             statsCache: search.statsCache,
           }),
         };
@@ -2678,6 +2858,194 @@ export async function resolveClubItems(pageWindow, options = {}) {
     field: null,
     endOfList: false,
     criteria: summarizeCriteria(criteriaResolution),
+  };
+}
+
+/** The observer method id whose criteria the #76 diff compares. */
+const OBSERVED_CLUB_SEARCH_METHOD_ID = 'services.Club.search';
+
+/** The paging names the #76 diff recognises on an observed call. */
+const DIFF_PAGING_FIELDS = Object.freeze(['offset', 'start']);
+
+const isPrimitiveCriteriaValue = (value) =>
+  value === null ||
+  typeof value === 'string' ||
+  typeof value === 'number' ||
+  typeof value === 'boolean';
+
+/**
+ * Normalises one observed field name to the public criteria name it backs: an
+ * own `_count` is how EA's criteria class stores the public `count` (#70).
+ * Redacted names and the bare backing prefix carry no name and are dropped.
+ * An observed name outside the observer's value allowlist still contributes a
+ * name (and a type), never a value.
+ */
+const normalizeCriteriaFieldName = (name) => {
+  if (typeof name !== 'string') return null;
+  const stripped = name.startsWith('_') ? name.slice(1) : name;
+  return stripped.length === 0 || stripped === '<redacted>' ? null : stripped;
+};
+
+/**
+ * Finds the most recent observed call of EA's own club search: a
+ * `services.Club.search` call the observer attributed to EA (#64) whose first
+ * argument is a criteria object. Later calls win because a later page of EA's
+ * own walk carries the most recent state.
+ */
+const findObservedClubSearchCall = (report) => {
+  const calls = Array.isArray(report?.calls) ? report.calls : [];
+  let found = null;
+  for (let index = 0; index < calls.length; index++) {
+    const call = calls[index];
+    if (call?.method !== OBSERVED_CLUB_SEARCH_METHOD_ID) continue;
+    if (call.origin !== 'ea') continue;
+    if (call.args?.[0]?.type !== 'object') continue;
+    found = { callIndex: index, call };
+  }
+  return found;
+};
+
+/**
+ * Reads the field names, types and allowlisted primitive values off one
+ * observed criteria argument, keyed by the public field name. Values are only
+ * taken for names the observer's own allowlist permits, so a malformed or
+ * tampered report cannot smuggle a non-allowlisted value through the diff.
+ * Keys contribute names and types only; the values object contributes the
+ * primitives the observer was allowed to record.
+ */
+const observedCriteriaFields = (argument) => {
+  const fields = new Map();
+  const values = isRecordObject(argument.values) ? argument.values : {};
+  const allowlist = new Set(OBSERVED_CRITERIA_VALUE_FIELDS);
+  const record = (rawName, name, value) => {
+    if (!allowlist.has(rawName) || !isPrimitiveCriteriaValue(value) || value === undefined) return;
+    const entry = fields.get(name) ?? {};
+    entry.value = value;
+    if (entry.type === undefined) entry.type = typeof value;
+    fields.set(name, entry);
+  };
+  for (const key of Array.isArray(argument.keys) ? argument.keys : []) {
+    const name = normalizeCriteriaFieldName(key?.name);
+    if (name === null) continue;
+    const entry = fields.get(name) ?? {};
+    if (typeof key.type === 'string') entry.type = key.type;
+    fields.set(name, entry);
+    if (typeof key.name === 'string' && Object.hasOwn(values, key.name)) {
+      record(key.name, name, values[key.name]);
+    }
+  }
+  for (const [rawName, value] of Object.entries(values)) {
+    const name = normalizeCriteriaFieldName(rawName);
+    if (name === null) continue;
+    record(rawName, name, value);
+  }
+  return fields;
+};
+
+/**
+ * The comparison verdict for one criteria field: `ours-only` when this build
+ * handed over a field EA's own call did not show, `observed-only` when EA
+ * showed one this build did not hand over, `uncompared` when the observation
+ * carried no allowlisted value to compare, and otherwise `same` or `different`
+ * by value.
+ */
+const criteriaFieldStatus = (observed, our, hasObservedValue) => {
+  if (our === undefined) return 'observed-only';
+  if (observed === undefined) return 'ours-only';
+  if (!hasObservedValue) return 'uncompared';
+  return observed.value === our ? 'same' : 'different';
+};
+
+/**
+ * The field-by-field diff between how EA's own UI called
+ * `services.Club.search` in this session and the criteria fields this project
+ * handed over (#76). It reports, per public field name, EA's observed type and
+ * allowlisted primitive value next to ours, a `status` (`same`, `different`,
+ * `uncompared`, `ours-only`, `observed-only`), and a dedicated `paging` verdict
+ * naming the field EA carried for paging and the field this build used. The
+ * report carries field names and request-shaping primitives only — never an
+ * item, a player, a price or an account identifier.
+ *
+ * The observer's captures are content-controlled by construction (see
+ * `OBSERVED_CRITERIA_VALUE_FIELDS`), and this function re-applies that same
+ * allowlist, so a report built from anything else still cannot carry a value
+ * outside it. A session in which EA's own club search never ran has no
+ * observed side: `observed` is null and `note` names the screen to open so the
+ * next Solve has the measurement.
+ *
+ * @param {{ calls: Array<object> }|null} observerReport the `#64` observer
+ *   report carried by the diagnostics
+ * @param {Array<{ name: string, value: * }>} [ourFields] the criteria fields
+ *   this build handed over, from the club stage's `setFields`
+ * @returns {{ observed: { callIndex: number }|null,
+ *   ours: Array<{ name: string, value: * }>,
+ *   fields: Array<{ name: string,
+ *     observed: { present: boolean, type?: string, value?: * },
+ *     ours: { value: * }|null,
+ *     status: 'same'|'different'|'uncompared'|'ours-only'|'observed-only' }>,
+ *   paging: { observedField: string|null, ourField: string|null, same: boolean },
+ *   note: string|null }}
+ */
+export function diffClubSearchCriteria(observerReport, ourFields = []) {
+  const found = findObservedClubSearchCall(observerReport);
+  const observedFields = found === null ? new Map() : observedCriteriaFields(found.call.args[0]);
+  const ours = (Array.isArray(ourFields) ? ourFields : [])
+    .filter((entry) => typeof entry?.name === 'string' && entry.name.length > 0)
+    .map((entry) => ({ name: entry.name, value: entry.value }));
+
+  const fields = [];
+  const pushed = new Set();
+  const push = (name, observed, our) => {
+    pushed.add(name);
+    const hasObservedValue = observed !== undefined && Object.hasOwn(observed, 'value');
+    fields.push({
+      name,
+      observed:
+        observed === undefined
+          ? { present: false }
+          : {
+              present: true,
+              ...(observed.type === undefined ? {} : { type: observed.type }),
+              ...(hasObservedValue ? { value: observed.value } : {}),
+            },
+      ours: our === undefined ? null : { value: our },
+      status: criteriaFieldStatus(observed, our, hasObservedValue),
+    });
+  };
+  for (const entry of ours) push(entry.name, observedFields.get(entry.name), entry.value);
+  for (const [name, observed] of observedFields) {
+    if (!pushed.has(name)) push(name, observed, undefined);
+  }
+
+  const observedPaging = DIFF_PAGING_FIELDS.filter((name) => observedFields.has(name));
+  const ourPaging = DIFF_PAGING_FIELDS.filter((name) => ours.some((entry) => entry.name === name));
+  const observedField = observedPaging.length === 1 ? observedPaging[0] : null;
+  const ourField = ourPaging.length === 1 ? ourPaging[0] : null;
+  const paging = { observedField, ourField, same: observedField !== null && observedField === ourField };
+
+  let note = null;
+  if (found === null) {
+    note =
+      "EA's own services.Club.search was not observed in this session, so there is no observed" +
+      ' criteria to compare against; open the Club screen and let its player list load once' +
+      ' before pressing Solve, so the next diagnostic carries EA\u2019s own criteria.';
+  } else if (observedPaging.length === 0) {
+    note =
+      'the observed criteria carried no own paging field, so the paging field stays unresolved;' +
+      ` this build handed over ${ourPaging.join('/') || 'no paging field'}, decided by the` +
+      " criteria object's own shape or the capture.";
+  } else if (!paging.same) {
+    note =
+      `the observed criteria carried ${observedPaging.join('/')} while this build handed over` +
+      ` ${ourPaging.join('/') || 'no paging field'}; the paging field is not resolved from the` +
+      ' observation and the next build must follow it.';
+  }
+  return {
+    observed: found === null ? null : { callIndex: found.callIndex },
+    ours,
+    fields,
+    paging,
+    note,
   };
 }
 

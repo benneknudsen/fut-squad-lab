@@ -280,15 +280,15 @@ describe('formatDiagnosticsBlock', () => {
 
 describe('formatDiagnosticsFileName', () => {
   it('names the evidence file with the build id and a filesystem-safe timestamp', () => {
-    const name = formatDiagnosticsFileName('fsl-build/11', new Date('2026-09-27T14:02:11.000Z'));
+    const name = formatDiagnosticsFileName('fsl-build/12', new Date('2026-09-27T14:02:11.000Z'));
 
-    expect(name).toBe('fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json');
+    expect(name).toBe('fsl-diagnostics-fsl-build-12-2026-09-27T14-02-11Z.json');
   });
 
   it('drops the milliseconds so the name matches the documented shape exactly', () => {
-    const name = formatDiagnosticsFileName('fsl-build/11', new Date('2026-09-27T14:02:11.987Z'));
+    const name = formatDiagnosticsFileName('fsl-build/12', new Date('2026-09-27T14:02:11.987Z'));
 
-    expect(name).toBe('fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json');
+    expect(name).toBe('fsl-diagnostics-fsl-build-12-2026-09-27T14-02-11Z.json');
   });
 
   it('rejects a report without a build id instead of writing an unnamed file', () => {
@@ -337,13 +337,13 @@ describe('writeDiagnosticsFile', () => {
     const { pageWindow, blobs, clicked, revoked } = createFilePage();
     const report = { schema: DIAGNOSTIC_SCHEMA, stages: [], download: { ok: true } };
 
-    writeDiagnosticsFile(pageWindow, 'fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json', report);
+    writeDiagnosticsFile(pageWindow, 'fsl-diagnostics-fsl-build-12-2026-09-27T14-02-11Z.json', report);
 
     expect(blobs).toHaveLength(1);
     expect(blobs[0].settings).toEqual({ type: 'application/json' });
     expect(JSON.parse(blobs[0].parts[0])).toEqual(report);
     expect(clicked).toHaveLength(1);
-    expect(clicked[0].download).toBe('fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json');
+    expect(clicked[0].download).toBe('fsl-diagnostics-fsl-build-12-2026-09-27T14-02-11Z.json');
     expect(clicked[0].href).toBe('blob:fsl/1');
     expect(revoked).toEqual(['blob:fsl/1']);
   });
@@ -1067,6 +1067,11 @@ describe('the page bridge exposes one documented diagnostic global', () => {
     expect(call.args[0].type).toBe('object');
     expect(call.args[0].keys.some((entry) => entry.name === 'elgReq')).toBe(true);
     expect(JSON.stringify(report.observer)).not.toContain('3 Leagues & 2 Nations');
+    // #76: the diff is computed beside the captures, even when EA's own club
+    // search was never observed in this session.
+    expect(report.criteriaDiff).not.toBeUndefined();
+    expect(report.criteriaDiff.observed).toBeNull();
+    expect(report.criteriaDiff.note).toMatch(/Club/);
   });
 });
 
@@ -1091,7 +1096,7 @@ describe('the page bridge writes one evidence file per Solve', () => {
     expect(report.download).toEqual({
       ok: true,
       file: expect.stringMatching(
-        /^fsl-diagnostics-fsl-build-11-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.json$/
+        /^fsl-diagnostics-fsl-build-12-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.json$/
       ),
     });
     expect(report.mount).not.toBeUndefined();
@@ -1134,7 +1139,7 @@ describe('the page bridge writes one evidence file per Solve', () => {
     const club = report.stages.find((stage) => stage.id === 'club');
     const challenge = report.stages.find((stage) => stage.id === 'challenge');
 
-    expect(report.build.id).toBe('fsl-build/11');
+    expect(report.build.id).toBe('fsl-build/12');
     expect(challenge.detail.challengeId).toBe(25);
     expect(club.detail).toMatchObject({
       field: 'items',
