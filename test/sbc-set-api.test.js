@@ -5,6 +5,8 @@ import {
   loadChallengePayload,
   selectOpenChallenge,
 } from '../src/ea/adapter.js';
+import { readChallenge } from '../src/ea/challenge-reader.js';
+import set10 from './fixtures/sbs-set-10-challenges.json';
 import { createTestPacer } from './helpers/pacing.js';
 
 const testPacer = createTestPacer();
@@ -106,8 +108,8 @@ describe('the challenge is read through the SBC set API (#72)', () => {
     expect(result.attempts[0]).toMatchObject({
       id: 'services.SBC.requestSets+requestChallengesForSet+getChallenges',
       ok: true,
-      reason: null,
     });
+    expect(result.attempts[0].reason).toMatch(/load result/);
     expect(result.attempts[0].selection).toMatchObject({
       sets: 1,
       seen: 1,
@@ -302,5 +304,190 @@ describe('the open-challenge selection rule (#72)', () => {
       chosenId: 25,
       inProgress: true,
     });
+  });
+});
+
+// Issue #77: the set-challenges response carries the requirements itself
+// (`elgReq` on each challenge), so a challenge that already carries a non-empty
+// `elgReq` array is usable as it stands and must not be loaded at all. Only a
+// challenge with no `elgReq` is loaded, by identity through the DAO with the
+// entity's own `isInProgress()` (a throw means false) and the entity as the
+// fallback, and the stage reason must say which of the two shapes answered.
+describe('the requirements the set payload carries (#77)', () => {
+  const fixtureChallenge = (challengeId) =>
+    JSON.parse(JSON.stringify(set10.challenges.find((entry) => entry.challengeId === challengeId)));
+
+  it('uses the set-challenges payload requirements without loading the challenge', async () => {
+    const entity = fixtureChallenge(25);
+    const set = { id: 10, getChallenges: () => [entity] };
+    let loadCalls = 0;
+    const pageWindow = {
+      services: {
+        SBC: {
+          requestSets: () => observableOf({ sets: [set] }),
+          requestChallengesForSet: () => observableOf({}),
+          loadChallenge() {
+            loadCalls += 1;
+            throw new Error('the challenge must not be loaded when the payload carries elgReq');
+          },
+        },
+      },
+    };
+    const localPacer = createTestPacer();
+
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: localPacer });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toBe(entity);
+    expect(result.loadVia).toBe('set-payload.elgReq');
+    expect(loadCalls).toBe(0);
+    expect(localPacer.snapshot().calls).toBe(2);
+    expect(result.attempts[0].reason).toMatch(/set-challenges payload/);
+    expect(result.attempts[0].reason).toMatch(/elgReq\[12\]/);
+    expect(result.attempts[0].reason).toMatch(/no .*load was needed/i);
+    const challenge = readChallenge(result.payload);
+    expect(challenge.elgReq).toHaveLength(12);
+    expect(challenge.requirementsFrom).toBe('payload.elgReq');
+  });
+
+  it('loads by identity and reports that the set payload carried no elgReq', async () => {
+    const entity = challengeEntity({ id: 25 });
+    const received = [];
+    const set = { id: 10, getChallenges: () => [entity] };
+    const pageWindow = {
+      services: {
+        SBC: {
+          sbcDAO: {
+            loadChallenge(...args) {
+              received.push(args);
+              return observableOf(loadedPayload);
+            },
+          },
+          requestSets: () => observableOf({ sets: [set] }),
+          requestChallengesForSet: () => observableOf({}),
+        },
+      },
+    };
+
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+
+    expect(received).toEqual([[25, false]]);
+    expect(result.ok).toBe(true);
+    expect(result.payload).toBe(loadedPayload);
+    expect(result.loadVia).toBe('SBC.sbcDAO.loadChallenge');
+    expect(result.attempts[0].reason).toMatch(/carried no elgReq/);
+    expect(result.attempts[0].reason).toMatch(/load result/);
+  });
+
+  it('treats an empty elgReq array as not carried and loads the challenge', async () => {
+    const entity = { ...challengeEntity({ id: 25 }), elgReq: [] };
+    const received = [];
+    const pageWindow = {
+      services: {
+        SBC: {
+          sbcDAO: {
+            loadChallenge(...args) {
+              received.push(args);
+              return observableOf(loadedPayload);
+            },
+          },
+          requestSets: () => observableOf({ sets: [{ id: 10, getChallenges: () => [entity] }] }),
+          requestChallengesForSet: () => observableOf({}),
+        },
+      },
+    };
+
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+
+    expect(received).toEqual([[25, false]]);
+    expect(result.ok).toBe(true);
+    expect(result.attempts[0].reason).toMatch(/carried no elgReq/);
+  });
+
+  it('passes false to the DAO load when the entity isInProgress() throws', async () => {
+    const entity = {
+      id: 25,
+      isCompleted: () => false,
+      isInProgress() {
+        throw new Error('isInProgress exploded');
+      },
+    };
+    const received = [];
+    const pageWindow = {
+      services: {
+        SBC: {
+          sbcDAO: {
+            loadChallenge(...args) {
+              received.push(args);
+              return observableOf(loadedPayload);
+            },
+          },
+          requestSets: () => observableOf({ sets: [{ id: 10, getChallenges: () => [entity] }] }),
+          requestChallengesForSet: () => observableOf({}),
+        },
+      },
+    };
+
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+
+    expect(result.ok).toBe(true);
+    expect(received).toEqual([[25, false]]);
+  });
+
+  it('falls back to services.SBC.loadChallenge(entity) when the DAO yields no requirements', async () => {
+    const entity = challengeEntity({ id: 25 });
+    const received = [];
+    const pageWindow = {
+      services: {
+        SBC: {
+          sbcDAO: {
+            loadChallenge: () => observableOf({ challengeId: 25, squad: { players: [] } }),
+          },
+          loadChallenge(...args) {
+            received.push(args);
+            return observableOf(loadedPayload);
+          },
+          requestSets: () => observableOf({ sets: [{ id: 10, getChallenges: () => [entity] }] }),
+          requestChallengesForSet: () => observableOf({}),
+        },
+      },
+    };
+
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toBe(loadedPayload);
+    expect(result.strategy).toBe(
+      'services.SBC.requestSets+requestChallengesForSet+getChallenges'
+    );
+    expect(result.loadVia).toBe('SBC.loadChallenge');
+    expect(received).toHaveLength(1);
+    expect(received[0][0]).toBe(entity);
+    expect(result.attempts[0].reason).toMatch(/load result/);
+  });
+
+  it('reports the seen count and the load result key names when nothing carries requirements', async () => {
+    const entity = challengeEntity({ id: 25 });
+    const pageWindow = {
+      services: {
+        SBC: {
+          sbcDAO: {
+            loadChallenge: () => observableOf({ challengeId: 25, squad: { players: [] } }),
+          },
+          requestSets: () => observableOf({ sets: [{ id: 10, getChallenges: () => [entity] }] }),
+          requestChallengesForSet: () => observableOf({}),
+        },
+      },
+    };
+
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+
+    expect(result.ok).toBe(false);
+    const reason = result.attempts[0].reason;
+    expect(reason).toMatch(/carried no elgReq/);
+    expect(reason).toMatch(/saw 1 challenges/);
+    expect(reason).toContain('challengeId');
+    expect(reason).toContain('squad');
+    expect(reason).toMatch(/requirements array/);
   });
 });
