@@ -52,8 +52,14 @@ import {
  * field with its end-of-list rule and a page-size offset, and the challenge is
  * read through the SBC set API walk before the panel-argument fallbacks, so a
  * report must state which field and which selection this build made.
+ * Incremented by #74: a read that throws is now recorded as that stage's
+ * failure instead of escaping `solve`, so one press of Solve always logs the
+ * diagnostic block; a rejected club item reports its field and the item's key
+ * names (never a value), the club failure names the array field, page, page
+ * item count and offending index, and a refused `requestChallengesForSet`
+ * names the set id and the HTTP status.
  */
-export const BUILD_ID = 'fsl-build/10';
+export const BUILD_ID = 'fsl-build/11';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact

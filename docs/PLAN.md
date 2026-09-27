@@ -190,6 +190,28 @@ our own words:
 These are the facts `fsl-build/10` implements. A later live probe that
 contradicts either one wins over this section.
 
+### 1.9 Live reader facts from the `fsl-build/10` run (#74)
+
+The `fsl-build/10` live run was the first to reach both readers' new code paths.
+It established, in our own words:
+
+- **The club array fix worked.** The pre-#72 `page 1 returned no itemData array`
+  error is gone: the paged read reaches EA's returned item array. The run then
+  failed inside `normaliseClubItem`, because a raw item did not carry a finite
+  `assetId`. That is a payload-shape question — a renamed field, a changed type,
+  or the wrong array — and holds no conclusion yet.
+- **The set-API walk reached a real set.** `services.SBC.requestSets()` answered
+  with at least one set whose `id` is 29, and `requestChallengesForSet` was
+  called for it. The request underneath that call was refused by EA on
+  2026-09-27 with `HTTP 426 Upgrade Required`, so `set.getChallenges()` and the
+  later `loadChallenge` step remain unproven: EA's server answered nothing for
+  the listing.
+- **The run produced no diagnostics block at all.** A read that threw left
+  `page-bridge-app.js` before the block was built, so the live paste carried
+  only the two error lines. `fsl-build/11` records a throwing stage and logs the
+  block on every path; the next run's paste is what settles the two questions
+  above.
+
 ---
 
 ## 2. Design decisions

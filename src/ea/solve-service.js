@@ -27,7 +27,10 @@
  *
  * `solve` never throws for an expected environment failure. It returns
  * `{ ok: false, stage, error, read, stages }` so the bridge can always print the
- * read summary and a loud, specific reason. A solution the validator rejected is
+ * read summary and a loud, specific reason. A read that throws instead of
+ * returning its outcome is recorded as that stage's failure, with the thrown
+ * message, and the run stops there (#74) — a thrown read must never erase the
+ * diagnostics block that would explain it. A solution the validator rejected is
  * a normal `{ ok: true, valid: false }` outcome and is not written: writing a
  * squad that violates the challenge would be worse than reporting it.
  *
@@ -63,6 +66,20 @@ const fail = (message) => {
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 const toError = (value) => (value instanceof Error ? value : new Error(String(value)));
+
+/**
+ * The result shape of a read stage that threw instead of returning its outcome
+ * (#74). The stage is recorded as failed with the thrown message and the run
+ * stops as it does for any other failed stage, so a thrown read can never erase
+ * the diagnostics block that would explain it.
+ */
+const thrownStageResult = (error) => ({
+  ok: false,
+  payload: null,
+  strategy: null,
+  attempts: [],
+  thrown: toError(error),
+});
 
 const describeAttempts = (attempts) =>
   attempts.length === 0
@@ -170,28 +187,39 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
         pacing: calls.snapshot(),
       });
 
-      const subjectResult = resolveSubject(subject, pageWindow);
-      const loadResult = await loadChallengeFn(pageWindow, subjectResult, { pacer: calls });
-      record(
-        'bridge',
-        loadResult.ok === true,
+      let subjectResult;
+      try {
+        subjectResult = resolveSubject(subject, pageWindow);
+      } catch (error) {
+        subjectResult = thrownStageResult(error);
+      }
+      let loadResult;
+      try {
+        loadResult = await loadChallengeFn(pageWindow, subjectResult, { pacer: calls });
+      } catch (error) {
+        loadResult = thrownStageResult(error);
+      }
+      const bridgeReason =
         loadResult.ok === true
           ? null
-          : subjectResult.ok !== true
-            ? 'the panel argument carried no challenge payload; the panel shape may have changed'
-            : `the challenge payload could not be loaded; tried ${describeAttempts(loadResult.attempts)}`,
-        {
-          strategy: loadResult.strategy ?? null,
-          attempts: loadResult.attempts,
-          // The #72 set-API selection counts: how many sets and challenges were
-          // seen and which challenge was chosen, so the next live log can say
-          // whether this build picked the challenge the player meant.
-          selection: loadResult.selection ?? null,
-          loadVia: loadResult.loadVia ?? null,
-          squadBackfilled: loadResult.squadBackfilled === true,
-          subject: { strategy: subjectResult.strategy ?? null, attempts: subjectResult.attempts },
-        }
-      );
+          : subjectResult.thrown !== undefined
+            ? `the challenge subject read threw: ${subjectResult.thrown.message}`
+            : loadResult.thrown !== undefined
+              ? `the challenge payload read threw: ${loadResult.thrown.message}`
+              : subjectResult.ok !== true
+                ? 'the panel argument carried no challenge payload; the panel shape may have changed'
+                : `the challenge payload could not be loaded; tried ${describeAttempts(loadResult.attempts)}`;
+      record('bridge', loadResult.ok === true, bridgeReason, {
+        strategy: loadResult.strategy ?? null,
+        attempts: loadResult.attempts,
+        // The #72 set-API selection counts: how many sets and challenges were
+        // seen and which challenge was chosen, so the next live log can say
+        // whether this build picked the challenge the player meant.
+        selection: loadResult.selection ?? null,
+        loadVia: loadResult.loadVia ?? null,
+        squadBackfilled: loadResult.squadBackfilled === true,
+        subject: { strategy: subjectResult.strategy ?? null, attempts: subjectResult.attempts },
+      });
 
       let challenge = null;
       let challengeError = null;
@@ -217,34 +245,58 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
         );
       }
 
-      const clubResult = await resolveClub(pageWindow, { pacer: calls });
-      const clubRecords = clubResult.ok ? readClubItemsFn(clubResult.items) : [];
-      const shapeResult = clubResult.ok === true ? { report: null, reason: null } : describeShapeSafely();
-      record(
-        'club',
-        clubResult.ok === true,
-        clubResult.ok === true
-          ? null
-          : `the club read failed; tried ${describeAttempts(clubResult.attempts)}`,
-        {
-          items: clubRecords.length,
-          strategy: clubResult.strategy ?? null,
-          attempts: clubResult.attempts,
-          pages: clubResult.pages ?? null,
-          capped: clubResult.capped === true,
-          capReason: clubResult.capReason ?? null,
-          // The field the live page carried (#72); null on a failed read, so
-          // the diagnostic shows the field name only when one was read.
-          field: clubResult.field ?? null,
-          endOfList: clubResult.endOfList === true,
-          criteria: clubResult.criteria ?? null,
-          // The shape report runs on failure only: a read that answered
-          // carries none (#44). A shape failure is a recorded reason, never a
-          // lost solve (#50).
-          shape: shapeResult.report,
-          shapeError: shapeResult.reason,
+      let clubResult;
+      try {
+        clubResult = await resolveClub(pageWindow, { pacer: calls });
+      } catch (error) {
+        clubResult = thrownStageResult(error);
+      }
+      let clubRecords = [];
+      let clubReadError = null;
+      if (clubResult.ok) {
+        try {
+          clubRecords = readClubItemsFn(clubResult.items, {
+            pageItems: clubResult.pageItems ?? null,
+          });
+        } catch (error) {
+          // A payload that arrived but an item that cannot be translated (#74):
+          // the stage records the reader's located report instead of losing the
+          // whole run to a throw the diagnostic never sees.
+          clubReadError = toError(error);
         }
-      );
+      }
+      const shapeResult =
+        clubResult.ok === true ? { report: null, reason: null } : describeShapeSafely();
+      const clubReason =
+        clubReadError !== null
+          ? clubReadError.message
+          : clubResult.ok === true
+            ? null
+            : clubResult.thrown !== undefined
+              ? `the club read threw: ${clubResult.thrown.message}`
+              : `the club read failed; tried ${describeAttempts(clubResult.attempts)}`;
+      record('club', clubResult.ok === true && clubReadError === null, clubReason, {
+        items: clubRecords.length,
+        strategy: clubResult.strategy ?? null,
+        attempts: clubResult.attempts,
+        pages: clubResult.pages ?? null,
+        capped: clubResult.capped === true,
+        capReason: clubResult.capReason ?? null,
+        // The field the live page carried (#72); null on a failed read, so
+        // the diagnostic shows the field name only when one was read.
+        field: clubResult.field ?? null,
+        endOfList: clubResult.endOfList === true,
+        criteria: clubResult.criteria ?? null,
+        // Where the club walk saw the item it could not translate (#74): the
+        // array field, page, page item count and offending index. Null unless
+        // an item was rejected.
+        clubRead: clubReadError?.clubRead ?? null,
+        // The shape report runs on failure only: a read that answered
+        // carries none (#44). A shape failure is a recorded reason, never a
+        // lost solve (#50).
+        shape: shapeResult.report,
+        shapeError: shapeResult.reason,
+      });
 
       // The one-liner must name why the challenge was not read. The bridge and
       // subject attempts are already recorded on the bridge stage, so the
@@ -282,6 +334,8 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
           read,
           error:
             challengeError ??
+            loadResult.thrown ??
+            subjectResult.thrown ??
             new Error('the panel argument carried no challenge payload; the panel shape may have changed'),
         });
       }
@@ -290,19 +344,31 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
           ok: false,
           stage: 'club',
           read,
-          error: new Error(`the club read failed; tried ${describeAttempts(clubResult.attempts)}`),
+          error:
+            clubResult.thrown ??
+            new Error(`the club read failed; tried ${describeAttempts(clubResult.attempts)}`),
         });
       }
+      if (clubReadError !== null) {
+        return finish({ ok: false, stage: 'club', read, error: clubReadError });
+      }
 
-      const squadResult = await resolveSquad(subject, pageWindow, loadResult.payload, {
-        pacer: calls,
-      });
+      let squadResult;
+      try {
+        squadResult = await resolveSquad(subject, pageWindow, loadResult.payload, {
+          pacer: calls,
+        });
+      } catch (error) {
+        squadResult = thrownStageResult(error);
+      }
       record(
         'squad',
         squadResult.ok === true,
         squadResult.ok === true
           ? null
-          : `the challenge squad payload is unreadable; tried ${describeAttempts(squadResult.attempts)}`,
+          : squadResult.thrown !== undefined
+            ? `the challenge squad read threw: ${squadResult.thrown.message}`
+            : `the challenge squad payload is unreadable; tried ${describeAttempts(squadResult.attempts)}`,
         { strategy: squadResult.strategy ?? null, attempts: squadResult.attempts }
       );
       if (!squadResult.ok) {
@@ -310,9 +376,11 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
           ok: false,
           stage: 'squad',
           read,
-          error: new Error(
-            `the challenge squad payload is unreadable; tried ${describeAttempts(squadResult.attempts)}`
-          ),
+          error:
+            squadResult.thrown ??
+            new Error(
+              `the challenge squad payload is unreadable; tried ${describeAttempts(squadResult.attempts)}`
+            ),
         });
       }
 
