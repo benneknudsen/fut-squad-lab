@@ -11,8 +11,9 @@ const testPacer = createTestPacer();
 // `services.Club.search` and `{ items, endOfList }` from
 // `services.Item.searchStorageItems`. The reader looked for `itemData` and read
 // zero items from both. These tests pin the live field name, the end-of-list
-// rule and the offset rule the reference confirmed: the offset advances by the
-// requested page size, never by the number of items a page happened to return.
+// rule and the paging rule the reference confirmed: the paging value advances
+// by the requested page size, never by the number of items a page happened to
+// return.
 
 const observableOf = (payload) => ({
   observe(subscriber, callback) {
@@ -82,7 +83,7 @@ describe('the live club payload field is items (#72)', () => {
 });
 
 describe('the club end-of-list rule (#72)', () => {
-  it('continues while retrievedAll is false and advances the offset by the page size', async () => {
+  it('continues while retrievedAll is false and advances the paging value by the page size', async () => {
     const { snapshots, search } = pagedSearch([
       { items: [{ id: 1 }, { id: 2 }], retrievedAll: false },
       { items: [{ id: 3 }], retrievedAll: false },
@@ -93,7 +94,7 @@ describe('the club end-of-list rule (#72)', () => {
 
     expect(result.items.map((item) => item.id)).toEqual([1, 2, 3]);
     expect(result.pages).toBe(3);
-    expect(snapshots.map((criteria) => criteria.offset)).toEqual([
+    expect(snapshots.map((criteria) => criteria.start)).toEqual([
       0,
       CLUB_SEARCH_PAGE_SIZE,
       2 * CLUB_SEARCH_PAGE_SIZE,

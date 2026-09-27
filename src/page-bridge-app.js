@@ -23,6 +23,7 @@ import {
   EA_GLOBALS,
   EA_PANEL_HOOK,
   OBSERVED_CRITERIA_VALUE_FIELDS,
+  diffClubSearchCriteria,
   formatEligibilityKeysLine,
   readEligibilityKeys,
   resolveEaGlobal,
@@ -259,11 +260,21 @@ export function startPageBridge(pageWindow, options = {}) {
     state.busy = true;
     try {
       const outcome = await service.solve(state.subject);
+      const observerReport = observer.report();
+      // #76: the diff compares EA's own observed club search criteria with the
+      // criteria this build actually handed over, taken from the club stage's
+      // record. It is part of the report even when the club read never ran.
+      const clubDetail = outcome.stages.find((stage) => stage.id === 'club')?.detail ?? null;
+      const criteriaDiff = diffClubSearchCriteria(
+        observerReport,
+        clubDetail?.criteria?.setFields ?? []
+      );
       const diagnostics = buildDiagnosticsReport(
         outcome.stages,
         buildMarker(),
         outcome.pacing,
-        observer.report()
+        observerReport,
+        criteriaDiff
       );
       // #75: one evidence file per Solve, written from the world that already
       // owns the report, and the same block relayed to the isolated console
