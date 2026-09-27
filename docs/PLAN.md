@@ -212,6 +212,19 @@ It established, in our own words:
   block on every path; the next run's paste is what settles the two questions
   above.
 
+### 1.10 The requirements the set-challenges payload carries (#77)
+
+The `fsl-build/13` build reads the requirements off the set-challenges response
+itself, from the 2026-09-17 capture: each challenge entry in
+`test/fixtures/sbs-set-10-challenges.json` carries a non-empty `elgReq` array,
+while the load (`POST /sbs/challenge/{id}`) returns only `challengeId` and
+`squad`. The reader therefore uses the entity's `elgReq` when present and loads
+only when it is missing, not an array, or empty. The load order is unchanged,
+with the DAO's `inProgress` taken from the entity's own `isInProgress()` and a
+throw meaning "not in progress". The panel-argument fallbacks are unchanged.
+The live page's own set-challenges payload remains the measurement: if it
+carries no `elgReq`, the read takes the load path and reports that.
+
 ---
 
 ## 2. Design decisions

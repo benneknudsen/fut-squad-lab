@@ -3214,9 +3214,12 @@ const carriesTopLevelRequirements = (value) => {
  *   services.SBC.loadChallenge(challengeEntity)    when the DAO is absent
  *
  * An entity carries `id`, `name`/`title`, `isCompleted()`, `isInProgress()` and
- * `squad`; the loaded payload carries the requirements, and its `squad` is
- * written back onto the entity when the entity has none. Every name here is EA
- * vocabulary, which is why it lives in this one file.
+ * `squad`; the set-challenges payload's own entries also carry `elgReq`,
+ * `elgOperation` and `status` (the shape of
+ * `test/fixtures/sbs-set-10-challenges.json`). The loaded payload carries the
+ * requirements when the entity does not, and its `squad` is written back onto
+ * the entity when the entity has none. Every name here is EA vocabulary, which
+ * is why it lives in this one file.
  */
 export const SBC_SET_API = Object.freeze({
   requestSets: 'requestSets',
@@ -3230,6 +3233,9 @@ export const SBC_SET_API = Object.freeze({
   isCompleted: 'isCompleted',
   isInProgress: 'isInProgress',
   squad: 'squad',
+  elgReq: 'elgReq',
+  elgOperation: 'elgOperation',
+  status: 'status',
   data: 'data',
 });
 
@@ -3380,17 +3386,82 @@ const backfillLoadedSquad = (challenge, payload) => {
 };
 
 /**
- * Walks the SBC set API to a loaded challenge payload: request the sets, list
- * each set's challenges through `requestChallengesForSet` and
- * `set.getChallenges()`, select the open challenge, then load it by id through
- * the DAO when that method exists and the entity has an id, otherwise by the
- * entity itself. The set entities may already carry their challenges for the
- * live page; the request is still made first because the reference makes it and
- * that is the only verified way the entities are populated.
+ * The own key names a load result carried, sorted and renamed through the one
+ * paste-safety list, so a failed load reports what EA sent without a value
+ * (#77). A payload that is not an object is described by its shape instead.
+ */
+const carriedKeyNames = (payload) =>
+  isRecordObject(payload) ? carriedKeys(payload).join(', ') : describeValue(payload);
+
+/**
+ * Reads the requirements the set-challenges payload itself carries. The
+ * `fsl-build/11` live run demanded them off the entity and found only `squad`
+ * because the requirements are the set-challenges entry's own `elgReq` array:
+ * the capture in `test/fixtures/sbs-set-10-challenges.json` proves the shape.
+ * Only a non-empty top-level `elgReq` array counts as carried; a missing,
+ * non-array or empty value keeps its own reason so the caller loads and the
+ * report can say which shape was missing.
+ */
+const readChallengeEntityRequirements = (challenge) => {
+  const read = readDataProperty(challenge, SBC_SET_API.elgReq);
+  if (!read.ok) {
+    return {
+      carried: false,
+      count: 0,
+      reason:
+        read.reason === null
+          ? `the selected challenge carries no ${SBC_SET_API.elgReq}`
+          : `${SBC_SET_API.elgReq} is ${read.reason}`,
+    };
+  }
+  if (!Array.isArray(read.value)) {
+    return {
+      carried: false,
+      count: 0,
+      reason: `${SBC_SET_API.elgReq} is ${describeValue(read.value)}, not an array`,
+    };
+  }
+  if (read.value.length === 0) {
+    return { carried: false, count: 0, reason: `${SBC_SET_API.elgReq} is an empty array` };
+  }
+  return { carried: true, count: read.value.length, reason: null };
+};
+
+/**
+ * Summarizes one load attempt for the reason string: the call that ran, whether
+ * its payload carried a requirements array, and, when it did not, the payload's
+ * own key names (never a value, names already renamed through the shared
+ * paste-safety list). The caller reads `usable` to decide on the next fallback.
+ */
+const describeLoadAttempt = (via, call) => {
+  if (!call.ok) return { usable: false, reason: `${via} failed: ${call.reason}` };
+  if (carriesChallengeRequirements(call.event.payload)) {
+    return { usable: true, reason: `${via} returned the requirements` };
+  }
+  return {
+    usable: false,
+    reason:
+      `${via} returned an object carrying [${carriedKeyNames(call.event.payload)}] with no` +
+      ' requirements array',
+  };
+};
+
+/**
+ * Walks the SBC set API to a challenge payload with requirements: request the
+ * sets, list each set's challenges through `requestChallengesForSet` and
+ * `set.getChallenges()`, and select the open challenge. A selected challenge
+ * whose own `elgReq` array is non-empty answers directly (#77); otherwise the
+ * challenge is loaded by id through the DAO — with the entity's own
+ * `isInProgress()`, a throw meaning false — and then, when that yields no
+ * requirements, by the entity itself. The set entities may already carry their
+ * challenges for the live page; the request is still made first because the
+ * reference makes it and that is the only verified way the entities are
+ * populated.
  *
- * A set whose listing fails is recorded and skipped; a payload that arrives
- * without requirements is rejected by the caller's own check. Every reason
- * names the call and the argument it used, never a guessed one.
+ * A set whose listing fails is recorded and skipped; a load that yields no
+ * requirements keeps every attempt and the payload's own key names so the
+ * failure says which shape was missing. Every reason names the call and the
+ * argument it used, never a guessed one.
  */
 const loadChallengeFromSetApi = async ({ pageWindow, strategy, timeoutMs, pacer }) => {
   const base = resolveStrategyBase(pageWindow, SBC_SERVICE_TARGET);
@@ -3486,50 +3557,106 @@ const loadChallengeFromSetApi = async ({ pageWindow, strategy, timeoutMs, pacer 
   }
 
   const chosen = selection.challenge;
+  const entityRequirements = readChallengeEntityRequirements(chosen);
+  if (entityRequirements.carried) {
+    return {
+      ok: true,
+      payload: chosen,
+      challenge: chosen,
+      via: `set-payload.${SBC_SET_API.elgReq}`,
+      requirementsFrom: `payload.${SBC_SET_API.elgReq}`,
+      requirementsReason:
+        `requirements came from the set-challenges payload (${SBC_SET_API.elgReq}[` +
+        `${entityRequirements.count}]); no challenge load was needed`,
+      sets: sets.length,
+      selection,
+    };
+  }
+
+  // The entity carries no requirements, so the challenge is loaded by identity:
+  // the DAO first when it exists and the entity has an id, then the entity
+  // itself. The entity's own `isInProgress()` decides the DAO's second argument
+  // and a throw there means "not in progress".
+  const inProgress = entityFlag(chosen, SBC_SET_API.isInProgress);
   const entityId = readEntityId(chosen);
+  const loadAttempts = [];
+  let payload = null;
+  let via = null;
+
   const daoBase = resolveStrategyBase(pageWindow, SBC_DAO_TARGET);
   const daoLoad = daoBase.ok ? findMethod(daoBase.value, SBC_SET_API.loadChallenge) : { ok: false };
-  let call;
-  let via;
   if (daoLoad.ok && entityId !== null) {
-    via = `${SBC_DAO_TARGET.target}.${SBC_SET_API.loadChallenge}`;
-    call = await callReadMethod(
+    const daoVia = `${SBC_DAO_TARGET.target}.${SBC_SET_API.loadChallenge}`;
+    const call = await callReadMethod(
       daoLoad,
       daoBase.value,
-      [entityId, selection.inProgress],
-      `${strategy.id} ${via}`,
+      [entityId, inProgress],
+      `${strategy.id} ${daoVia}`,
       timeoutMs,
       { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
     );
-  } else {
-    const found = findMethod(base.value, SBC_SET_API.loadChallenge);
-    if (!found.ok) {
-      return {
-        ok: false,
-        reason: describeMissingMethod(base.name, SBC_SET_API.loadChallenge, found.reason),
-        sets: sets.length,
-        selection,
-      };
+    const attempt = describeLoadAttempt(daoVia, call);
+    loadAttempts.push(attempt);
+    if (attempt.usable) {
+      payload = call.event.payload;
+      via = daoVia;
     }
-    via = `${SBC_SERVICE_TARGET.target}.${SBC_SET_API.loadChallenge}`;
-    call = await callReadMethod(
-      found,
-      base.value,
-      [chosen],
-      `${strategy.id} ${via}`,
-      timeoutMs,
-      { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
-    );
   }
-  if (!call.ok) return { ok: false, reason: call.reason, sets: sets.length, selection };
 
+  if (payload === null) {
+    const found = findMethod(base.value, SBC_SET_API.loadChallenge);
+    if (found.ok) {
+      const entityVia = `${SBC_SERVICE_TARGET.target}.${SBC_SET_API.loadChallenge}`;
+      const call = await callReadMethod(
+        found,
+        base.value,
+        [chosen],
+        `${strategy.id} ${entityVia}`,
+        timeoutMs,
+        { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
+      );
+      const attempt = describeLoadAttempt(entityVia, call);
+      loadAttempts.push(attempt);
+      if (attempt.usable) {
+        payload = call.event.payload;
+        via = entityVia;
+      }
+    }
+  }
+
+  if (payload === null) {
+    const attempts =
+      loadAttempts.length === 0
+        ? `no load method was available (${SBC_DAO_TARGET.target}.${SBC_SET_API.loadChallenge} and` +
+          ` ${SBC_SERVICE_TARGET.target}.${SBC_SET_API.loadChallenge})`
+        : `${loadAttempts
+            .map((attempt) => attempt.reason)
+            .join('; ')}; none of them carried a requirements array`;
+    return {
+      ok: false,
+      reason:
+        `the set-challenges payload carried no ${SBC_SET_API.elgReq} ` +
+        `(${entityRequirements.reason}); saw ${selection.seen} challenges in ${sets.length} sets;` +
+        ` ${attempts}`,
+      sets: sets.length,
+      selection,
+    };
+  }
+
+  const requirements = resolveChallengeRequirements(payload);
+  const squadBackfilled = backfillLoadedSquad(chosen, payload);
   return {
     ok: true,
-    payload: call.event.payload,
+    payload,
     challenge: chosen,
     via,
+    requirementsFrom: requirements.ok ? requirements.source : null,
+    requirementsReason:
+      `the set-challenges payload carried no ${SBC_SET_API.elgReq}; requirements came from the` +
+      ` load result (${requirements.source})`,
     sets: sets.length,
     selection,
+    squadBackfilled,
   };
 };
 
@@ -3594,14 +3721,20 @@ const describeArgumentFailure = (strategy, subjectResult) => {
  *
  * The primary strategy is the #72 SBC set API walk: request the sets, list each
  * set's challenges, select the open one (deterministic rule in
- * `selectOpenChallenge`), load it, and backfill its `squad` onto the entity when
- * the entity has none. The #51 panel-argument strategies stay behind it as
- * reported fallbacks. Every strategy goes through the observable bridge: a
- * returned observable is subscribed and unsubscribed with a timeout, a promise
- * is awaited under the same timeout, and a plain value is carried as-is. A
- * loaded payload is accepted when any documented requirements location carries
- * an array, so the loaded shape is reported by the same lookup as the panel
- * shape.
+ * `selectOpenChallenge`), and read the requirements the set-challenges payload
+ * itself carries (#77): a selected challenge with a non-empty `elgReq` array is
+ * usable as it stands, with no load at all. Only a challenge whose `elgReq` is
+ * missing, not an array or empty is loaded — by identity through the DAO with
+ * the entity's own `isInProgress()` (a throw means false) first, then the
+ * entity itself — and the loaded `squad` is written back onto the entity. The
+ * attempt carries a reason naming which of the two shapes answered, so a live
+ * report can tell "the payload had no elgReq" from "the load returned no
+ * data". The #51 panel-argument strategies stay behind it as reported
+ * fallbacks. Every strategy goes through the observable bridge: a returned
+ * observable is subscribed and unsubscribed with a timeout, a promise is
+ * awaited under the same timeout, and a plain value is carried as-is. A loaded
+ * payload is accepted when any documented requirements location carries an
+ * array, so the loaded shape is reported by the same lookup as the panel shape.
  *
  * @param {object|undefined} pageWindow the page's `window`
  * @param {{ ok: boolean, payload: object|null }} subjectResult the
@@ -3644,8 +3777,8 @@ export async function loadChallengePayload(pageWindow, subjectResult, options = 
         )})`;
         continue;
       }
-      const squadBackfilled = backfillLoadedSquad(outcome.challenge, outcome.payload);
       attempt.ok = true;
+      attempt.reason = outcome.requirementsReason ?? null;
       return {
         ok: true,
         payload: outcome.payload,
@@ -3653,7 +3786,8 @@ export async function loadChallengePayload(pageWindow, subjectResult, options = 
         attempts,
         selection: outcome.selection,
         loadVia: outcome.via,
-        squadBackfilled,
+        requirementsFrom: outcome.requirementsFrom ?? null,
+        squadBackfilled: outcome.squadBackfilled === true,
       };
     }
 
