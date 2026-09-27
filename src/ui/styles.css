@@ -48,6 +48,22 @@
 }
 
 /* ============================================================================
+   Diagnostics note (#75). One muted line under the toolbar stating where the
+   Solve's evidence file landed, or that the write was blocked. Text only; the
+   console block carries the reason.
+   ========================================================================== */
+
+.fsl-root .fsl-diagnostics {
+  margin: 0;
+  padding: var(--fsl-sp-2) var(--fsl-sp-5);
+  border-bottom: 1px solid var(--fsl-border);
+  font-family: var(--fsl-font-ui);
+  font-size: var(--fsl-fs-11);
+  color: var(--fsl-fg-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ============================================================================
    Fallback mount (#42). When the panel view shape is not recognised, the
    control is pinned to the bottom-left corner instead of being appended below
    EA's full-height app. This is a diagnostic fallback, not the intended

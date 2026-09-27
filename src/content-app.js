@@ -40,6 +40,32 @@ export function bridgeModuleMessage(chrome) {
 }
 
 /**
+ * Fetches the copy bundle for the browser language. The bundle is returned so
+ * the diagnostics relay can build its panel string from the same load the
+ * button label came from; nothing is fetched twice.
+ *
+ * @param {{ chrome: object, navigator: object, fetch: Function }} environment
+ * @returns {Promise<{ locale: string, bundle: object }>}
+ * @throws {Error} when the bundle request fails
+ */
+export async function loadCopyBundle({ chrome, navigator, fetch }) {
+  const locale = resolveCopyLocale(navigator.language);
+  const file = COPY_FILES[locale];
+  const response = await fetch(chrome.runtime.getURL(file));
+  if (!response.ok) {
+    throw new Error(`copy bundle ${file} failed to load (HTTP ${response.status})`);
+  }
+  return { locale, bundle: await response.json() };
+}
+
+const copyMessage = ({ locale, bundle }) => ({
+  source: CONTENT_SOURCE,
+  kind: CONTENT_TO_PAGE_KINDS.COPY,
+  locale,
+  label: readCopyPath(bundle, 'panel.solve'),
+});
+
+/**
  * Loads the copy bundle for the browser language and builds the message that
  * carries the primary-action label to the page.
  *
@@ -47,19 +73,40 @@ export function bridgeModuleMessage(chrome) {
  * @returns {Promise<{ source: string, kind: string, locale: string, label: string }>}
  * @throws {Error} when the bundle request fails or the file has no `panel.solve`
  */
-export async function loadCopyMessage({ chrome, navigator, fetch }) {
-  const locale = resolveCopyLocale(navigator.language);
-  const file = COPY_FILES[locale];
-  const response = await fetch(chrome.runtime.getURL(file));
-  if (!response.ok) {
-    throw new Error(`copy bundle ${file} failed to load (HTTP ${response.status})`);
+export async function loadCopyMessage(environment) {
+  return copyMessage(await loadCopyBundle(environment));
+}
+
+/** The injected root the diagnostics note is appended to. */
+const PANEL_ROOT_SELECTOR = '.fsl-root';
+const NOTE_ATTRIBUTE = 'data-fsl-diagnostics';
+const NOTE_SELECTOR = `[${NOTE_ATTRIBUTE}]`;
+
+/**
+ * States in the injected panel whether the Solve's evidence file was written.
+ * The string is the copy bundle's `panel.diagnosticsFile` (or
+ * `panel.diagnosticsBlocked`) with `{file}` substituted; the note is created
+ * on the first Solve and reused after, so a second solve replaces one line
+ * instead of stacking another. The DOM is optional: a page with no injected
+ * root, or a test document without `querySelector`, is left untouched.
+ *
+ * @param {{ document: object, bundle: object, file: string|null, ok: boolean }} input
+ * @returns {object|null} the note element, or null when there is no panel root
+ */
+export function showDiagnosticsNote({ document, bundle, file, ok }) {
+  const root = document?.querySelector?.(PANEL_ROOT_SELECTOR) ?? null;
+  if (root === null) return null;
+  let note = root.querySelector?.(NOTE_SELECTOR) ?? null;
+  if (note === null) {
+    note = document.createElement('p');
+    note.className = 'fsl-diagnostics';
+    note.setAttribute(NOTE_ATTRIBUTE, '');
+    note.setAttribute('role', 'status');
+    root.appendChild(note);
   }
-  return {
-    source: CONTENT_SOURCE,
-    kind: CONTENT_TO_PAGE_KINDS.COPY,
-    locale,
-    label: readCopyPath(await response.json(), 'panel.solve'),
-  };
+  const key = ok === true ? 'panel.diagnosticsFile' : 'panel.diagnosticsBlocked';
+  note.textContent = readCopyPath(bundle, key).replaceAll('{file}', String(file));
+  return note;
 }
 
 /**
@@ -82,7 +129,9 @@ export function injectStylesheets(document, chrome) {
  * bridge's hello, hands over the bridge module URL. Prints the summary and any
  * bridge error to the page console. It also owns the one solver Worker for the
  * session: the page's token-tagged solve requests are brokered to it and its
- * answers are posted back with the same token.
+ * answers are posted back with the same token. The MAIN world's diagnostics
+ * block is logged verbatim here and the evidence file is stated in the panel,
+ * so a saved console log always carries the block (#75).
  *
  * @param {{ window: object, document: object, chrome: object, navigator: object,
  *   fetch: Function, console: object, createWorker?: (url: string) => object }}
@@ -105,9 +154,16 @@ export function startContentApp({
     deliver: (message) => send({ source: CONTENT_SOURCE, ...message }),
   });
 
+  // The one copy load of the session, kept so the diagnostics relay can state
+  // the evidence file in the panel without fetching the bundle a second time.
+  let copy = null;
+
   const announceCopy = () =>
-    loadCopyMessage({ chrome, navigator, fetch })
-      .then(send)
+    loadCopyBundle({ chrome, navigator, fetch })
+      .then((loaded) => {
+        copy = loaded;
+        send(copyMessage(loaded));
+      })
       .catch((error) => console.warn(`[FUT Squad Lab] ${error.message}`));
 
   window.addEventListener('message', (event) => {
@@ -133,6 +189,31 @@ export function startContentApp({
     }
     if (data.kind === PAGE_TO_CONTENT_KINDS.SUMMARY) {
       console.log(`[FUT Squad Lab] ${data.summary}`);
+      return;
+    }
+    if (data.kind === PAGE_TO_CONTENT_KINDS.DIAGNOSTICS) {
+      // The one isolated-world copy of the block, verbatim and unconditional:
+      // the MAIN-world log is kept, but only this one is guaranteed to survive
+      // a saved console log (#75). One post per Solve means one line here; a
+      // malformed message never produces a second.
+      if (typeof data.block !== 'string' || data.block.length === 0) return;
+      console.log(data.block);
+      if (copy === null) {
+        console.warn('[FUT Squad Lab] diagnostics note skipped: the copy bundle has not loaded');
+        return;
+      }
+      const ok =
+        data.download?.ok === true && typeof data.file === 'string' && data.file.length > 0;
+      try {
+        showDiagnosticsNote({
+          document,
+          bundle: copy.bundle,
+          file: ok ? data.file : null,
+          ok,
+        });
+      } catch (error) {
+        console.warn(`[FUT Squad Lab] diagnostics note failed: ${error.message}`);
+      }
       return;
     }
     if (data.kind === PAGE_TO_CONTENT_KINDS.ERROR) {
