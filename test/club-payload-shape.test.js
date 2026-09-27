@@ -100,6 +100,17 @@ describe('the club end-of-list rule (#72)', () => {
     ]);
   });
 
+  it('reports each page item count so a failed normalisation can name its page', async () => {
+    const { search } = pagedSearch([
+      { items: [{ id: 1 }, { id: 2 }], retrievedAll: false },
+      { items: [{ id: 3 }], endOfList: true },
+    ]);
+
+    const result = await resolveClubItems(windowWithSearch(search), { pacer: testPacer });
+
+    expect(result.pageItems).toEqual([2, 1]);
+  });
+
   it('lets endOfList win over retrievedAll and keeps walking when it is false', async () => {
     const { calls, search } = pagedSearch([
       { items: [{ id: 1 }], endOfList: false, retrievedAll: true },
