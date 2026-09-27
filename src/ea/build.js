@@ -58,8 +58,14 @@ import {
  * names (never a value), the club failure names the array field, page, page
  * item count and offending index, and a refused `requestChallengesForSet`
  * names the set id and the HTTP status.
+ * Incremented by #76: the club walk now sends the criteria EA's own captured
+ * request carries (type, the OVR window, the sort, alternate positions, page
+ * size 91, paging through the criteria' own paging field or the captured
+ * `start`), sends no `untradeables` field in the whole-club mode, and the
+ * diagnostic carries the observed-EA-criteria diff field by field, so a live
+ * report states what EA itself sent next to what this build sent.
  */
-export const BUILD_ID = 'fsl-build/11';
+export const BUILD_ID = 'fsl-build/12';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact
