@@ -30,6 +30,7 @@ export const PAGE_TO_CONTENT_KINDS = Object.freeze({
   BRIDGE_READY: 'bridge-ready',
   MOUNTED: 'mounted',
   SUMMARY: 'summary',
+  DIAGNOSTICS: 'diagnostics',
   ERROR: 'error',
   SOLVE_REQUEST: 'solve-request',
   SOLVE_CANCEL: 'solve-cancel',

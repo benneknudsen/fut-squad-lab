@@ -302,6 +302,32 @@ export function formatDiagnosticsBlock(report) {
 }
 
 /**
+ * The name of the evidence file one Solve writes to the user's Downloads
+ * folder (#75): `fsl-diagnostics-<buildId>-<timestamp>.json`. The build id's
+ * `/` becomes `-` and the ISO timestamp loses its milliseconds and has its
+ * `:` replaced by `-`, so the name is valid on every filesystem a browser may
+ * target while staying sortable and readable. Pure, with the clock injected,
+ * so the exact name is provable without a browser.
+ *
+ * @param {string} buildId the `build.id` carried by the report, e.g. `fsl-build/11`
+ * @param {Date} [at] the solve's timestamp; defaults to now
+ * @returns {string} e.g. `fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json`
+ * @throws {Error} when `buildId` is not a non-empty string or `at` is not a
+ *   valid `Date`
+ */
+export function formatDiagnosticsFileName(buildId, at = new Date()) {
+  if (typeof buildId !== 'string' || buildId.length === 0) {
+    throw new Error('formatDiagnosticsFileName: buildId must be a non-empty string');
+  }
+  if (!(at instanceof Date) || Number.isNaN(at.getTime())) {
+    throw new Error('formatDiagnosticsFileName: at must be a valid Date');
+  }
+  const id = buildId.replaceAll('/', '-');
+  const stamp = at.toISOString().replace(/\.\d{3}Z$/, 'Z').replaceAll(':', '-');
+  return `fsl-diagnostics-${id}-${stamp}.json`;
+}
+
+/**
  * Shapes `planSquadWrite`'s report for the payload stage without carrying any
  * club item id into the pasted summary: how many slots were filled, how many
  * existing entries were preserved, and every unplaced player as a formation

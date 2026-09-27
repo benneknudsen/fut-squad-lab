@@ -8,12 +8,13 @@ import {
   buildDiagnosticsReport,
   completeStages,
   formatDiagnosticsBlock,
+  formatDiagnosticsFileName,
   summarizeWritePlan,
 } from '../src/ea/summary.js';
 import { crossCheckEligibilityModel, readEligibilityKeys } from '../src/ea/adapter.js';
 import { readClubItems } from '../src/ea/club-reader.js';
 import { createSolveService } from '../src/ea/solve-service.js';
-import { startPageBridge } from '../src/page-bridge-app.js';
+import { startPageBridge, writeDiagnosticsFile } from '../src/page-bridge-app.js';
 import club from './fixtures/club-items.json';
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import challengeSquadFixture from './fixtures/sbs-challenge-25-squad.json';
@@ -274,6 +275,83 @@ describe('formatDiagnosticsBlock', () => {
   it('rejects a report that is not the builder output', () => {
     expect(() => formatDiagnosticsBlock(null)).toThrow(/report/);
     expect(() => formatDiagnosticsBlock({ schema: 'other' })).toThrow(/report/);
+  });
+});
+
+describe('formatDiagnosticsFileName', () => {
+  it('names the evidence file with the build id and a filesystem-safe timestamp', () => {
+    const name = formatDiagnosticsFileName('fsl-build/11', new Date('2026-09-27T14:02:11.000Z'));
+
+    expect(name).toBe('fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json');
+  });
+
+  it('drops the milliseconds so the name matches the documented shape exactly', () => {
+    const name = formatDiagnosticsFileName('fsl-build/11', new Date('2026-09-27T14:02:11.987Z'));
+
+    expect(name).toBe('fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json');
+  });
+
+  it('rejects a report without a build id instead of writing an unnamed file', () => {
+    expect(() => formatDiagnosticsFileName('', new Date())).toThrow(/buildId/);
+  });
+});
+
+const createFilePage = ({ withBlob = true } = {}) => {
+  const clicked = [];
+  const revoked = [];
+  const blobs = [];
+  class Blob {
+    constructor(parts, settings) {
+      this.parts = parts;
+      this.settings = settings;
+      blobs.push(this);
+    }
+  }
+  const document = {
+    body: { appendChild: vi.fn() },
+    createElement: (tagName) => {
+      void tagName;
+      const anchor = {
+        href: null,
+        download: null,
+        click: () => clicked.push(anchor),
+        remove: vi.fn(),
+      };
+      return anchor;
+    },
+  };
+  const urlApi = {
+    createObjectURL: (blob) => `blob:fsl/${blob === blobs[0] ? 1 : 2}`,
+    revokeObjectURL: (url) => revoked.push(url),
+  };
+  const pageWindow = {
+    document,
+    Blob: withBlob ? Blob : undefined,
+    URL: urlApi,
+  };
+  return { pageWindow, blobs, clicked, revoked, document };
+};
+
+describe('writeDiagnosticsFile', () => {
+  it('writes the exact report JSON through a blob and clicks a named download anchor', () => {
+    const { pageWindow, blobs, clicked, revoked } = createFilePage();
+    const report = { schema: DIAGNOSTIC_SCHEMA, stages: [], download: { ok: true } };
+
+    writeDiagnosticsFile(pageWindow, 'fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json', report);
+
+    expect(blobs).toHaveLength(1);
+    expect(blobs[0].settings).toEqual({ type: 'application/json' });
+    expect(JSON.parse(blobs[0].parts[0])).toEqual(report);
+    expect(clicked).toHaveLength(1);
+    expect(clicked[0].download).toBe('fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json');
+    expect(clicked[0].href).toBe('blob:fsl/1');
+    expect(revoked).toEqual(['blob:fsl/1']);
+  });
+
+  it('throws naming the missing Blob shape rather than silently dropping the evidence file', () => {
+    const { pageWindow } = createFilePage({ withBlob: false });
+
+    expect(() => writeDiagnosticsFile(pageWindow, 'name.json', {})).toThrow(/Blob/);
   });
 });
 
@@ -760,6 +838,10 @@ const createDiagnosticsWindow = (options = {}) => {
   const messages = [];
   const listeners = [];
   const logs = [];
+  const created = [];
+  const blobs = [];
+  const objectUrls = [];
+  const revocations = [];
   const clubResponse = options.clubResponse ?? { items: club.items };
   const network = {
     fetch: vi.fn(() => {
@@ -794,9 +876,34 @@ const createDiagnosticsWindow = (options = {}) => {
     return 'original result';
   };
 
+  class Blob {
+    constructor(parts, settings) {
+      this.parts = parts;
+      this.settings = settings;
+      blobs.push(this);
+    }
+  }
+
   const pageWindow = {
     SBCEligibilityKey: liveEnumFromPinned(),
-    document: { body: createFakeNode(), createElement: () => createFakeNode() },
+    document: {
+      body: createFakeNode(),
+      createElement: (tagName) => {
+        const node = createFakeNode();
+        node.tagName = String(tagName).toUpperCase();
+        created.push(node);
+        return node;
+      },
+    },
+    Blob: options.downloadBlocked === true ? undefined : Blob,
+    URL: {
+      createObjectURL: vi.fn((blob) => {
+        const url = `blob:fsl/${objectUrls.length + 1}`;
+        objectUrls.push({ url, blob });
+        return url;
+      }),
+      revokeObjectURL: vi.fn((url) => revocations.push(url)),
+    },
     services: {
       UTSBCRepository: { getClubItems: async () => clubResponse },
     },
@@ -841,6 +948,10 @@ const createDiagnosticsWindow = (options = {}) => {
     logs,
     network,
     messages,
+    created,
+    blobs,
+    objectUrls,
+    revocations,
     dispatchMessage(data, source = pageWindow) {
       for (const listener of listeners) listener({ data, source });
     },
@@ -956,5 +1067,87 @@ describe('the page bridge exposes one documented diagnostic global', () => {
     expect(call.args[0].type).toBe('object');
     expect(call.args[0].keys.some((entry) => entry.name === 'elgReq')).toBe(true);
     expect(JSON.stringify(report.observer)).not.toContain('3 Leagues & 2 Nations');
+  });
+});
+
+const runBridgeSolve = async (options = {}) => {
+  const fake = createDiagnosticsWindow(options);
+  startPageBridge(fake.pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+  fake.dispatchMessage(COPY_MESSAGE);
+  const controller = new fake.pageWindow.UTSBCSquadDetailPanelViewController();
+  controller.initWithSBCSet({ ...challengeFixture, squad: challengeSquadFixture.squad });
+  mountedButton(fake.view).click();
+  await vi.waitFor(() => {
+    expect(fake.pageWindow.__FSL_DIAGNOSE__()).not.toBeNull();
+  });
+  return fake;
+};
+
+describe('the page bridge writes one evidence file per Solve', () => {
+  it('writes the exact __FSL_DIAGNOSE__() object under the documented file name and relays the block once', async () => {
+    const { pageWindow, logs, messages, blobs, created } = await runBridgeSolve();
+
+    const report = pageWindow.__FSL_DIAGNOSE__();
+    expect(report.download).toEqual({
+      ok: true,
+      file: expect.stringMatching(
+        /^fsl-diagnostics-fsl-build-11-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.json$/
+      ),
+    });
+    expect(report.mount).not.toBeUndefined();
+
+    expect(blobs).toHaveLength(1);
+    expect(blobs[0].settings).toEqual({ type: 'application/json' });
+    expect(JSON.parse(blobs[0].parts[0])).toEqual(report);
+
+    const anchor = created.find((node) => node.tagName === 'A');
+    expect(anchor.download).toBe(report.download.file);
+    expect(anchor.href).toBe('blob:fsl/1');
+
+    const relayed = messages.filter((message) => message.kind === 'diagnostics');
+    expect(relayed).toHaveLength(1);
+    expect(relayed[0].block).toBe(formatDiagnosticsBlock(report));
+    expect(relayed[0].file).toBe(report.download.file);
+    expect(logs.filter((line) => line === relayed[0].block)).toHaveLength(1);
+  });
+
+  it('records a blocked download in the report instead of swallowing it', async () => {
+    const { pageWindow, logs, messages, blobs } = await runBridgeSolve({ downloadBlocked: true });
+
+    const report = pageWindow.__FSL_DIAGNOSE__();
+    expect(report.download.ok).toBe(false);
+    expect(report.download.reason).toMatch(/Blob/);
+    expect(blobs).toHaveLength(0);
+
+    const relayed = messages.filter((message) => message.kind === 'diagnostics');
+    expect(relayed).toHaveLength(1);
+    expect(relayed[0].file).toBeNull();
+    expect(logs.filter((line) => line === relayed[0].block)).toHaveLength(1);
+  });
+
+  it('carries the stall point of a failed club walk into the written evidence', async () => {
+    const { pageWindow, blobs } = await runBridgeSolve({
+      clubResponse: { items: [{ id: 116927068448054 }] },
+    });
+
+    const report = pageWindow.__FSL_DIAGNOSE__();
+    const club = report.stages.find((stage) => stage.id === 'club');
+    const challenge = report.stages.find((stage) => stage.id === 'challenge');
+
+    expect(report.build.id).toBe('fsl-build/11');
+    expect(challenge.detail.challengeId).toBe(25);
+    expect(club.detail).toMatchObject({
+      field: 'items',
+      strategy: 'services.UTSBCRepository.getClubItems',
+    });
+    expect(club.detail.clubRead).toMatchObject({
+      index: 0,
+      pageIndex: 1,
+      pageItems: 1,
+      itemIndexInPage: 0,
+    });
+    expect(club.detail.clubRead.keys).toContain('id');
+    expect(club.reason).toMatch(/assetId/);
+    expect(JSON.parse(blobs[0].parts[0])).toEqual(report);
   });
 });
