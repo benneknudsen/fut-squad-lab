@@ -14,6 +14,7 @@ these, not against hand-written guesses.
 | `sbs-set-16-challenges.json` | `GET /sbs/setId/16/challenges` | A second challenge set, for variety |
 | `sbs-challenge-25-squad.json` | `POST /sbs/challenge/25` | The empty squad template a solution is written into |
 | `club-items.json` | `POST /club` | The club item format (`items` envelope, issue #72) |
+| `club-search-request.json` | `POST /club` (request body) | EA's own whole-club search criteria: field names, values and page size (issue #76) |
 | `chemistry-profiles.json` | `GET /chemistry/profiles` | FC27 chemistry rules |
 | `chemistry-teamlinks.json` | `GET /chemistry/teamlinks` | Linked clubs (cross-team club counting) |
 | `chemistry-observed-squad.json` | `GET /squad/active` (derived) | **EA's own chemistry numbers** for a real squad — the only ground truth we have for the scoring layer |
@@ -24,6 +25,17 @@ descriptor each key decodes to, and the inferred `eligibilityValue` scope mappin
 Issue #16 removed it from `src/` so that the solver core cannot fall back to it;
 production must read the numbers from EA's live `SBCEligibilityKey` enum instead.
 `test/helpers/eligibility.js` is the one place tests re-supply it.
+
+`club-search-request.json` is the request half of the same `/club` call whose
+sanitised response is `club-items.json`: the body EA's own UI sent, plus the
+endpoint path and the capture timestamp. It came from the network capture quoted
+in issue #76 (the `POST /ut/game/fc27/club` entry). It carries **no personal
+data** — the body holds only the eight criteria fields shown (`count`, `ovrMax`,
+`ovrMin`, `searchAltPositions`, `sort`, `sortBy`, `start`, `type`), all
+request-shaping numbers, strings and booleans; there is no persona id, no
+account field and no item in it. The whole-club criteria in
+`src/ea/adapter.js` are pinned to this file by a test, so a drift between the
+capture and the code fails loudly.
 
 ## Sanitisation
 

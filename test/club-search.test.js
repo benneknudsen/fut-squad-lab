@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import club from './fixtures/club-items.json';
+import clubSearchRequest from './fixtures/club-search-request.json';
 import {
   CLUB_ITEM_STRATEGIES,
+  CLUB_SEARCH_OBSERVED_PAGE_FIELD,
   CLUB_SEARCH_PAGE_CAP,
   CLUB_SEARCH_PAGE_SIZE,
+  CLUB_SEARCH_WHOLE_CLUB_FIELDS,
+  diffClubSearchCriteria,
   resolveClubItems,
+  resolveClubSearchPaging,
 } from '../src/ea/adapter.js';
 import { readClubItems } from '../src/ea/club-reader.js';
 import { createTestPacer } from './helpers/pacing.js';
@@ -80,7 +85,7 @@ describe('resolveClubItems search path', () => {
     expect(result.pages).toBe(2);
     expect(result.capped).toBe(false);
     expect(snapshots[0].count).toBe(CLUB_SEARCH_PAGE_SIZE);
-    expect(snapshots[0].offset).toBe(0);
+    expect(snapshots[0][CLUB_SEARCH_OBSERVED_PAGE_FIELD]).toBe(0);
     expect(snapshots[0].ownedOnly).toBe(true);
     expect(result.attempts[0].method.arity).toBe(1);
     expect(result.criteria).toMatchObject({ ok: true, strategy: expect.stringContaining('UTBucketedItemSearchViewModel') });
@@ -123,7 +128,7 @@ describe('resolveClubItems search path', () => {
 
     expect(result.items.map((item) => item.id)).toEqual([1, 2, 3]);
     expect(result.pages).toBe(3);
-    expect(snapshots.map((criteria) => criteria.offset)).toEqual([
+    expect(snapshots.map((criteria) => criteria.start)).toEqual([
       0,
       CLUB_SEARCH_PAGE_SIZE,
       2 * CLUB_SEARCH_PAGE_SIZE,
@@ -240,6 +245,226 @@ describe('resolveClubItems search path', () => {
     for (const attempt of result.attempts) {
       expect(Object.keys(attempt).sort()).toEqual(['id', 'ok', 'reason']);
     }
+  });
+});
+
+// Issue #76: the club walk read 0 items because the criteria we handed EA were
+// not the ones EA's own request carries. The whole-club criteria, the page size
+// and the paging field are adopted from the captured EA request
+// (test/fixtures/club-search-request.json); the paging field is resolved from
+// the criteria object itself when it exposes one, and the captured field is the
+// reported fallback. These tests pin all of that to the fixture.
+describe('the captured EA club search request (#76)', () => {
+  const body = clubSearchRequest.body;
+
+  it('pins the captured request this build adopts as the whole-club criteria', () => {
+    expect(clubSearchRequest.method).toBe('POST');
+    expect(clubSearchRequest.path).toBe('/ut/game/fc27/club');
+    expect(clubSearchRequest.capturedAt).toBe('2026-09-17T19:25:02.625Z');
+    expect(CLUB_SEARCH_PAGE_SIZE).toBe(body.count);
+    expect(body.start).toBe(0);
+    expect(Object.hasOwn(body, CLUB_SEARCH_OBSERVED_PAGE_FIELD)).toBe(true);
+  });
+
+  it('adopts every whole-club criterion with EA\u2019s own value and no field EA did not send', () => {
+    for (const field of CLUB_SEARCH_WHOLE_CLUB_FIELDS) {
+      expect(Object.hasOwn(body, field.name)).toBe(true);
+      expect(body[field.name]).toEqual(field.value);
+    }
+    expect(
+      Object.fromEntries(CLUB_SEARCH_WHOLE_CLUB_FIELDS.map((field) => [field.name, field.value]))
+    ).toEqual({
+      type: 'player',
+      ovrMin: 45,
+      ovrMax: 99,
+      sortBy: 'ovr',
+      sort: 'desc',
+      searchAltPositions: true,
+    });
+  });
+
+  it('sets exactly EA\u2019s own fields and values on the whole-club criteria it hands over', async () => {
+    const { snapshots, search } = pagedSearch([[{ id: 1 }], []]);
+
+    await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
+        services: { Club: { search } },
+      },
+      { pacer: testPacer }
+    );
+
+    const handed = snapshots[0];
+    expect(handed.type).toBe(body.type);
+    expect(handed.ovrMin).toBe(body.ovrMin);
+    expect(handed.ovrMax).toBe(body.ovrMax);
+    expect(handed.sortBy).toBe(body.sortBy);
+    expect(handed.sort).toBe(body.sort);
+    expect(handed.searchAltPositions).toBe(body.searchAltPositions);
+    expect(handed.count).toBe(body.count);
+    expect(handed[CLUB_SEARCH_OBSERVED_PAGE_FIELD]).toBe(body.start);
+    expect(Object.hasOwn(handed, 'untradeables')).toBe(false);
+  });
+});
+
+describe('resolving the paging field (#76)', () => {
+  it('uses the paging property the criteria object itself exposes', () => {
+    expect(resolveClubSearchPaging({ offset: 0, ownedOnly: true })).toMatchObject({
+      field: 'offset',
+      source: 'criteria',
+    });
+
+    const withAccessor = Object.create({
+      get start() {
+        return this._start;
+      },
+      set start(value) {
+        this._start = value;
+      },
+    });
+    withAccessor.ownedOnly = true;
+    expect(resolveClubSearchPaging(withAccessor)).toMatchObject({
+      field: 'start',
+      source: 'criteria',
+    });
+  });
+
+  it('falls back to the field EA\u2019s own captured request carries when the criteria exposes none', () => {
+    const paging = resolveClubSearchPaging({ ownedOnly: true });
+
+    expect(paging.field).toBe(CLUB_SEARCH_OBSERVED_PAGE_FIELD);
+    expect(paging.source).toBe('capture');
+    expect(paging.reason).toMatch(/captured|EA/);
+  });
+
+  it('reports the ambiguity instead of guessing when the criteria exposes both', () => {
+    const paging = resolveClubSearchPaging({ offset: 0, start: 0, ownedOnly: true });
+
+    expect(paging.field).toBe('start');
+    expect(paging.source).toBe('capture');
+    expect(paging.present).toEqual(['offset', 'start']);
+    expect(paging.reason).toMatch(/both|ambiguous/i);
+  });
+
+  it('pages through the resolved field and reports it on the result', async () => {
+    const { snapshots, search } = pagedSearch([[{ id: 1 }], [{ id: 2 }], []]);
+    const criteria = { ownedOnly: true, offset: 0 };
+
+    const result = await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel: { searchCriteria: criteria },
+        services: { Club: { search } },
+      },
+      { pacer: testPacer }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.paging).toMatchObject({ field: 'offset', source: 'criteria' });
+    expect(snapshots.map((entry) => entry.offset)).toEqual([
+      0,
+      CLUB_SEARCH_PAGE_SIZE,
+      2 * CLUB_SEARCH_PAGE_SIZE,
+    ]);
+    expect(Object.hasOwn(snapshots[0], 'start')).toBe(false);
+  });
+});
+
+// Issue #76: the field-by-field diff between how EA's own UI called
+// services.Club.search and what this build hands it is the evidence the next
+// live run reports. Primitive request-shaping values only; never an item.
+describe('the observed-criteria diff (#76)', () => {
+  const observerCall = () => ({
+    method: 'services.Club.search',
+    argumentCount: 1,
+    origin: 'ea',
+    nested: false,
+    thisType: 'object',
+    thisMatchesTarget: true,
+    threw: false,
+    args: [
+      {
+        type: 'object',
+        keys: [
+          { name: '_type', type: 'string', empty: false },
+          { name: '_count', type: 'number' },
+          { name: '_start', type: 'number' },
+          { name: '_untradeables', type: 'string', empty: false },
+        ],
+        values: { type: 'player', count: 91, start: 0, untradeables: 'true' },
+      },
+    ],
+  });
+  const ours = [
+    { name: 'type', value: 'player' },
+    { name: 'count', value: 91 },
+    { name: 'start', value: 0 },
+  ];
+
+  it('reports EA\u2019s own criteria field by field next to ours, values included', () => {
+    const diff = diffClubSearchCriteria({ calls: [observerCall()], dropped: 0 }, ours);
+    const byName = Object.fromEntries(diff.fields.map((entry) => [entry.name, entry]));
+
+    expect(diff.observed).toEqual({ callIndex: 0 });
+    expect(byName.type.status).toBe('same');
+    expect(byName.count.status).toBe('same');
+    expect(byName.start.status).toBe('same');
+    expect(byName.untradeables).toMatchObject({
+      status: 'observed-only',
+      observed: { present: true, value: 'true' },
+    });
+    expect(diff.paging).toEqual({ observedField: 'start', ourField: 'start', same: true });
+  });
+
+  it('flags a paging field EA carried that this build did not hand over', () => {
+    const call = observerCall();
+    call.args[0].keys = [
+      { name: '_type', type: 'string', empty: false },
+      { name: '_offset', type: 'number' },
+    ];
+    call.args[0].values = { type: 'player', offset: 0 };
+
+    const diff = diffClubSearchCriteria({ calls: [call], dropped: 0 }, ours);
+
+    expect(diff.paging).toEqual({ observedField: 'offset', ourField: 'start', same: false });
+    expect(diff.note).toMatch(/offset/);
+    expect(diff.note).toMatch(/start/);
+  });
+
+  it('says the paging field stays unresolved when the observation carried none', () => {
+    const call = observerCall();
+    call.args[0].keys = [{ name: '_type', type: 'string', empty: false }];
+    call.args[0].values = { type: 'player' };
+
+    const diff = diffClubSearchCriteria({ calls: [call], dropped: 0 }, ours);
+
+    expect(diff.paging).toEqual({ observedField: null, ourField: 'start', same: false });
+    expect(diff.note).toMatch(/no own paging field/i);
+    expect(diff.note).toMatch(/unresolved/i);
+  });
+
+  it('names the missing observation and what to open when EA never searched the club', () => {
+    const diff = diffClubSearchCriteria({ calls: [], dropped: 0 }, ours);
+
+    expect(diff.observed).toBeNull();
+    expect(diff.fields.map((entry) => entry.name)).toEqual(['type', 'count', 'start']);
+    expect(diff.fields.every((entry) => entry.status === 'ours-only')).toBe(true);
+    expect(diff.note).toMatch(/Club/);
+  });
+
+  it('never carries a redacted name or a value outside the observer allowlist', () => {
+    const call = observerCall();
+    call.args[0].keys = [
+      { name: '<redacted>', type: 'string', empty: false },
+      { name: '_count', type: 'number' },
+    ];
+    call.args[0].values = { count: 91, personaId: 'distinctive-persona-987' };
+
+    const diff = diffClubSearchCriteria({ calls: [call], dropped: 0 }, ours);
+    const report = JSON.stringify(diff);
+
+    expect(report).not.toContain('distinctive-persona-987');
+    expect(report).not.toContain('<redacted>');
+    expect(diff.fields.map((entry) => entry.name)).toEqual(['type', 'count', 'start']);
   });
 });
 
@@ -383,8 +608,8 @@ describe('the criteria report (#61)', () => {
     expect(reason).toMatch(/timed out/);
     expect(reason).toMatch(/observe=function/);
     expect(reason).toMatch(/unobserve=absent/);
-    expect(reason).toMatch(/count=100/);
-    expect(reason).toMatch(/offset=0/);
+    expect(reason).toMatch(new RegExp(`count=${CLUB_SEARCH_PAGE_SIZE}`));
+    expect(reason).toMatch(/start=0/);
     expect(reason).toMatch(/ownedOnly/);
   });
 
@@ -405,26 +630,26 @@ describe('the criteria report (#61)', () => {
 });
 
 // Issue #65: the criteria handed to EA must carry `untradeables` as a STRING
-// and the named page size, and the club DAO's stats cache is reset when the
-// page provides it. The string type is the deliberate part: EA lower-cases the
-// value, so a boolean would silently look right to a careless test.
-describe('the criteria initialisation (#65)', () => {
+// when that filter is requested, and the named page size; the club DAO's stats
+// cache is reset when the page provides it. Issue #76 narrowed it: the
+// whole-club mode sends no `untradeables` field at all, because EA's own
+// captured request does not carry one.
+describe('the criteria initialisation (#65, #76)', () => {
   const searchWindow = (search, club = {}) => ({
     UTBucketedItemSearchViewModel: { searchCriteria: { ownedOnly: true } },
     services: { Club: { search, ...club } },
   });
 
-  it('sets untradeables as a string, never a boolean', async () => {
+  it('sends no untradeables field at all in the whole-club mode', async () => {
     const { snapshots, search } = pagedSearch([[{ id: 1 }], []]);
 
     const result = await resolveClubItems(searchWindow(search), { pacer: testPacer });
 
     expect(result.ok).toBe(true);
-    expect(typeof snapshots[0].untradeables).toBe('string');
-    expect(snapshots[0].untradeables).toBe('false');
+    expect(Object.hasOwn(snapshots[0], 'untradeables')).toBe(false);
   });
 
-  it('sets the untradeables-only path to "true" and the other path to "false"', async () => {
+  it('sends untradeables as the string "true" only when untradeables-only was asked for', async () => {
     const onlyUntradeables = pagedSearch([[{ id: 1 }], []]);
     await resolveClubItems(searchWindow(onlyUntradeables.search), {
       pacer: testPacer,
@@ -438,7 +663,7 @@ describe('the criteria initialisation (#65)', () => {
       pacer: testPacer,
       onlyUntradeables: false,
     });
-    expect(notOnly.snapshots[0].untradeables).toBe('false');
+    expect(Object.hasOwn(notOnly.snapshots[0], 'untradeables')).toBe(false);
     expect(notOnly.snapshots[0].untradeables).not.toBe(false);
   });
 
@@ -488,16 +713,21 @@ describe('the criteria initialisation (#65)', () => {
     const read = await resolveClubItems(searchWindow(search), { pacer: testPacer });
 
     expect(read.criteria.setFields).toEqual([
-      { name: 'untradeables', type: 'string' },
-      { name: 'count', type: 'number' },
-      { name: 'offset', type: 'number' },
+      { name: 'type', type: 'string', value: 'player' },
+      { name: 'ovrMin', type: 'number', value: 45 },
+      { name: 'ovrMax', type: 'number', value: 99 },
+      { name: 'sortBy', type: 'string', value: 'ovr' },
+      { name: 'sort', type: 'string', value: 'desc' },
+      { name: 'searchAltPositions', type: 'boolean', value: true },
+      { name: 'count', type: 'number', value: CLUB_SEARCH_PAGE_SIZE },
+      { name: 'start', type: 'number', value: 0 },
     ]);
 
     const timedOut = await resolveClubItems(searchWindow(() => neverFires()), {
       observableTimeoutMs: 20,
       pacer: testPacer,
     });
-    expect(timedOut.attempts[0].reason).toContain('untradeables');
+    expect(timedOut.attempts[0].reason).toContain('start');
   });
 
   it('never hands the criteria to EA, or reports set fields, when they cannot be read', async () => {
@@ -657,7 +887,7 @@ describe('the criteria object handed to EA (#70)', () => {
     expect(seen[0]).toEqual({
       count: CLUB_SEARCH_PAGE_SIZE,
       offset: 0,
-      untradeables: 'false',
+      untradeables: undefined,
     });
     expect(Object.hasOwn(criteria, 'count')).toBe(false);
     expect(criteria._count).toBe(5);
@@ -679,6 +909,6 @@ describe('the criteria object handed to EA (#70)', () => {
     );
 
     expect(ownCriteria.count).toBe(CLUB_SEARCH_PAGE_SIZE);
-    expect(ownCriteria.offset).toBe(CLUB_SEARCH_PAGE_SIZE);
+    expect(ownCriteria[CLUB_SEARCH_OBSERVED_PAGE_FIELD]).toBe(CLUB_SEARCH_PAGE_SIZE);
   });
 });

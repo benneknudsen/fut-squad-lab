@@ -541,11 +541,26 @@ describe('resolveObservationTargets', () => {
     expect(OBSERVED_CRITERIA_VALUE_FIELDS).toEqual([
       'count',
       'offset',
+      'start',
+      'ovrMin',
+      'ovrMax',
+      'searchAltPositions',
+      'sort',
       'sortBy',
+      'type',
+      'untradeables',
+      '_count',
+      '_offset',
+      '_start',
+      '_ovrMin',
+      '_ovrMax',
+      '_searchAltPositions',
+      '_sort',
+      '_sortBy',
       '_type',
+      '_untradeables',
       '_category',
       '_position',
-      '_sort',
       '_zone',
       'isExactSearch',
       'preferredPositionOnly',
@@ -564,5 +579,16 @@ describe('the observer report in the staged diagnostics', () => {
     expect(buildDiagnosticsReport(finishedStages(), buildMarker(), null, report).observer).toEqual(
       report
     );
+  });
+
+  it('carries the observed-criteria diff beside the observer captures (#76)', () => {
+    const report = { calls: [], dropped: 0, truncated: false, methods: [] };
+    const criteriaDiff = { observed: null, ours: [], fields: [], paging: null, note: 'none' };
+
+    expect(buildDiagnosticsReport(finishedStages()).criteriaDiff).toBeNull();
+    expect(
+      buildDiagnosticsReport(finishedStages(), buildMarker(), null, report, criteriaDiff)
+        .criteriaDiff
+    ).toEqual(criteriaDiff);
   });
 });

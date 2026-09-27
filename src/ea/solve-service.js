@@ -286,6 +286,10 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
         // the diagnostic shows the field name only when one was read.
         field: clubResult.field ?? null,
         endOfList: clubResult.endOfList === true,
+        // Which paging field the criteria object exposed and which one the
+        // walk used, with the capture fallback's reason (#76); null when the
+        // read never reached the criteria.
+        paging: clubResult.paging ?? null,
         criteria: clubResult.criteria ?? null,
         // Where the club walk saw the item it could not translate (#74): the
         // array field, page, page item count and offending index. Null unless

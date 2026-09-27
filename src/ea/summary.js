@@ -235,16 +235,20 @@ export function completeStages(recorded) {
  *   methods: Array<object> }} [observer] the #64 observer report: how EA's own
  *   methods were called while this session ran, by name and type only; `null`
  *   when no observer was installed
+ * @param {object} [criteriaDiff] the #76 observed-criteria diff: EA's own club
+ *   search criteria field by field next to the criteria this build handed
+ *   over, with the paging verdict; `null` when the reporter has none
  * @returns {{ schema: string, build: object, pacing: object|null,
- *   observer: object|null, ok: boolean, stoppedAt: string|null,
- *   stages: Array<object> }}
+ *   observer: object|null, criteriaDiff: object|null, ok: boolean,
+ *   stoppedAt: string|null, stages: Array<object> }}
  * @throws {Error} when a stage outcome is missing, unknown or duplicated
  */
 export function buildDiagnosticsReport(
   stages,
   build = buildMarker(),
   pacing = null,
-  observer = null
+  observer = null,
+  criteriaDiff = null
 ) {
   if (!Array.isArray(stages)) {
     throw new Error('buildDiagnosticsReport: stages must be an array');
@@ -271,6 +275,7 @@ export function buildDiagnosticsReport(
     build,
     pacing: pacing ?? null,
     observer: observer ?? null,
+    criteriaDiff: criteriaDiff ?? null,
     ok: stopped === null,
     stoppedAt: stopped === null ? null : stopped.id,
     stages: completed,
