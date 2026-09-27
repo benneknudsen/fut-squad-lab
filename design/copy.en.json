@@ -39,7 +39,9 @@
     "solvingLabel": "Solving",
     "copyList": "Copy list",
     "copied": "Copied",
-    "footer": "Search: {formation} · {lineups} lineups · {seconds}s"
+    "footer": "Search: {formation} · {lineups} lineups · {seconds}s",
+    "diagnosticsFile": "Diagnostics saved to {file}",
+    "diagnosticsBlocked": "Diagnostics file could not be saved"
   },
   "summary": {
     "title": "Cost summary",

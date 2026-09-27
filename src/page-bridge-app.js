@@ -32,7 +32,12 @@ import { createSolveService } from './ea/solve-service.js';
 import { createSolveTransport } from './ea/solve-transport.js';
 import { buildMarker } from './ea/build.js';
 import { createMethodObserver, formatObserverCall } from './ea/observer.js';
-import { buildDiagnosticsReport, buildSolveSummary, formatDiagnosticsBlock } from './ea/summary.js';
+import {
+  buildDiagnosticsReport,
+  buildSolveSummary,
+  formatDiagnosticsBlock,
+  formatDiagnosticsFileName,
+} from './ea/summary.js';
 import { CONTENT_SOURCE, CONTENT_TO_PAGE_KINDS, PAGE_SOURCE, PAGE_TO_CONTENT_KINDS } from './ui/messages.js';
 import { FALLBACK_VIA, describeMountShape, findPanelMount } from './ui/panel-mount.js';
 import { mountSolveButton } from './ui/solve-button.js';
@@ -43,6 +48,54 @@ const PATCH_FLAG = '__fslPatchedBySquadLab';
 
 /** The console group the #64 observer logs every captured EA call into. */
 const OBSERVER_GROUP_TITLE = 'FUT Squad Lab — observed EA calls';
+
+/**
+ * Writes the diagnostics report to the user's Downloads folder with a `Blob`
+ * and a synthetic `<a download>` click (#75). The MAIN world already owns the
+ * report, so the evidence file needs no permission, no background round-trip
+ * and no extension API. It throws when the page cannot provide the pieces the
+ * write needs, or when the synthetic anchor cannot be clicked; the caller
+ * records that as the report's `download: { ok: false, reason }` instead of
+ * swallowing it.
+ *
+ * @param {object} pageWindow the page `window`
+ * @param {string} fileName the exact name, from `formatDiagnosticsFileName`
+ * @param {object} report the exact `__FSL_DIAGNOSE__()` object: report, mount
+ *   and download outcome
+ * @throws {Error} when the page has no `Blob`, no `document.createElement` or
+ *   no `URL.createObjectURL`, or when the anchor has no `click`
+ */
+export function writeDiagnosticsFile(pageWindow, fileName, report) {
+  const BlobCtor = pageWindow?.Blob;
+  const document = pageWindow?.document;
+  const urlApi = pageWindow?.URL;
+  if (typeof BlobCtor !== 'function') {
+    throw new Error('the page has no Blob constructor');
+  }
+  if (document === null || document === undefined || typeof document.createElement !== 'function') {
+    throw new Error('the page has no document.createElement');
+  }
+  if (urlApi === null || urlApi === undefined || typeof urlApi.createObjectURL !== 'function') {
+    throw new Error('the page has no URL.createObjectURL');
+  }
+  const href = urlApi.createObjectURL(
+    new BlobCtor([JSON.stringify(report, null, 2)], { type: 'application/json' })
+  );
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = href;
+    anchor.download = fileName;
+    if (typeof anchor.click !== 'function') {
+      throw new Error('the page cannot click a download anchor');
+    }
+    const parent = document.body ?? null;
+    if (parent !== null && typeof parent.appendChild === 'function') parent.appendChild(anchor);
+    anchor.click();
+    if (parent !== null && typeof anchor.remove === 'function') anchor.remove();
+  } finally {
+    if (typeof urlApi.revokeObjectURL === 'function') urlApi.revokeObjectURL(href);
+  }
+}
 
 /**
  * Starts the bridge in the page's `window`.
@@ -212,8 +265,28 @@ export function startPageBridge(pageWindow, options = {}) {
         outcome.pacing,
         observer.report()
       );
-      state.diagnostics = { ...diagnostics, mount: state.mount };
-      pageWindow.console?.log?.(formatDiagnosticsBlock(state.diagnostics));
+      // #75: one evidence file per Solve, written from the world that already
+      // owns the report, and the same block relayed to the isolated console
+      // between its own markers. A blocked write is recorded inside the report
+      // itself, never swallowed. The file carries the exact object the global
+      // returns: the staged report, the mount shape and this download outcome.
+      const file = formatDiagnosticsFileName(diagnostics.build.id);
+      state.diagnostics = { ...diagnostics, mount: state.mount, download: { ok: true, file } };
+      try {
+        writeDiagnosticsFile(pageWindow, file, state.diagnostics);
+      } catch (error) {
+        state.diagnostics = {
+          ...state.diagnostics,
+          download: { ok: false, reason: error.message },
+        };
+      }
+      const block = formatDiagnosticsBlock(state.diagnostics);
+      pageWindow.console?.log?.(block);
+      post(PAGE_TO_CONTENT_KINDS.DIAGNOSTICS, {
+        block,
+        file: state.diagnostics.download.ok === true ? file : null,
+        download: state.diagnostics.download,
+      });
       post(PAGE_TO_CONTENT_KINDS.SUMMARY, {
         summary: outcome.read.summary,
         challengeStrategy: outcome.read.challengeStrategy,
