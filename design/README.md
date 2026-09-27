@@ -17,7 +17,7 @@ stylesheet must survive that app changing between game versions.
 | 1 | `README.md` (this file) | Scope, principles, token contract, states, acceptance criteria |
 | 2 | `tokens.css` | The complete token set. **Single source of truth** for colour, type, space, radii, motion |
 | 3 | `components.md` | Every component with props, states and exact values |
-| 4 | `copy.da.json` / `copy.en.json` | All 202 UI strings in Danish and English. No string is hardcoded |
+| 4 | `copy.da.json` / `copy.en.json` | All 204 UI strings in Danish and English. No string is hardcoded |
 | 5 | `reference/vision.html` | The visual reference. Open it in a browser — read it, don't copy it |
 | 6 | `assets/` | The mark, its 16 px optical variant, the app-icon tiles, the two lockups, and the PNG exports. `logo.html` at the project root presents them |
 | 7 | `tools/` | Two checks you can run: contrast measurement and a functional DOM test |
@@ -137,7 +137,7 @@ Three rules that hold across all six:
 
 ## 6. Copy contract
 
-- 202 keys per language, identical key sets, identical placeholders in both files. The smoke
+- 204 keys per language, identical key sets, identical placeholders in both files. The smoke
   test verifies that the reference page's inline copy is a faithful subset of both files.
 - Nested, dotted paths (`states.noSolution.fixBuy`), placeholder syntax `{count}`.
 - **All strings are translatable. Nothing is hardcoded**, including the micro-labels
@@ -217,7 +217,7 @@ no real player's identity is reproduced.
 | Locked / tradeable / untradeable / duplicate / concept distinguishable without colour | Glyph + word + colour on every chip; locked rows use a neutral outline and a pin, never a warning colour | Test asserts every chip has a glyph, a word and a description |
 | Numbers use tabular figures and align in columns | `--fsl-font-mono` + `font-variant-numeric: tabular-nums` on every figure; fixed-width cost column, right-aligned | Contrast/typography tokens; test asserts the tabular declaration is present |
 | Panel reads as belonging in a dark game UI | Own dark token set, three surfaces, hairline separations, condensed uppercase headings, no light-mode assumptions | `reference/vision.html` shows it against a simulated host column |
-| All copy in Danish and English | 202 keys × 2, identical sets and placeholders | Test asserts subset fidelity and that no language leaks into the other |
+| All copy in Danish and English | 204 keys × 2, identical sets and placeholders | Test asserts subset fidelity and that no language leaks into the other |
 | Icon legible at 16 px | A re-cut 16 px file: outline 2.6, three nodes, connectors 2.4 — the scaled master fuses into a blob | Shown at 16 / 32 / 48 / 128 px on a checkerboard and on light and dark toolbar strips in `logo.html` |
 | Focus states and keyboard navigation specified for rows and the alternatives | Full key map in §8 and in `components.md` §10 | Test asserts focusable toggles, `aria-expanded`, `aria-controls`, `aria-pressed` |
 | Zero EA-owned trademarks, logos or assets | Placeholder identities only; mark is original | Test greps for EA marks, crest and likeness references |

@@ -39,7 +39,9 @@
     "solvingLabel": "Løser",
     "copyList": "Kopiér liste",
     "copied": "Kopieret",
-    "footer": "Søgning: {formation} · {lineups} opstillinger · {seconds}s"
+    "footer": "Søgning: {formation} · {lineups} opstillinger · {seconds}s",
+    "diagnosticsFile": "Diagnostik gemt i {file}",
+    "diagnosticsBlocked": "Diagnostikfilen kunne ikke gemmes"
   },
   "summary": {
     "title": "Prisoversigt",
