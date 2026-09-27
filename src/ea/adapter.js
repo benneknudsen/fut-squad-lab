@@ -68,7 +68,7 @@
  * This file is pure data and pure functions. No DOM, no chrome APIs, no network.
  */
 
-import { describeMethodShape, describeOwnPropertyTypes } from '../shape.js';
+import { describeMethodShape, describeOwnPropertyTypes, redactName } from '../shape.js';
 import { DEFAULT_OBSERVABLE_TIMEOUT_MS, isObservable, observeOnce } from './observable.js';
 import { CALL_KINDS, EA_CALL_FAILURE_NAME, defaultPacer } from './pacing.js';
 
@@ -746,12 +746,30 @@ const isFiniteNumberArray = (value) =>
 
 const isNullablePrice = (value) => value === null || value === undefined || Number.isFinite(value);
 
+/**
+ * The key names a rejected raw item carries, sorted and renamed through the
+ * shared paste-safety list (#74): a live report must say what EA actually sent
+ * without ever carrying a value, and sorting the names makes two runs diffable.
+ * A name the redaction list marks sensitive stays visible as `<redacted>`.
+ */
+const carriedKeys = (rawItem) =>
+  Object.keys(rawItem)
+    .map((name) => redactName(name))
+    .sort();
+
+const rejectedItemError = (rawItem, field, message) => {
+  const keys = carriedKeys(rawItem);
+  const error = new Error(
+    `${message}; rejected field ${field}; it carries keys [${keys.join(', ')}]; the /club` +
+      ' payload shape may have changed'
+  );
+  error.rawItemShape = { field, keys };
+  return error;
+};
+
 const requireRawField = (rawItem, field, isValid, expected) => {
   if (!isValid(rawItem[field])) {
-    throw new Error(
-      `normaliseClubItem: raw item must carry ${expected}; the /club payload shape may have` +
-        ' changed'
-    );
+    throw rejectedItemError(rawItem, field, `normaliseClubItem: raw item must carry ${expected}`);
   }
 };
 
@@ -766,9 +784,11 @@ const readRoleList = (rawItem, field) => {
   const value = rawItem[field];
   if (value === undefined || value === null) return [];
   if (!isFiniteNumberArray(value)) {
-    throw new Error(
-      `normaliseClubItem: raw item must carry ${field} as a dense array of finite numbers` +
-        ' when present; the /club payload shape may have changed'
+    throw rejectedItemError(
+      rawItem,
+      field,
+      `normaliseClubItem: raw item must carry ${field} as a dense array of finite numbers when` +
+        ' present'
     );
   }
   return [...value];
@@ -796,8 +816,11 @@ const readRoleList = (rawItem, field) => {
  * (finite number, non-empty string, array of position strings, or boolean).
  * This boundary is the only point where the raw shape is known, so a missing
  * field throws here with that context instead of silently producing an
- * `undefined` that only surfaces later as a confusing solver error. The four
- * price fields are the exception: `marketAverage`, `marketDataMinPrice`,
+ * `undefined` that only surfaces later as a confusing solver error. A rejected
+ * item additionally reports the field that failed and the key names it does
+ * carry, sorted and renamed through the shared paste-safety list, so the next
+ * live log states what EA actually sent without carrying any value (#74).
+ * The four price fields are the exception: `marketAverage`, `marketDataMinPrice`,
  * `marketDataMaxPrice` and `discardValue` normalise a `null` or absent value
  * to `null`, meaning "price unknown", never to 0.
  *
@@ -2314,7 +2337,14 @@ const callReadMethod = async (found, base, callArguments, label, timeoutMs, paci
     );
     return { ok: true, event };
   } catch (error) {
-    return { ok: false, reason: failureReason(error) };
+    return {
+      ok: false,
+      reason: failureReason(error),
+      // The HTTP status the observable reported, kept beside the reason so a
+      // caller can label EA's refusal (#74): a status 426 is EA saying no, not
+      // an opaque throw, and the status is a number, never personal data.
+      status: Number.isFinite(error?.status) ? error.status : null,
+    };
   }
 };
 
@@ -2411,6 +2441,7 @@ const runPagedSearch = async ({
   const snapshot = resolution.owned === true ? null : snapshotSetFields(criteria);
   const statsCache = resetClubStatsCache(pageWindow);
   const items = [];
+  const pageItemCounts = [];
   let offset = 0;
   let pages = 0;
   let setFields = [];
@@ -2438,14 +2469,33 @@ const runPagedSearch = async ({
         );
       }
       const pageItems = clubItemsOf(event.payload);
+      pageItemCounts.push(pageItems.length);
       items.push(...pageItems);
       // A page that returns nothing ends the walk, whatever its end-of-list
       // flag says: there is no next item to ask for.
       if (pageItems.length === 0) {
-        return { items, pages, capped: false, capReason: null, endOfList: false, setFields, statsCache };
+        return {
+          items,
+          pages,
+          pageItems: pageItemCounts,
+          capped: false,
+          capReason: null,
+          endOfList: false,
+          setFields,
+          statsCache,
+        };
       }
       if (isClubEndOfList(event.payload)) {
-        return { items, pages, capped: false, capReason: null, endOfList: true, setFields, statsCache };
+        return {
+          items,
+          pages,
+          pageItems: pageItemCounts,
+          capped: false,
+          capReason: null,
+          endOfList: true,
+          setFields,
+          statsCache,
+        };
       }
       // The offset advances by the page size this project asked EA for, never
       // by how many items the page happened to yield: EA may clamp or trim a
@@ -2456,6 +2506,7 @@ const runPagedSearch = async ({
     return {
       items,
       pages,
+      pageItems: pageItemCounts,
       capped: true,
       capReason:
         `the page cap of ${CLUB_SEARCH_PAGE_CAP} was reached before the search stopped yielding` +
@@ -2510,8 +2561,10 @@ const runPagedSearch = async ({
  *   reference's option of the same name (#65)
  * @returns {Promise<{ ok: boolean, items: Array<object>, strategy: string|null,
  *   attempts: Array<{id: string, ok: boolean, reason: string|null,
- *   method?: object}>, pages: number, capped: boolean, capReason: string|null,
- *   criteria: object|null }>}
+ *   method?: object}>, pages: number, pageItems: Array<number>, capped: boolean,
+ *   capReason: string|null, criteria: object|null }>} `pageItems` is the item
+ *   count of every page the walk read, in order, so a rejected item can be
+ *   located in its page (#74)
  */
 export async function resolveClubItems(pageWindow, options = {}) {
   const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
@@ -2565,6 +2618,7 @@ export async function resolveClubItems(pageWindow, options = {}) {
           strategy: strategy.id,
           attempts,
           pages: search.pages,
+          pageItems: search.pageItems,
           capped: search.capped,
           capReason: search.capReason,
           field: CLUB_ITEM_ARRAY_FIELD,
@@ -2597,12 +2651,14 @@ export async function resolveClubItems(pageWindow, options = {}) {
       continue;
     }
     attempt.ok = true;
+    const items = clubItemsOf(event.payload);
     return {
       ok: true,
-      items: clubItemsOf(event.payload),
+      items,
       strategy: strategy.id,
       attempts,
       pages: 1,
+      pageItems: [items.length],
       capped: false,
       capReason: null,
       field: CLUB_ITEM_ARRAY_FIELD,
@@ -2616,6 +2672,7 @@ export async function resolveClubItems(pageWindow, options = {}) {
     strategy: null,
     attempts,
     pages: 0,
+    pageItems: [],
     capped: false,
     capReason: null,
     field: null,
@@ -3027,7 +3084,10 @@ const loadChallengeFromSetApi = async ({ pageWindow, strategy, timeoutMs, pacer 
       { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
     );
     if (!listing.ok) {
-      failures.push(`${label}: ${listing.reason}`);
+      const setId = readEntityId(set);
+      const idPart = setId === null ? '' : ` (set id ${setId})`;
+      const statusPart = listing.status === null ? '' : ` [HTTP ${listing.status}]`;
+      failures.push(`${label}${idPart}${statusPart}: ${listing.reason}`);
       continue;
     }
     const challenges = readSetChallenges(set);

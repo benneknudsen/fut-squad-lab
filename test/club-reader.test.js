@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import club from './fixtures/club-items.json';
+import { normaliseClubItem } from '../src/ea/adapter.js';
 import { readClubItems } from '../src/ea/club-reader.js';
 import { buildPool } from '../src/solver/candidates.js';
 
@@ -79,5 +80,77 @@ describe('readClubItems', () => {
   it('propagates the adapter validation naming the offending raw field', () => {
     const { rating, ...withoutRating } = club.items[0];
     expect(() => readClubItems({ items: [withoutRating] })).toThrow(/rating/);
+  });
+});
+
+// Issue #74: the fsl-build/10 live run threw from normaliseClubItem with only
+// "raw item must carry a finite assetId" — no key names, no page, no index — so
+// the next report could not say what EA actually sent. These tests pin the
+// item-shape report and the club-walk location report.
+describe('the club item shape report (#74)', () => {
+  const SENTINEL_ID = 900900900;
+
+  it('names the rejected field and the key names the item carries, never a value', () => {
+    const { assetId, ...item } = { ...club.items[0], id: SENTINEL_ID };
+
+    let message = null;
+    try {
+      normaliseClubItem(item);
+    } catch (error) {
+      message = error.message;
+    }
+
+    expect(message).toMatch(/assetId/);
+    expect(message).toMatch(/keys \[/);
+    expect(message).toContain('id');
+    expect(message).toContain('rating');
+    expect(message).not.toContain(String(SENTINEL_ID));
+    expect(message).not.toContain(String(club.items[0].marketAverage));
+    expect(message).not.toContain(String(club.items[0].id));
+  });
+
+  it('reports sensitive key names through the shared redaction list and never their values', () => {
+    const { assetId, ...item } = {
+      ...club.items[0],
+      marketAverage: 987654321,
+      discardValue: 123456789,
+      lastSalePrice: 111222333,
+    };
+
+    let message = null;
+    try {
+      normaliseClubItem(item);
+    } catch (error) {
+      message = error.message;
+    }
+
+    expect(message).toContain('<redacted>');
+    expect(message).not.toContain('987654321');
+    expect(message).not.toContain('123456789');
+    expect(message).not.toContain('111222333');
+  });
+
+  it('locates the offending item in its page when the caller reports the page sizes', () => {
+    const { assetId, ...withoutAssetId } = club.items[0];
+
+    let caught = null;
+    try {
+      readClubItems({ items: [club.items[1], withoutAssetId] }, { pageItems: [1, 1] });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught.clubRead).toMatchObject({
+      field: 'items',
+      index: 1,
+      pageIndex: 2,
+      pageItems: 1,
+      itemIndexInPage: 0,
+    });
+    expect(caught.clubRead.keys).toContain('id');
+    expect(caught.message).toMatch(/assetId/);
+    expect(caught.message).toMatch(/page 2/);
+    expect(caught.message).toContain('array field items');
   });
 });
