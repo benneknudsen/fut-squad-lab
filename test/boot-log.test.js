@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { BUILD_ID } from '../src/ea/build.js';
 import { startPageBridge } from '../src/page-bridge-app.js';
+import { OWN_EXTENSION_ID, OWN_MODULE_URL } from './helpers/bootstrap.js';
 import { TEST_NONCE } from './helpers/nonce.js';
-import { createChannel, startLoader, startRelay, OWN_MODULE_URL } from './helpers/channel.js';
+import { createChannel, startLoader, startRelay } from './helpers/channel.js';
 
 // Issue #102: one line per stage of the bootstrap, so a pasted console log says
 // which stage the boot reached and which one it did not. Every assertion here is
@@ -28,6 +29,23 @@ const PANEL_GLOBAL = 'UTSBCSquadDetailPanelViewController';
 
 const startBridge = (channel, options = {}) =>
   startPageBridge(channel.window, { nonce: TEST_NONCE, hookPollMs: 1, hookTimeoutMs: 20, ...options });
+
+/**
+ * Both worlds on one page, in production order, until the module has reported
+ * itself. #105 fixed that order: the isolated relay is a manifest content script
+ * and boots first, and it is the relay that injects the MAIN-world loader, so the
+ * loader's body cannot run before the relay has booted. Its hello line therefore
+ * lands after the relay's own three.
+ */
+const bootBothWorlds = async (channel) => {
+  startRelay(channel);
+  startLoader(channel);
+  await channel.settle();
+  await vi.waitFor(() => {
+    expect(channel.logged).toContain(MODULE_LOADED);
+  });
+  await channel.settle();
+};
 
 /** Runs the hook poll to its deadline without waiting for it in real time. */
 const withFakeTimers = (run) => {
@@ -57,10 +75,41 @@ describe('the isolated relay boot log', () => {
     expect(channel.logged[0]).toBe(BUILDING);
   });
 
+  it('writes nothing from the MAIN world until the injected loader has run', () => {
+    // #105: injecting the loader is not the same as running it. A browser fetches
+    // the element and evaluates it on a later turn, so the relay's boot completes
+    // with the loader still pending — and a log that claimed the loader's line here
+    // would be claiming something that has not happened.
+    const channel = createChannel();
+
+    startRelay(channel);
+
+    expect(channel.injectedScripts.map((script) => script.src)).toEqual([
+      `chrome-extension://${OWN_EXTENSION_ID}/src/page-bridge.js`,
+    ]);
+    expect(channel.logged).not.toContain(HELLO_ACKED);
+  });
+
+  it('says the loader did not run when the page refuses the injected script', () => {
+    // The one new way this boot can fail with nothing on the console: the page's
+    // own CSP refusing the extension origin, or the file not being served. Without
+    // this line it is indistinguishable from a boot that is still waiting.
+    const channel = createChannel();
+
+    startRelay(channel);
+    channel.injectedScripts[0].onerror();
+
+    expect(channel.warned).toEqual([
+      `[FUT Squad Lab] main-world loader did not run: ` +
+        `chrome-extension://${OWN_EXTENSION_ID}/src/page-bridge.js was refused or not found`,
+    ]);
+    expect(channel.logged).not.toContain(HELLO_ACKED);
+  });
+
   it('writes no second handshake line when the loader asks again with its hello', () => {
-    // The stage completed once, when the relay put the module URL on the
-    // channel by itself. Answering the loader's hello is the same stage, so it
-    // must not add a line: a boot log that repeats is one nobody reads.
+    // The stage completed once, when the relay put the module URL on the channel by
+    // itself. Answering the loader's hello is the same stage, so it must not add a
+    // line: a boot log that repeats is one nobody reads.
     const channel = createChannel();
     startRelay(channel);
 
@@ -71,8 +120,8 @@ describe('the isolated relay boot log', () => {
   });
 
   it('writes nothing at all when the relay never starts', () => {
-    // The negative twin of every line above: a page this extension never
-    // injected has an empty console, which is what "not booted" looks like.
+    // The negative twin of every line above: a page this extension never injected
+    // has an empty console, which is what "not booted" looks like.
     const channel = createChannel();
 
     expect(channel.logged).toEqual([]);
@@ -157,8 +206,11 @@ describe('the classic MAIN-world loader boot log', () => {
   it('writes the hello line when it announces itself, and the module line once the module is loaded', async () => {
     const channel = createChannel();
 
+    // #105: the loader can only exist because the relay injected it, so the
+    // relay always goes first. Production order, and the only order.
+    startRelay(channel);
     startLoader(channel);
-    expect(channel.logged).toEqual([HELLO_ACKED]);
+    expect(channel.logged).toEqual([BUILDING, RELAY_READY, HANDSHAKE_SENT, HELLO_ACKED]);
 
     channel.post(moduleMessage());
     channel.drain();
@@ -168,7 +220,10 @@ describe('the classic MAIN-world loader boot log', () => {
 
     // The loader's line comes after the module's own stages: it reports the
     // stage that is complete once the module has both loaded and been started.
-    expect(channel.logged.slice(0, 5)).toEqual([
+    expect(channel.logged.slice(0, 8)).toEqual([
+      BUILDING,
+      RELAY_READY,
+      HANDSHAKE_SENT,
       HELLO_ACKED,
       HOOK_FOUND,
       OBSERVER_INSTALLED,
@@ -179,6 +234,7 @@ describe('the classic MAIN-world loader boot log', () => {
 
   it('writes no module line when the import fails, and says why it failed', async () => {
     const channel = createChannel();
+    startRelay(channel);
     startLoader(channel, {
       importModule: async () => {
         throw new Error('the module is not on disk');
@@ -191,7 +247,7 @@ describe('the classic MAIN-world loader boot log', () => {
       expect(channel.warned.join('\n')).toContain('the module is not on disk');
     });
 
-    expect(channel.logged).toEqual([HELLO_ACKED]);
+    expect(channel.logged).not.toContain(MODULE_LOADED);
   });
 });
 
@@ -199,22 +255,13 @@ describe('one boot, one console: both worlds on the same page window', () => {
   it('writes every boot stage exactly once, in the order the stages complete', async () => {
     const channel = createChannel();
 
-    // Production order at `document_start`: the MAIN-world loader runs its body
-    // synchronously, while the isolated relay's first line can only come out of
-    // the async import of its module. So the loader's hello is the first line.
-    startLoader(channel);
-    startRelay(channel);
-    await channel.settle();
-    await vi.waitFor(() => {
-      expect(channel.logged).toContain(MODULE_LOADED);
-    });
-    await channel.settle();
+    await bootBothWorlds(channel);
 
     expect(channel.logged).toEqual([
-      HELLO_ACKED,
       BUILDING,
       RELAY_READY,
       HANDSHAKE_SENT,
+      HELLO_ACKED,
       HOOK_FOUND,
       OBSERVER_INSTALLED,
       READY,
@@ -227,13 +274,8 @@ describe('one boot, one console: both worlds on the same page window', () => {
     // The mount line is the MAIN world's own post, relayed by the relay — which
     // is why the bridge does not also write it locally.
     const channel = createChannel();
-    startLoader(channel);
-    startRelay(channel);
-    await channel.settle();
-    await vi.waitFor(() => {
-      expect(channel.logged).toContain(MODULE_LOADED);
-    });
-    await channel.settle();
+
+    await bootBothWorlds(channel);
 
     expect(channel.logged.some((line) => line.includes('button mounted'))).toBe(false);
 
@@ -250,8 +292,8 @@ describe('one boot, one console: both worlds on the same page window', () => {
   it('carries a MAIN-world error to the relay console, so a refused hook is not silent', async () => {
     const channel = createChannel({ withHook: false });
 
-    startLoader(channel);
     startRelay(channel);
+    startLoader(channel);
     await channel.settle();
     await vi.waitFor(() => {
       expect(channel.warned).toHaveLength(1);
@@ -267,13 +309,7 @@ describe('one boot, one console: both worlds on the same page window', () => {
   it('keeps the session nonce out of every line of the boot log', async () => {
     const channel = createChannel();
 
-    startLoader(channel);
-    startRelay(channel);
-    await channel.settle();
-    await vi.waitFor(() => {
-      expect(channel.logged).toContain(MODULE_LOADED);
-    });
-    await channel.settle();
+    await bootBothWorlds(channel);
     channel.openPanel();
     channel.drain();
 

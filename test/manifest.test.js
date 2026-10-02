@@ -13,23 +13,38 @@ const EA_MATCH = 'https://www.ea.com/*';
 const scriptFor = (jsPath) =>
   manifest.content_scripts.find((entry) => entry.js.includes(jsPath));
 
+const [war] = manifest.web_accessible_resources;
+const exposedResources = manifest.web_accessible_resources.flatMap((entry) => entry.resources);
+
+/** Every one of these is a resource the page must be able to load. */
+const expectExposed = (...resources) => {
+  for (const resource of resources) expect(war.resources).toContain(resource);
+};
+
 describe('manifest.json', () => {
   it('is Manifest V3', () => {
     expect(manifest.manifest_version).toBe(3);
   });
 
-  it('injects exactly the isolated relay and the MAIN-world bridge on the EA app', () => {
-    expect(manifest.content_scripts).toHaveLength(2);
+  it('injects the isolated relay on the EA app and nothing else', () => {
+    // #105: the MAIN-world loader is not declared here any more, and that is the
+    // point of the change rather than an accident. Chrome creates no `<script>`
+    // element for a manifest-declared MAIN-world content script, so
+    // `document.currentScript` is `null` in it — the loader could not resolve its
+    // own extension id, and #85's gate refused every message including the relay's
+    // own. The isolated relay injects it instead, as a real element. If this ever
+    // grows a `world: "MAIN"` entry again, the loader has no id again.
+    expect(manifest.content_scripts).toHaveLength(1);
     expect(scriptFor('src/content.js').matches).toEqual([EA_MATCH]);
     expect(scriptFor('src/content.js').world).toBeUndefined();
-    expect(scriptFor('src/page-bridge.js').matches).toEqual([EA_MATCH]);
-    expect(scriptFor('src/page-bridge.js').world).toBe('MAIN');
+    expect(scriptFor('src/page-bridge.js')).toBeUndefined();
+    expect(
+      manifest.content_scripts.filter((entry) => entry.world !== undefined),
+    ).toEqual([]);
   });
 
-  it('runs both scripts at document_start', () => {
-    for (const entry of manifest.content_scripts) {
-      expect(entry.run_at).toBe('document_start');
-    }
+  it('runs the isolated relay at document_start', () => {
+    expect(scriptFor('src/content.js').run_at).toBe('document_start');
   });
 
   it('claims no permissions at all: the page makes its own authenticated calls', () => {
@@ -53,36 +68,35 @@ describe('manifest.json', () => {
 
   it('exposes the runtime assets only to the EA app', () => {
     expect(manifest.web_accessible_resources).toHaveLength(1);
-    const [war] = manifest.web_accessible_resources;
     expect(war.matches).toEqual([EA_MATCH]);
-    for (const resource of [
+    // #105: the MAIN-world loader is a web-accessible resource now, because the
+    // page is what has to be able to load it. One entry, and it is the loader
+    // and nothing else — this is the only file the injection added.
+    expectExposed(
       'design/tokens.css',
       'design/copy.en.json',
       'design/copy.da.json',
       'src/ui/styles.css',
       'src/content-app.js',
+      'src/page-bridge.js',
       'src/page-bridge-app.js',
-    ]) {
-      expect(war.resources).toContain(resource);
-    }
+    );
   });
 
   it('exposes no captured payload fixture to the page', () => {
     // `test/fixtures/` holds real captures off a live club, sanitised. They are
     // not loaded at runtime and must never become fetchable from EA's page.
-    const exposed = manifest.web_accessible_resources
-      .flatMap((entry) => entry.resources)
-      .filter((resource) => /(?:^|\/)test\/fixtures\//.test(resource));
+    const exposed = exposedResources.filter((resource) =>
+      /(?:^|\/)test\/fixtures\//.test(resource),
+    );
 
     expect(exposed, 'web_accessible_resources must not expose a test fixture').toEqual([]);
   });
 
   it('exposes only extension-root-relative paths, so no entry can reach outside the package', () => {
-    const exposed = manifest.web_accessible_resources
-      .flatMap((entry) => entry.resources)
-      .filter(
-        (resource) => resource.startsWith('/') || resource.split('/').includes('..'),
-      );
+    const exposed = exposedResources.filter(
+      (resource) => resource.startsWith('/') || resource.split('/').includes('..'),
+    );
 
     expect(exposed, 'web_accessible_resources must be relative to the extension root').toEqual([]);
   });
@@ -94,19 +108,20 @@ describe('manifest.json', () => {
     // resource only when `extension.guid() == target_url.host()`), so the URL
     // becomes `chrome-extension://<guid>/src/page-bridge-app.js`.
     //
-    // `src/page-bridge.js` is a manifest content script, not a web-accessible
-    // resource, so its own `document.currentScript.src` keeps the static id and
-    // the MAIN world can never learn the GUID. The id pin in that script could
-    // therefore not survive the switch: it would either refuse every URL or stop
-    // checking the id at all. See #89 for the full write-up.
+    // #105 moved where the loader's id comes from, and with it this reasoning. The
+    // id is read from the `<script>` element the relay injects, and that element is
+    // now a web-accessible resource — so a dynamic URL would hand the loader the
+    // GUID while the relay hands over the static id from `chrome.runtime.getURL`,
+    // and the pin in `src/page-bridge.js` would refuse every message again. Same
+    // conclusion as #89 reached, and the same reason: the two sides of the gate
+    // have to agree on which host names this extension. See #98 for the switch.
     for (const entry of manifest.web_accessible_resources) {
       expect(entry.use_dynamic_url ?? false).toBe(false);
     }
   });
 
   it('exposes every module the MAIN-world bridge imports', () => {
-    const [war] = manifest.web_accessible_resources;
-    for (const module of [
+    expectExposed(
       'src/ea/adapter.js',
       'src/ea/build.js',
       'src/ea/challenge-reader.js',
@@ -119,27 +134,21 @@ describe('manifest.json', () => {
       'src/ui/solve-button.js',
       'src/solver/candidates.js',
       'src/solver/prices.js',
-    ]) {
-      expect(war.resources).toContain(module);
-    }
+    );
   });
 
   it('exposes the solver worker and every module it imports', () => {
-    const [war] = manifest.web_accessible_resources;
-    for (const module of [
+    expectExposed(
       'src/solver/worker.js',
       'src/solver/worker-protocol.js',
       'src/solver/solve.js',
       'src/solver/validate.js',
       'src/solver/chemistry.js',
       'src/solver/requirements.js',
-    ]) {
-      expect(war.resources).toContain(module);
-    }
+    );
   });
 
   it('lists every module reachable from the declared entry points', () => {
-    const [war] = manifest.web_accessible_resources;
     const entryPoints = [
       ...manifest.content_scripts.flatMap((entry) => entry.js),
       ...war.resources,

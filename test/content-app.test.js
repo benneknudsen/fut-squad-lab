@@ -1,16 +1,23 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import copyDa from '../design/copy.da.json';
 import copyEn from '../design/copy.en.json';
 import {
   bridgeModuleMessage,
+  injectBridgeLoader,
   injectStylesheets,
   loadCopyMessage,
   mintSessionNonce,
   startContentApp,
 } from '../src/content-app.js';
 import { BUILD_ID } from '../src/ea/build.js';
-import { NONCE_BYTES, formatNonce } from '../src/ui/messages.js';
+import {
+  BRIDGE_LOADER_FILE,
+  NONCE_BYTES,
+  formatNonce,
+} from '../src/ui/messages.js';
 import { TEST_NONCE, stubCrypto } from './helpers/nonce.js';
 
 const fakeChrome = () => ({
@@ -96,6 +103,90 @@ describe('injectStylesheets', () => {
       'chrome-extension://abc/design/tokens.css',
       'chrome-extension://abc/src/ui/styles.css',
     ]);
+  });
+});
+
+// #105: this injection is the only thing that puts the MAIN-world loader into the
+// page, and the loader's whole ability to identify its own extension rests on the
+// element created here.
+describe('injectBridgeLoader', () => {
+  const createDocument = () => {
+    const appended = [];
+    const created = [];
+    return {
+      appended,
+      created,
+      document: {
+        createElement: (tagName) => {
+          const node = { tagName: tagName.toUpperCase(), src: '', onerror: null };
+          created.push(tagName);
+          return node;
+        },
+        // The `src` is read as it was the moment the element was connected, which is
+        // what a browser would have started fetching by then.
+        head: {
+          appendChild: (node) => {
+            appended.push({ ...node, srcAtInsertion: node.src });
+            return node;
+          },
+        },
+      },
+    };
+  };
+
+  it('connects exactly one script element, at this extension URL for this loader', () => {
+    const fake = createDocument();
+
+    const element = injectBridgeLoader(fake.document, fakeChrome());
+
+    expect(fake.created).toEqual(['script']);
+    expect(fake.appended).toHaveLength(1);
+    expect(fake.appended[0].tagName).toBe('SCRIPT');
+    expect(element.src).toBe(`chrome-extension://abc/${BRIDGE_LOADER_FILE}`);
+  });
+
+  it('sets the src before the element reaches the document', () => {
+    // A `<script>` connected with no `src` fetches the page's own URL, and a
+    // browser starts fetching the moment it is connected — so appending first and
+    // assigning after would run EA's document instead of the loader, with nothing
+    // on the console to say so.
+    const fake = createDocument();
+
+    injectBridgeLoader(fake.document, fakeChrome());
+
+    expect(fake.appended[0].srcAtInsertion).toBe(`chrome-extension://abc/${BRIDGE_LOADER_FILE}`);
+  });
+
+  it('reports the refusal through onerror, the one channel the page does not own', () => {
+    const fake = createDocument();
+    const failures = [];
+
+    const element = injectBridgeLoader(fake.document, fakeChrome(), (url) => failures.push(url));
+    expect(element.onerror).toBeTypeOf('function');
+
+    element.onerror();
+
+    // This is the failure #105 could otherwise have made invisible: the page's own
+    // CSP refusing the extension origin, so the loader never runs and the button
+    // never appears.
+    expect(failures).toEqual([`chrome-extension://abc/${BRIDGE_LOADER_FILE}`]);
+  });
+
+  it('still injects without a failure handler, rather than throwing on the way out', () => {
+    const fake = createDocument();
+
+    expect(() => injectBridgeLoader(fake.document, fakeChrome())).not.toThrow();
+    expect(fake.appended).toHaveLength(1);
+  });
+
+  it('injects the loader named in the shared message contract', () => {
+    // `src/content-app.js` and `src/page-bridge.js` cannot import each other — one
+    // is an ES module and the other is a classic script — so the literal the relay
+    // injects is locked to the contract here.
+    expect(BRIDGE_LOADER_FILE).toBe('src/page-bridge.js');
+    expect(readFileSync(new URL('../src/content-app.js', import.meta.url), 'utf8')).toContain(
+      'BRIDGE_LOADER_FILE',
+    );
   });
 });
 

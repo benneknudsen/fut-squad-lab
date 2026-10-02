@@ -12,18 +12,27 @@
  * The console is one object both worlds are given — the relay through its
  * `console` option, the MAIN world through `window.console` — so a single
  * ordered list of lines is the page's real console, in the order they happened.
+ *
+ * #105: the MAIN-world loader reaches this window as an injected `<script>`
+ * element, so the document parks what the relay injects and `startLoader` runs it.
+ * The fake never has a script element of its own — `document.currentScript` is
+ * `null` here, as it is in a document that was not injected into.
  */
 
 import { vi } from 'vitest';
 
 import copyEn from '../../design/copy.en.json';
 import { startContentApp } from '../../src/content-app.js';
-import { BRIDGE_MODULE_FILE } from '../../src/ui/messages.js';
-import { OWN_EXTENSION_ID, loadMainWorldBootstrap } from './bootstrap.js';
+import {
+  OWN_EXTENSION_ID,
+  createScriptElement,
+  parkInjectedScript,
+  startInjectedLoader,
+} from './bootstrap.js';
 import { stubCrypto } from './nonce.js';
 
 /** A plain-object DOM node, the same shape the other bridge tests use. */
-export const createFakeNode = (tagName = 'div') => {
+const createFakeNode = (tagName = 'div') => {
   const node = {
     tagName: tagName.toUpperCase(),
     className: '',
@@ -82,6 +91,7 @@ export const createChannel = ({ withController = true, withHook = true } = {}) =
   const seen = [];
   const logged = [];
   const warned = [];
+  const injectedScripts = [];
 
   function UTSBCSquadDetailPanelViewController() {
     this.view = view;
@@ -95,9 +105,13 @@ export const createChannel = ({ withController = true, withHook = true } = {}) =
   }
 
   const document = {
+    // `null`, as it is in any real document outside a script's own evaluation. It
+    // becomes the injected element only while that element's body is running.
+    currentScript: null,
     body: createFakeNode('body'),
-    createElement: (tagName) => createFakeNode(tagName),
-    head: { appendChild: () => {} },
+    createElement: (tagName) =>
+      String(tagName).toLowerCase() === 'script' ? createScriptElement() : createFakeNode(tagName),
+    head: { appendChild: parkInjectedScript(injectedScripts) },
   };
 
   const consoleStub = {
@@ -138,12 +152,13 @@ export const createChannel = ({ withController = true, withHook = true } = {}) =
   return {
     window,
     document,
-    view,
-    eaPanelHook,
     console: consoleStub,
     logged,
     warned,
     seen,
+    injectedScripts,
+    /** A page script that observes the channel, as any script on the page can. */
+    observe: (handler) => window.addEventListener('message', handler),
     /** Queues a message as if a page script posted it to the same channel. */
     post: (message) => queue.push(structuredClone(message)),
     drain,
@@ -170,8 +185,11 @@ export const startRelay = (channel) =>
   startContentApp({
     window: channel.window,
     document: channel.document,
-    // The extension id the classic loader derives for itself, so the module URL
-    // the relay hands over is the one the loader's own gate accepts.
+    // One `chrome.runtime` answers for both sides of the handshake: the id it
+    // resolves for the loader is the one the loader then derives for itself, and
+    // the module URL it hands over is the one the loader's own gate accepts. A
+    // harness that gave the two sides different ids would test a gate nothing
+    // runs against.
     chrome: { runtime: { getURL: (path) => `chrome-extension://${OWN_EXTENSION_ID}/${path}` } },
     navigator: { language: 'en-GB' },
     fetch: async (url) => ({ ok: true, status: 200, url, json: async () => copyEn }),
@@ -181,18 +199,23 @@ export const startRelay = (channel) =>
   });
 
 /**
- * Runs the real classic MAIN-world bootstrap on the shared window, importing the
- * real MAIN-world module — the only arrangement in which the loader's own lines
- * and the module's lines land in the same console in the order they happen.
+ * Runs the MAIN-world loader the relay injected, importing the real MAIN-world
+ * module — the only arrangement in which the loader's own lines and the module's
+ * lines land in the same console in the order they happen.
  *
- * @param {object} channel the shared page world
+ * There is nothing to fall back to: `startInjectedLoader` throws unless the relay
+ * has injected exactly one script, so a loader can only exist in this harness the
+ * way it exists in Chrome — because something injected it.
+ *
+ * @param {object} channel the shared page world, after `startRelay`
  * @param {{ importModule?: Function }} options `importModule` replaces the real
  *   dynamic import, so a test can make the module fail to load
  */
 export const startLoader = (channel, { importModule } = {}) =>
-  loadMainWorldBootstrap({
-    window: channel.window,
+  startInjectedLoader({
     document: channel.document,
+    injectedScripts: channel.injectedScripts,
+    window: channel.window,
     importModule:
       importModule ??
       (async () => {
@@ -200,6 +223,3 @@ export const startLoader = (channel, { importModule } = {}) =>
         return { startPageBridge: module.startPageBridge };
       }),
   });
-
-/** The bridge module URL the relay and the loader must agree on. */
-export const OWN_MODULE_URL = `chrome-extension://${OWN_EXTENSION_ID}/${BRIDGE_MODULE_FILE}`;

@@ -13,6 +13,7 @@ import { readCopyPath, resolveCopyLocale } from './ui/copy.js';
 import { createWorkerClient } from './ea/worker-client.js';
 import { BUILD_ID } from './ea/build.js';
 import {
+  BRIDGE_LOADER_FILE,
   BRIDGE_MODULE_FILE,
   CONTENT_SOURCE,
   CONTENT_TO_PAGE_KINDS,
@@ -151,6 +152,37 @@ export function injectStylesheets(document, chrome) {
 }
 
 /**
+ * Injects the classic MAIN-world loader (#105). This is the only thing that puts
+ * `src/page-bridge.js` into the MAIN world, and the loader's whole ability to
+ * identify its own extension rests on the element created here.
+ *
+ * The `src` is set before the element is inserted, which is not a style choice:
+ * a `<script>` element that reaches the document with an empty `src` fetches the
+ * page's own URL, and a real browser starts fetching the moment it is connected.
+ * `onError` is the one channel this injection has — the page never sees the
+ * element as anything but a node — and it fires for the failure that would
+ * otherwise be completely silent, a page whose CSP refuses the extension origin.
+ *
+ * @param {object} document the isolated world's `document`, which is the same
+ *   document the page sees: a script element connected to it runs in the MAIN
+ *   world, which is what an extension-script world cannot do for us
+ * @param {object} chrome `chrome.runtime.getURL` resolves the loader's own URL
+ * @param {(url: string) => void} [onError] called with the refused URL when the
+ *   browser does not run the injected script
+ * @returns {object} the injected element
+ */
+export function injectBridgeLoader(document, chrome, onError) {
+  const element = document.createElement('script');
+  const url = chrome.runtime.getURL(BRIDGE_LOADER_FILE);
+  element.src = url;
+  if (typeof onError === 'function') {
+    element.onerror = () => onError(url);
+  }
+  document.head.appendChild(element);
+  return element;
+}
+
+/**
  * Wires the isolated relay: mints the session nonce, injects styles, announces
  * the copy and, on the bridge's hello, hands over the bridge module URL. Prints
  * the summary and any bridge error to the page console. It also owns the one
@@ -280,6 +312,19 @@ export function startContentApp({
   // here a message the MAIN world posts is answered. Before the proactive
   // handshake below, so the log reads as the stages completing in order.
   bootLog('content relay ready');
+
+  // #105: the MAIN-world loader is injected here rather than declared in the
+  // manifest, because a manifest-declared MAIN-world content script has no
+  // `<script>` element of its own: `document.currentScript` is `null` in it, so
+  // #85's id pin could never resolve and every `bridge-module` message was
+  // refused. An injected element is a real element, so the loader reads its own
+  // extension id off it, and the id stays out of the hands of anything on the
+  // channel. The element goes in before the handshake below, and the loader's own
+  // `bridge-hello` covers the ordering either way. Injection is the only new way
+  // this boot can fail silently, so a refused script says so.
+  injectBridgeLoader(document, chrome, (url) =>
+    console.warn(bootLine(`main-world loader did not run: ${url} was refused or not found`)),
+  );
 
   window.addEventListener('pagehide', () => workerClient.teardown());
 

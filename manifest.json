@@ -15,12 +15,6 @@
       "matches": ["https://www.ea.com/*"],
       "js": ["src/content.js"],
       "run_at": "document_start"
-    },
-    {
-      "matches": ["https://www.ea.com/*"],
-      "js": ["src/page-bridge.js"],
-      "world": "MAIN",
-      "run_at": "document_start"
     }
   ],
   "web_accessible_resources": [
@@ -31,6 +25,7 @@
         "design/copy.da.json",
         "src/ui/styles.css",
         "src/content-app.js",
+        "src/page-bridge.js",
         "src/page-bridge-app.js",
         "src/ea/adapter.js",
         "src/ea/build.js",
