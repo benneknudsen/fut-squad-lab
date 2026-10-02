@@ -178,7 +178,12 @@ export function injectBridgeLoader(document, chrome, onError) {
   if (typeof onError === 'function') {
     element.onerror = () => onError(url);
   }
-  document.head.appendChild(element);
+  // `document.head` is null at a bare `document_start` in Chromium, so a caller
+  // that reached this synchronously would throw and kill the relay. Nothing does:
+  // `src/content.js` awaits its dynamic imports before calling `startContentApp`,
+  // and `documentElement` already exists at `document_start`. Spelling the fallback
+  // out makes the guarantee local instead of an invariant held two files away.
+  (document.head ?? document.documentElement).appendChild(element);
   return element;
 }
 

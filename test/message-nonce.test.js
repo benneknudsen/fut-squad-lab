@@ -200,7 +200,10 @@ describe('a page script that observes the channel', () => {
     ]);
   });
 
-  it('still cannot take the channel over when it forges before the loader exists', async () => {
+  // Named for what it actually proves: the loader refuses a foreign-extension URL.
+  // It does not prove the loader cannot be taken over at all — see the own-URL
+  // replay case below for the honest limit.
+  it('still refuses a foreign-extension URL when it forges before the loader exists', async () => {
     const channel = createChannel();
     const started = [];
     channel.post({
@@ -219,6 +222,35 @@ describe('a page script that observes the channel', () => {
     expect(bridge.importCalls).toEqual([OWN_MODULE_URL]);
     await vi.waitFor(() => {
       expect(started).toEqual([{ nonce: TEST_NONCE }]);
+    });
+  });
+
+  it('documents the honest limit: an own-URL replay with an attacker nonce takes the channel over', async () => {
+    // #105: the loader accepts any non-empty nonce (#88 checks shape only), and the
+    // module URL is derivable from the injected element's `src`. A page script that
+    // wins the evaluation race can therefore start the bridge with a nonce it chose
+    // and deadlock the real handshake. This is bounded — #88 already puts the real
+    // nonce on the wire, so a channel observer has equivalent power without racing,
+    // and the only delta is a handshake DoS — but it is a real limit, and the test
+    // above must not be read as claiming otherwise.
+    const channel = createChannel();
+    const started = [];
+    channel.post({
+      source: CONTENT_SOURCE,
+      kind: 'bridge-module',
+      url: OWN_MODULE_URL,
+      nonce: 'attacker-chosen-nonce',
+    });
+    // The relay injects the loader and posts its own handshake; the page's forged
+    // message is already in the queue, so it is delivered first.
+    startRelay(channel);
+    const bridge = startLoader(channel, { importModule: realBridgeModule(started) });
+    await channel.settle();
+    // The attacker's message was queued first, so it is delivered before the relay's
+    // own. The loader accepts it and never sees the real handshake.
+    expect(bridge.importCalls).toEqual([OWN_MODULE_URL]);
+    await vi.waitFor(() => {
+      expect(started).toEqual([{ nonce: 'attacker-chosen-nonce' }]);
     });
   });
 
