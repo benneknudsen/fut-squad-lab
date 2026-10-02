@@ -8,6 +8,7 @@ import {
   findPanelMount,
 } from '../src/ui/panel-mount.js';
 import { startPageBridge } from '../src/page-bridge-app.js';
+import { TEST_NONCE } from './helpers/nonce.js';
 
 // A plain-object DOM with a tagName and a parentNode, so the shape report is
 // exercised without jsdom and the assertions are on what the module really
@@ -256,6 +257,7 @@ const createFallbackWindow = () => {
 
 const COPY_MESSAGE = {
   source: 'fsl-content',
+  nonce: TEST_NONCE,
   kind: 'copy',
   locale: 'en',
   label: 'Solve this challenge',
@@ -264,7 +266,7 @@ const COPY_MESSAGE = {
 describe('the page bridge fallback mount', () => {
   it('mounts the control in the tree under .fsl-root and reports the fallback route', () => {
     const { pageWindow, document, messages, dispatchMessage } = createFallbackWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
     dispatchMessage(COPY_MESSAGE);
 
     new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet('subject');
@@ -284,7 +286,7 @@ describe('the page bridge fallback mount', () => {
 
   it('carries the controller shape into the diagnostic report', async () => {
     const { pageWindow, document, dispatchMessage } = createFallbackWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
     dispatchMessage(COPY_MESSAGE);
 
     const controller = new pageWindow.UTSBCSquadDetailPanelViewController();

@@ -15,9 +15,13 @@ import {
   BRIDGE_MODULE_FILE,
   CONTENT_SOURCE,
   CONTENT_TO_PAGE_KINDS,
+  NONCE_BYTES,
+  NONCE_FIELD,
   PAGE_SOURCE,
   PAGE_TO_CONTENT_KINDS,
   WORKER_MODULE_FILE,
+  formatNonce,
+  nonceMatches,
 } from './ui/messages.js';
 
 const COPY_FILES = Object.freeze({
@@ -26,6 +30,25 @@ const COPY_FILES = Object.freeze({
 });
 
 const STYLESHEETS = Object.freeze(['design/tokens.css', 'src/ui/styles.css']);
+
+/**
+ * Mints this page session's nonce from the isolated world's `crypto`, which is
+ * the only world of the two that has it (`src/page-bridge.js` is a classic
+ * MAIN-world script and cannot import this module, so it is handed the finished
+ * value instead). Minting here rather than in `src/ui/messages.js` keeps the
+ * `crypto` dependency in one file and leaves the shared module pure.
+ *
+ * @param {{ getRandomValues: (array: Uint8Array) => Uint8Array }} crypto
+ * @returns {string} the hex nonce
+ * @throws {Error} when the environment has no `crypto.getRandomValues` — a
+ *   bridge without a nonce would be a bridge that trusts a forgeable tag
+ */
+export function mintSessionNonce(crypto) {
+  if (typeof crypto?.getRandomValues !== 'function') {
+    throw new Error('the isolated world has no crypto.getRandomValues to mint a nonce with');
+  }
+  return formatNonce(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
+}
 
 /**
  * The handshake message that tells the MAIN-world loader which module to import.
@@ -125,18 +148,19 @@ export function injectStylesheets(document, chrome) {
 }
 
 /**
- * Wires the isolated relay: injects styles, announces the copy and, on the
- * bridge's hello, hands over the bridge module URL. Prints the summary and any
- * bridge error to the page console. It also owns the one solver Worker for the
- * session: the page's token-tagged solve requests are brokered to it and its
- * answers are posted back with the same token. The MAIN world's diagnostics
- * block is logged verbatim here and the evidence file is stated in the panel,
- * so a saved console log always carries the block (#75).
+ * Wires the isolated relay: mints the session nonce, injects styles, announces
+ * the copy and, on the bridge's hello, hands over the bridge module URL. Prints
+ * the summary and any bridge error to the page console. It also owns the one
+ * solver Worker for the session: the page's token-tagged solve requests are
+ * brokered to it and its answers are posted back with the same token. The MAIN
+ * world's diagnostics block is logged verbatim here and the evidence file is
+ * stated in the panel, so a saved console log always carries the block (#75).
  *
  * @param {{ window: object, document: object, chrome: object, navigator: object,
- *   fetch: Function, console: object, createWorker?: (url: string) => object }}
- *   environment `createWorker` is injectable for tests; production constructs a
- *   module Worker from the extension URL
+ *   fetch: Function, console: object, crypto: object,
+ *   createWorker?: (url: string) => object }} environment `crypto` mints the
+ *   session nonce and `createWorker` is injectable for tests; production
+ *   constructs a module Worker from the extension URL
  */
 export function startContentApp({
   window,
@@ -145,9 +169,14 @@ export function startContentApp({
   navigator,
   fetch,
   console,
+  crypto,
   createWorker = (url) => new Worker(url, { type: 'module' }),
 }) {
-  const send = (message) => window.postMessage(message, '*');
+  // #88: one nonce per page session, and the single `send` choke point that
+  // every outbound message goes through. The nonce is spread last, so no caller
+  // can override or drop it by accident.
+  const nonce = mintSessionNonce(crypto);
+  const send = (message) => window.postMessage({ ...message, [NONCE_FIELD]: nonce }, '*');
 
   const workerClient = createWorkerClient({
     createWorker: () => createWorker(chrome.runtime.getURL(WORKER_MODULE_FILE)),
@@ -170,7 +199,18 @@ export function startContentApp({
     if (event.source !== window) return;
     const data = event.data;
     if (data === null || typeof data !== 'object' || data.source !== PAGE_SOURCE) return;
-    if (data.kind === PAGE_TO_CONTENT_KINDS.BRIDGE_HELLO) {
+    // The `source` tag is a literal any page script can write, so it says which
+    // world claims a message, not who sent it: the nonce is the part that has to
+    // be right. One message is exempt — the hello. The classic MAIN-world
+    // bootstrap runs at `document_start`, may have no nonce of its own yet, and
+    // the hello is how it asks for one; the reply carries the nonce and both
+    // worlds then have it. The hello holds no capability: its only effect is to
+    // be answered with the copy label and the module URL, which the relay
+    // already sent proactively. Everything else, `SOLVE_REQUEST` above all, is
+    // dropped here, before any dispatch.
+    const isHandshakeHello = data.kind === PAGE_TO_CONTENT_KINDS.BRIDGE_HELLO;
+    if (!isHandshakeHello && !nonceMatches(nonce, data[NONCE_FIELD])) return;
+    if (isHandshakeHello) {
       send(bridgeModuleMessage(chrome));
       announceCopy();
       return;

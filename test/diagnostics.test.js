@@ -20,6 +20,7 @@ import { readClubItems } from '../src/ea/club-reader.js';
 import { createSolveService } from '../src/ea/solve-service.js';
 import { scrubExternalText } from '../src/shape.js';
 import { startPageBridge, writeDiagnosticsFile } from '../src/page-bridge-app.js';
+import { TEST_NONCE } from './helpers/nonce.js';
 import club from './fixtures/club-items.json';
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import challengeSquadFixture from './fixtures/sbs-challenge-25-squad.json';
@@ -1017,6 +1018,7 @@ const createDiagnosticsWindow = (options = {}) => {
             source: pageWindow,
             data: {
               source: 'fsl-content',
+              nonce: TEST_NONCE,
               kind: 'solve-response',
               token: message.token,
               result: solution,
@@ -1054,6 +1056,7 @@ const createDiagnosticsWindow = (options = {}) => {
 
 const COPY_MESSAGE = {
   source: 'fsl-content',
+  nonce: TEST_NONCE,
   kind: 'copy',
   locale: 'en',
   label: 'Solve this challenge',
@@ -1064,7 +1067,7 @@ const mountedButton = (view) => view.children[0]?.children[0]?.children[0] ?? nu
 describe('the page bridge exposes one documented diagnostic global', () => {
   it('returns null before the first solve and the staged report afterwards', async () => {
     const { pageWindow, view, dispatchMessage } = createDiagnosticsWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
 
     expect(typeof pageWindow.__FSL_DIAGNOSE__).toBe('function');
@@ -1096,7 +1099,7 @@ describe('the page bridge exposes one documented diagnostic global', () => {
 
   it('logs the one delimited block the global re-dumps', async () => {
     const { pageWindow, view, dispatchMessage, logs } = createDiagnosticsWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
     controller.initWithSBCSet({ ...challengeFixture, squad: challengeSquadFixture.squad });
@@ -1115,7 +1118,7 @@ describe('the page bridge exposes one documented diagnostic global', () => {
     const { pageWindow, view, dispatchMessage, logs } = createDiagnosticsWindow({
       clubResponse: { items: [{ id: 116927068448054 }] },
     });
-    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
     controller.initWithSBCSet({ ...challengeFixture, squad: challengeSquadFixture.squad });
@@ -1144,7 +1147,7 @@ describe('the page bridge exposes one documented diagnostic global', () => {
 
   it('carries the observer captures in the pasted report, names and types only', async () => {
     const { pageWindow, view, dispatchMessage } = createDiagnosticsWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
     controller.initWithSBCSet({ ...challengeFixture, squad: challengeSquadFixture.squad });
@@ -1171,7 +1174,7 @@ describe('the page bridge exposes one documented diagnostic global', () => {
 
 const runBridgeSolve = async (options = {}) => {
   const fake = createDiagnosticsWindow(options);
-  startPageBridge(fake.pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+  startPageBridge(fake.pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, pacer: createTestPacer() });
   fake.dispatchMessage(COPY_MESSAGE);
   const controller = new fake.pageWindow.UTSBCSquadDetailPanelViewController();
   controller.initWithSBCSet({ ...challengeFixture, squad: challengeSquadFixture.squad });
@@ -1252,6 +1255,36 @@ describe('the page bridge writes the evidence file only for a failed Solve', () 
     expect(relayed[0].file).toBeNull();
     expect(relayed[0].download).toEqual(report.download);
     expect(logs.filter((line) => line === relayed[0].block)).toHaveLength(1);
+  });
+
+  it('keeps the session nonce out of everything a user pastes or saves', async () => {
+    // #88: the nonce is a capability, and the block is the artefact that leaves
+    // the user's machine — it goes into public issues and into the evidence file
+    // in Downloads. It must never be in it, whatever else is.
+    const { pageWindow, messages, blobs, logs } = await runBridgeSolve({
+      clubResponse: { items: [{ id: 116927068448054 }] },
+    });
+
+    const report = pageWindow.__FSL_DIAGNOSE__();
+    const block = formatDiagnosticsBlock(report);
+    const relayed = messages.find((message) => message.kind === 'diagnostics');
+
+    expect(block).not.toContain(TEST_NONCE);
+    expect(JSON.stringify(report)).not.toContain(TEST_NONCE);
+    expect(JSON.stringify(JSON.parse(blobs[0].parts[0]))).not.toContain(TEST_NONCE);
+    expect(logs.join('\n')).not.toContain(TEST_NONCE);
+    // The relay's copy of the block, and the panel line built from it, too.
+    expect(relayed.block).toBe(block);
+    // The nonce is on the message envelope, because that is what authenticates
+    // it; it is nowhere in the payload the message carries.
+    expect(relayed.nonce).toBe(TEST_NONCE);
+    expect(JSON.stringify({ ...relayed, nonce: null })).not.toContain(TEST_NONCE);
+    expect(
+      messages
+        .filter((message) => message.kind === 'summary')
+        .map((message) => JSON.stringify({ ...message, nonce: null }))
+        .join('\n')
+    ).not.toContain(TEST_NONCE);
   });
 
   it('carries the stall point of a failed club walk into the written evidence', async () => {

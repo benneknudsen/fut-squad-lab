@@ -6,8 +6,15 @@ import {
   BRIDGE_MODULE_FILE,
   CONTENT_SOURCE,
   CONTENT_TO_PAGE_KINDS,
+  NONCE_FIELD,
   PAGE_SOURCE,
 } from '../src/ui/messages.js';
+import {
+  FOREIGN_EXTENSION_ID,
+  OWN_EXTENSION_ID,
+  loadMainWorldBootstrap,
+} from './helpers/bootstrap.js';
+import { TEST_NONCE } from './helpers/nonce.js';
 
 // The two manifest-declared entry scripts are classic scripts: they cannot use
 // static imports, so their protocol constants are literals that must stay in
@@ -18,71 +25,13 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 const PAGE_BRIDGE = 'src/page-bridge.js';
 const CONTENT = 'src/content.js';
 
-const OWN_EXTENSION_ID = 'abcdefghijklmnopabcdefghijklmnop';
-const FOREIGN_EXTENSION_ID = 'ponmlkjihgfedcbaponmlkjihgfedcba';
-
-// Runs the real `page-bridge.js` body as a classic script against a fake window
-// and document. The only edit is swapping the dynamic `import()` for a
-// recorder, because a `Function` body cannot have its import target intercepted
-// any other way. The harness asserts that swap matched exactly once, so a
-// future rewrite that removes the import fails here instead of silently
-// passing.
-const loadMainWorldBootstrap = ({
-  ownScriptUrl = `chrome-extension://${OWN_EXTENSION_ID}/src/page-bridge.js`,
-} = {}) => {
-  const source = read(PAGE_BRIDGE);
-  const marker = 'import(data.url)';
-  const matches = source.split(marker).length - 1;
-  if (matches !== 1) {
-    throw new Error(`expected one dynamic import marker in ${PAGE_BRIDGE}, found ${matches}`);
-  }
-
-  const posted = [];
-  const importCalls = [];
-  const listeners = [];
-  const startPageBridge = vi.fn();
-
-  const window = {
-    postMessage(message) {
-      posted.push(message);
-    },
-    addEventListener(type, handler) {
-      if (type === 'message') listeners.push(handler);
-    },
-  };
-  const document = {
-    currentScript: ownScriptUrl === null ? null : { src: ownScriptUrl },
-  };
-  const importShim = (url) => {
-    importCalls.push(url);
-    return Promise.resolve({ startPageBridge });
-  };
-
-  const run = new Function(
-    'window',
-    'document',
-    'importShim',
-    source.replace(marker, 'importShim(data.url)')
-  );
-  run(window, document, importShim);
-
-  return {
-    window,
-    posted,
-    importCalls,
-    startPageBridge,
-    dispatch(data) {
-      for (const listener of listeners) listener({ data });
-    },
-  };
-};
-
 describe('main-world bootstrap', () => {
   it('uses the message contract tags from messages.js', () => {
     const source = read(PAGE_BRIDGE);
     expect(source).toContain(`'${PAGE_SOURCE}'`);
     expect(source).toContain(`'${CONTENT_SOURCE}'`);
     expect(source).toContain(`'${CONTENT_TO_PAGE_KINDS.BRIDGE_MODULE}'`);
+    expect(source).toContain(`'${NONCE_FIELD}'`);
   });
 
   it('imports exactly the bridge module named in the contract', () => {
@@ -98,21 +47,53 @@ describe('main-world bootstrap', () => {
 
 describe('main-world bootstrap module gate', () => {
   const ownModuleUrl = `chrome-extension://${OWN_EXTENSION_ID}/${BRIDGE_MODULE_FILE}`;
+  const moduleMessage = (extra) => ({
+    source: CONTENT_SOURCE,
+    kind: 'bridge-module',
+    nonce: TEST_NONCE,
+    url: ownModuleUrl,
+    ...extra,
+  });
 
-  it('imports the bridge module from this extension id and starts it', async () => {
+  it('imports the bridge module from this extension id and starts it with the nonce', async () => {
     const bridge = loadMainWorldBootstrap();
-    bridge.dispatch({ source: CONTENT_SOURCE, kind: 'bridge-module', url: ownModuleUrl });
+    bridge.dispatch(moduleMessage());
 
     expect(bridge.importCalls).toEqual([ownModuleUrl]);
     await vi.waitFor(() => {
-      expect(bridge.startPageBridge).toHaveBeenCalledWith(bridge.window);
+      // The nonce the module is started with is the one the relay minted, so
+      // the module can require it on everything it accepts from here on.
+      expect(bridge.startPageBridge).toHaveBeenCalledWith(bridge.window, { nonce: TEST_NONCE });
     });
+  });
+
+  it('refuses an unsigned bridge-module message and never imports it', () => {
+    for (const nonce of [undefined, null, '', 42, {}]) {
+      const bridge = loadMainWorldBootstrap();
+      bridge.dispatch(moduleMessage({ nonce }));
+
+      expect(bridge.importCalls).toEqual([]);
+      expect(bridge.startPageBridge).not.toHaveBeenCalled();
+      // The refusal must still be visible: this script has no nonce of its own
+      // to sign an error with, and the relay now drops unsigned messages.
+      expect(bridge.warned.join('\n')).toMatch(/nonce/i);
+    }
+  });
+
+  it('names the session nonce nowhere in its own output', () => {
+    const bridge = loadMainWorldBootstrap();
+    bridge.dispatch(
+      moduleMessage({ url: `chrome-extension://${FOREIGN_EXTENSION_ID}/${BRIDGE_MODULE_FILE}` })
+    );
+
+    expect(bridge.warned.join('\n')).not.toContain(TEST_NONCE);
+    expect(JSON.stringify(bridge.posted)).not.toContain(TEST_NONCE);
   });
 
   it('refuses a bridge-module URL from another extension and never imports it', () => {
     const bridge = loadMainWorldBootstrap();
     const foreignUrl = `chrome-extension://${FOREIGN_EXTENSION_ID}/${BRIDGE_MODULE_FILE}`;
-    bridge.dispatch({ source: CONTENT_SOURCE, kind: 'bridge-module', url: foreignUrl });
+    bridge.dispatch(moduleMessage({ url: foreignUrl }));
 
     expect(bridge.importCalls).toEqual([]);
     expect(bridge.startPageBridge).not.toHaveBeenCalled();
@@ -121,12 +102,14 @@ describe('main-world bootstrap module gate', () => {
     expect(error.message).toContain(`chrome-extension://${OWN_EXTENSION_ID}/`);
     expect(error.message).toContain(`chrome-extension://${FOREIGN_EXTENSION_ID}`);
     expect(error.message).not.toContain(`chrome-extension://${FOREIGN_EXTENSION_ID}/`);
+    // The same refusal, still legible in the console.
+    expect(bridge.warned.join('\n')).toContain(`chrome-extension://${FOREIGN_EXTENSION_ID}`);
   });
 
   it('refuses every bridge-module message when it cannot derive its own id', () => {
     for (const ownScriptUrl of [null, 'https://www.ea.com/src/page-bridge.js']) {
       const bridge = loadMainWorldBootstrap({ ownScriptUrl });
-      bridge.dispatch({ source: CONTENT_SOURCE, kind: 'bridge-module', url: ownModuleUrl });
+      bridge.dispatch(moduleMessage());
 
       expect(bridge.importCalls).toEqual([]);
       expect(bridge.startPageBridge).not.toHaveBeenCalled();
@@ -138,12 +121,24 @@ describe('main-world bootstrap module gate', () => {
   it('refuses this extension id when the path is not the bridge module', () => {
     const bridge = loadMainWorldBootstrap();
     bridge.dispatch({
-      source: CONTENT_SOURCE,
-      kind: 'bridge-module',
+      ...moduleMessage(),
       url: `chrome-extension://${OWN_EXTENSION_ID}/src/other.js`,
     });
 
     expect(bridge.importCalls).toEqual([]);
+  });
+
+  it('imports once, so a second signed module message cannot restart the bridge', async () => {
+    const bridge = loadMainWorldBootstrap();
+    bridge.dispatch(moduleMessage());
+    await vi.waitFor(() => {
+      expect(bridge.startPageBridge).toHaveBeenCalledTimes(1);
+    });
+
+    bridge.dispatch(moduleMessage());
+
+    expect(bridge.importCalls).toEqual([ownModuleUrl]);
+    expect(bridge.startPageBridge).toHaveBeenCalledTimes(1);
   });
 });
 

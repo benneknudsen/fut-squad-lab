@@ -39,7 +39,14 @@ import {
   formatDiagnosticsBlock,
   formatDiagnosticsFileName,
 } from './ea/summary.js';
-import { CONTENT_SOURCE, CONTENT_TO_PAGE_KINDS, PAGE_SOURCE, PAGE_TO_CONTENT_KINDS } from './ui/messages.js';
+import {
+  CONTENT_SOURCE,
+  CONTENT_TO_PAGE_KINDS,
+  NONCE_FIELD,
+  PAGE_SOURCE,
+  PAGE_TO_CONTENT_KINDS,
+  nonceMatches,
+} from './ui/messages.js';
 import { FALLBACK_VIA, describeMountShape, findPanelMount } from './ui/panel-mount.js';
 import { mountSolveButton } from './ui/solve-button.js';
 
@@ -102,15 +109,22 @@ export function writeDiagnosticsFile(pageWindow, fileName, report) {
  * Starts the bridge in the page's `window`.
  *
  * @param {object} pageWindow the page `window`
- * @param {{ hookPollMs?: number, hookTimeoutMs?: number, pacer?: object }} [options]
- *   poll tuning; the defaults keep checking for a minute before reporting a
- *   missing class, because the SPA may load EA's bundle after this script.
- *   `pacer` is the queue every EA call runs through (#52); production omits it
- *   and the solve service owns a fresh paced queue
+ * @param {{ nonce?: string, hookPollMs?: number, hookTimeoutMs?: number,
+ *   pacer?: object }} [options] `nonce` is this session's message nonce, handed
+ *   over by the classic `src/page-bridge.js` bootstrap after it checked the
+ *   bridge-module message that carried it. It is required: the source tag on a
+ *   message is a literal any page script can write, so the nonce is the part of
+ *   a message that has to be right (#88), and a caller that has none — a page
+ *   script that imports this module itself — gets a bridge that answers nothing.
+ *   The remaining options are poll tuning; the defaults keep checking for a
+ *   minute before reporting a missing class, because the SPA may load EA's
+ *   bundle after this script. `pacer` is the queue every EA call runs through
+ *   (#52); production omits it and the solve service owns a fresh paced queue
  */
 export function startPageBridge(pageWindow, options = {}) {
   const hookPollMs = options.hookPollMs ?? DEFAULT_HOOK_POLL_MS;
   const hookTimeoutMs = options.hookTimeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS;
+  const nonce = typeof options.nonce === 'string' && options.nonce.length > 0 ? options.nonce : null;
 
   const state = {
     label: null,
@@ -125,8 +139,13 @@ export function startPageBridge(pageWindow, options = {}) {
     observerGrouped: false,
   };
 
+  // #88: the one `post` choke point every message to the isolated world goes
+  // through, so the nonce cannot be forgotten on a new kind. It is spread last,
+  // so a payload cannot override or drop it. A bridge started without a nonce
+  // posts `nonce: null`, which the relay's compare rejects: an unauthenticated
+  // instance of this module is inert rather than a second bridge on the channel.
   const post = (kind, payload = {}) =>
-    pageWindow.postMessage({ source: PAGE_SOURCE, kind, ...payload }, '*');
+    pageWindow.postMessage({ source: PAGE_SOURCE, kind, ...payload, [NONCE_FIELD]: nonce }, '*');
 
   const reportError = (message) => post(PAGE_TO_CONTENT_KINDS.ERROR, { message });
 
@@ -383,6 +402,13 @@ export function startPageBridge(pageWindow, options = {}) {
     if (event.source !== pageWindow) return;
     const data = event.data;
     if (data === null || typeof data !== 'object' || data.source !== CONTENT_SOURCE) return;
+    // #88: nothing from the relay is acted on before the session nonce checks
+    // out — not the copy label, and not a `bridge-module` message either, on top
+    // of the URL gate the classic bootstrap already applies. A message that
+    // arrives before the nonce is known, or that carries the wrong one, is
+    // dropped here rather than buffered and rather than reported: the handshake
+    // retries itself, and a dropped forgery is not an error condition.
+    if (!nonceMatches(nonce, data[NONCE_FIELD])) return;
     if (data.kind === CONTENT_TO_PAGE_KINDS.COPY) {
       if (typeof data.label === 'string' && data.label.length > 0) {
         state.label = data.label;

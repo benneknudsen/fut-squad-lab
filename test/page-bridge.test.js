@@ -6,10 +6,12 @@ import club from './fixtures/club-items.json';
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import { panelLabel } from '../src/ui/copy.js';
 import { startPageBridge } from '../src/page-bridge-app.js';
+import { TEST_NONCE } from './helpers/nonce.js';
 
 const challengeFixture = set10.challenges.find((entry) => entry.challengeId === 25);
 const COPY_MESSAGE = {
   source: 'fsl-content',
+  nonce: TEST_NONCE,
   kind: 'copy',
   locale: 'da',
   label: panelLabel({ da: copyDa, en: copyEn }, 'da-DK'),
@@ -119,7 +121,7 @@ const mountedButton = (view) => view.children[0]?.children[0]?.children[0] ?? nu
 describe('startPageBridge', () => {
   it('patches the panel, keeps the original method working, and injects one labelled button', () => {
     const { pageWindow, view, dispatchMessage, messages } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
     dispatchMessage(COPY_MESSAGE);
 
     const Controller = pageWindow.UTSBCSquadDetailPanelViewController;
@@ -140,7 +142,7 @@ describe('startPageBridge', () => {
 
   it('does not inject before the copy label arrives', () => {
     const { pageWindow, view } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
     const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
     controller.initWithSBCSet(challengeFixture);
     expect(view.children).toHaveLength(0);
@@ -148,7 +150,7 @@ describe('startPageBridge', () => {
 
   it('posts the real challenge name, constraint count and club size on click', async () => {
     const { pageWindow, view, dispatchMessage, messages } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
     dispatchMessage(COPY_MESSAGE);
     const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
     controller.initWithSBCSet(challengeFixture);
@@ -169,7 +171,7 @@ describe('startPageBridge', () => {
 
   it('ignores a copy message posted by a foreign frame', () => {
     const { pageWindow, view, dispatchMessage } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
     dispatchMessage(COPY_MESSAGE, {});
     const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
     controller.initWithSBCSet(challengeFixture);
@@ -178,7 +180,7 @@ describe('startPageBridge', () => {
 
   it('accepts a copy message from its own window', () => {
     const { pageWindow, view, dispatchMessage } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
     dispatchMessage(COPY_MESSAGE, pageWindow);
     const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
     controller.initWithSBCSet(challengeFixture);
@@ -187,7 +189,7 @@ describe('startPageBridge', () => {
 
   it('names the missing panel class after the poll window, without throwing', async () => {
     const { pageWindow, messages } = createFakeWindow({ withController: false });
-    startPageBridge(pageWindow, { hookPollMs: 2, hookTimeoutMs: 10 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 2, hookTimeoutMs: 10 });
     await new Promise((resolve) => setTimeout(resolve, 40));
     const error = messages.find((message) => message.kind === 'error');
     expect(error.message).toContain('UTSBCSquadDetailPanelViewController');
@@ -195,7 +197,7 @@ describe('startPageBridge', () => {
 
   it('names the missing hook method when the class exists without it', async () => {
     const { pageWindow, messages } = createFakeWindow({ withHook: false });
-    startPageBridge(pageWindow, { hookPollMs: 2 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 2 });
     await vi.waitFor(() => {
       expect(messages.some((message) => message.kind === 'error')).toBe(true);
     });
@@ -205,7 +207,7 @@ describe('startPageBridge', () => {
 
   it('reports a bridge error instead of throwing when the panel argument is unusable', async () => {
     const { pageWindow, view, dispatchMessage, messages } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
     dispatchMessage(COPY_MESSAGE);
     const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
     controller.initWithSBCSet('not a challenge');
@@ -231,7 +233,7 @@ describe('live eligibility keys logging', () => {
     });
     pageWindow.console = { info: vi.fn() };
 
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
     dispatchMessage(COPY_MESSAGE);
     const Controller = pageWindow.UTSBCSquadDetailPanelViewController;
     new Controller().initWithSBCSet(challengeFixture);
@@ -248,7 +250,7 @@ describe('live eligibility keys logging', () => {
     const { pageWindow, dispatchMessage } = createFakeWindow();
     pageWindow.console = { info: vi.fn() };
 
-    startPageBridge(pageWindow, { hookPollMs: 1 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
     dispatchMessage(COPY_MESSAGE);
     const Controller = pageWindow.UTSBCSquadDetailPanelViewController;
     new Controller().initWithSBCSet(challengeFixture);
@@ -256,5 +258,70 @@ describe('live eligibility keys logging', () => {
 
     expect(pageWindow.console.info).toHaveBeenCalledTimes(1);
     expect(pageWindow.console.info.mock.calls[0][0]).toContain('SBCEligibilityKey');
+  });
+});
+
+
+describe('the MAIN-world side of the session nonce', () => {
+  const openPanel = (pageWindow) => {
+    const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
+    controller.initWithSBCSet(challengeFixture);
+    return controller;
+  };
+
+  it('signs every message it posts, so the relay will accept them', () => {
+    const { pageWindow, view, dispatchMessage, messages } = createFakeWindow();
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
+    dispatchMessage(COPY_MESSAGE);
+    openPanel(pageWindow);
+
+    expect(messages.length).toBeGreaterThan(0);
+    for (const message of messages) expect(message.nonce).toBe(TEST_NONCE);
+    expect(messages.some((message) => message.kind === 'bridge-hello')).toBe(true);
+    expect(mountedButton(view)).not.toBeNull();
+  });
+
+  it('mounts nothing for a copy message that forges the source tag without the nonce', () => {
+    const { pageWindow, view, dispatchMessage } = createFakeWindow();
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
+
+    dispatchMessage({ ...COPY_MESSAGE, nonce: undefined });
+    openPanel(pageWindow);
+    expect(view.children).toHaveLength(0);
+
+    dispatchMessage({ ...COPY_MESSAGE, nonce: `${TEST_NONCE.slice(0, -1)}0` });
+    openPanel(pageWindow);
+    expect(view.children).toHaveLength(0);
+
+    dispatchMessage({ ...COPY_MESSAGE, nonce: 42 });
+    openPanel(pageWindow);
+    expect(view.children).toHaveLength(0);
+  });
+
+  it('mounts the button as soon as the signed copy message arrives', () => {
+    const { pageWindow, view, dispatchMessage } = createFakeWindow();
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
+    openPanel(pageWindow);
+    expect(view.children).toHaveLength(0);
+
+    dispatchMessage(COPY_MESSAGE);
+    expect(mountedButton(view)?.textContent).toBe('Løs denne udfordring');
+  });
+
+  it('drops everything, without error, when it was started without a nonce', () => {
+    // A page script can import this module and call `startPageBridge` itself. With
+    // no nonce there is nothing to authenticate against, so the instance is inert
+    // rather than a second, unsigned bridge on the channel.
+    const { pageWindow, view, dispatchMessage, messages } = createFakeWindow();
+    startPageBridge(pageWindow, { hookPollMs: 1 });
+    dispatchMessage(COPY_MESSAGE);
+    openPanel(pageWindow);
+
+    expect(view.children).toHaveLength(0);
+    expect(messages.some((message) => message.kind === 'error')).toBe(false);
+    for (const message of messages) {
+      if (message.kind === 'error') continue;
+      expect(message.nonce).not.toBe(TEST_NONCE);
+    }
   });
 });
