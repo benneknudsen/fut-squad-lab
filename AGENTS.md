@@ -137,6 +137,14 @@ npm test -- --run --reporter=dot
   assertion vacuous, the test is worthless — reviewers will reject it.
 - If a change produces a bug fix, demonstrate it with a RED/GREEN proof: remove
   the fix, confirm the test fails, restore the fix, confirm it passes.
+- **Do not run the suite against untrusted input.** The test runner is a
+  contributor-side tool with contributor-side privileges. Only run it on a
+  checkout and fixtures you trust. A hostile test file, or a mocked redirect, can
+  make the runner read or write files outside the repository. This affects
+  whoever runs the suite — it never touches an extension user's browser — but it
+  is the reason the pinned vitest version is a security decision and not just a
+  housekeeping one. `npm audit --omit=dev` is the check that matters for the
+  shipped extension: it must stay at zero.
 
 ## Working with the FC27 web app
 
