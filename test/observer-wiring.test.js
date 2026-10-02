@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { startPageBridge } from '../src/page-bridge-app.js';
+import { TEST_NONCE } from './helpers/nonce.js';
 
 // Issue #64: the bridge installs the read-only observer when EA's panel class
 // appears, records EA's own club calls to the console, removes every wrapper on
@@ -62,7 +63,7 @@ const logLines = (pageWindow) =>
 describe('the bridge installs the observer', () => {
   it('wraps EA\u2019s club search, records how it was called and returns its result unchanged', () => {
     const { pageWindow, originalSearch, reply, logs } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1, hookTimeoutMs: 20 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, hookTimeoutMs: 20 });
 
     const criteria = { count: 25, offset: 0, personaId: 'distinctive-persona-987' };
     expect(pageWindow.services.Club.search).not.toBe(originalSearch);
@@ -82,7 +83,7 @@ describe('the bridge installs the observer', () => {
 
   it('records the panel payload by property name and type, never by value', () => {
     const { pageWindow } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1, hookTimeoutMs: 20 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, hookTimeoutMs: 20 });
 
     const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
     controller.initWithSBCSet({
@@ -101,7 +102,7 @@ describe('the bridge installs the observer', () => {
 
   it('removes every wrapper on pagehide and ends the console group', () => {
     const { pageWindow, originalSearch, dispatch } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1, hookTimeoutMs: 20 });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, hookTimeoutMs: 20 });
     expect(pageWindow.services.Club.search).not.toBe(originalSearch);
     pageWindow.services.Club.search({ count: 1 });
     expect(pageWindow.console.groupEnd).not.toHaveBeenCalled();

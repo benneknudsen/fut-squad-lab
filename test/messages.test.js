@@ -3,10 +3,14 @@ import { describe, expect, it } from 'vitest';
 import {
   BRIDGE_MODULE_FILE,
   CONTENT_SOURCE,
+  NONCE_BYTES,
+  NONCE_FIELD,
   PAGE_SOURCE,
   PAGE_TO_CONTENT_KINDS,
   CONTENT_TO_PAGE_KINDS,
+  formatNonce,
   isBridgeModuleUrl,
+  nonceMatches,
 } from '../src/ui/messages.js';
 
 describe('message contract', () => {
@@ -22,6 +26,91 @@ describe('message contract', () => {
     expect(PAGE_TO_CONTENT_KINDS.SUMMARY).toBe('summary');
     expect(CONTENT_TO_PAGE_KINDS.COPY).toBe('copy');
     expect(CONTENT_TO_PAGE_KINDS.BRIDGE_MODULE).toBe('bridge-module');
+  });
+});
+
+describe('formatNonce', () => {
+  it('renders bytes as lowercase hex, one byte per two characters', () => {
+    expect(formatNonce(Uint8Array.from([0x00, 0x0f, 0xa0, 0xff]))).toBe('000fa0ff');
+  });
+
+  it('pads every byte to two characters so a leading zero survives', () => {
+    expect(formatNonce(Uint8Array.from([0x01, 0x02]))).toBe('0102');
+  });
+
+  it('mints 16 bytes of entropy, which is 32 hex characters on the wire', () => {
+    expect(NONCE_BYTES).toBe(16);
+    expect(formatNonce(new Uint8Array(NONCE_BYTES))).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it('rejects anything that is not a byte array instead of inventing a nonce', () => {
+    expect(() => formatNonce('000102030405060708090a0b0c0d0e0f')).toThrow(/Uint8Array/);
+    expect(() => formatNonce(undefined)).toThrow(/Uint8Array/);
+  });
+});
+
+describe('nonceMatches', () => {
+  const NONCE = '000102030405060708090a0b0c0d0e0f';
+
+  it('names the field every message carries the nonce in', () => {
+    expect(NONCE_FIELD).toBe('nonce');
+  });
+
+  it('accepts the exact nonce it was minted with', () => {
+    expect(nonceMatches(NONCE, NONCE)).toBe(true);
+  });
+
+  it('rejects a nonce that differs anywhere, including the first character', () => {
+    expect(nonceMatches(NONCE, `100102030405060708090a0b0c0d0e0f`)).toBe(false);
+    expect(nonceMatches(NONCE, `000102030405060708090a0b0c0d0e00`)).toBe(false);
+    expect(nonceMatches(NONCE, `${NONCE}0`)).toBe(false);
+    expect(nonceMatches(NONCE, NONCE.slice(1))).toBe(false);
+  });
+
+  it('is case sensitive, so an upper-cased copy of the nonce is not the nonce', () => {
+    expect(nonceMatches(NONCE, NONCE.toUpperCase())).toBe(false);
+  });
+
+  it('rejects a value that is not a string, whatever it coerces to', () => {
+    for (const candidate of [undefined, null, 0, 1, true, {}, [], NONCE.split('')]) {
+      expect(nonceMatches(NONCE, candidate)).toBe(false);
+    }
+  });
+
+  it('fails closed when the listener has no nonce of its own', () => {
+    for (const expected of [undefined, null, '', 42, {}]) {
+      expect(nonceMatches(expected, NONCE)).toBe(false);
+    }
+    expect(nonceMatches(undefined, undefined)).toBe(false);
+    expect(nonceMatches('', '')).toBe(false);
+  });
+
+  it('compares every character instead of returning early, so the guess cannot leak', () => {
+    // The only black-box way to see an early return is to count the characters
+    // the compare looks at: `===` on two strings looks at none, a `startsWith`
+    // or a `some` that stops at the first difference looks at only some.
+    const expected = 'aaaaaaaa';
+    const real = String.prototype.charCodeAt;
+    const compared = (candidate) => {
+      let calls = 0;
+      String.prototype.charCodeAt = function counted(index) {
+        calls += 1;
+        return real.call(this, index);
+      };
+      try {
+        nonceMatches(expected, candidate);
+      } finally {
+        String.prototype.charCodeAt = real;
+      }
+      return calls;
+    };
+    // Where the first wrong character sits must not be observable, and the
+    // whole value must be walked: `===` looks at nothing, `every`/`some` and
+    // `startsWith` stop at the first difference.
+    const wrongFirst = compared('baaaaaaa');
+    const wrongLast = compared('aaaaaaab');
+    expect(wrongFirst).toBe(wrongLast);
+    expect(wrongFirst).toBeGreaterThan(expected.length);
   });
 });
 

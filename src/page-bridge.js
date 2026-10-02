@@ -12,6 +12,12 @@
  * import each other, so `test/bootstrap.test.js` locks them together and tests
  * the URL gate below. The same rule lives there as `isBridgeModuleUrl(url,
  * extensionId)`; keep the two in step.
+ *
+ * #88: this script is also where the session nonce enters the MAIN world. It
+ * has no expected value to compare against — the nonce is minted by the
+ * isolated relay and arrives on the message — so what it checks is that a
+ * bridge-module message carries one at all, and it hands the value to the
+ * module, which requires it on everything from then on.
  */
 (() => {
   const PAGE_SOURCE = 'fsl-page';
@@ -19,6 +25,7 @@
   const BRIDGE_MODULE_KIND = 'bridge-module';
   const BRIDGE_MODULE_SUFFIX = '/src/page-bridge-app.js';
   const CHROME_EXTENSION_PREFIX = 'chrome-extension://';
+  const NONCE_FIELD = 'nonce';
 
   const extensionIdFromScriptUrl = (url) => {
     if (typeof url !== 'string' || !url.startsWith(CHROME_EXTENSION_PREFIX)) return null;
@@ -46,8 +53,15 @@
 
   let started = false;
 
-  const report = (message) =>
+  // #88: the relay drops everything that does not carry the session nonce, and
+  // this script has no nonce of its own to sign an error with, so a refusal is
+  // also written straight to the console. Without that, refusing a hostile
+  // bridge-module URL — the one moment a user needs to read about — would fail
+  // silently. The message names the URL's origin, never the nonce.
+  const report = (message) => {
     window.postMessage({ source: PAGE_SOURCE, kind: 'error', message }, '*');
+    window.console?.warn?.(`[FUT Squad Lab] ${message}`);
+  };
 
   const isOwnBridgeModuleUrl = (url) =>
     ownModulePrefix !== null &&
@@ -55,10 +69,20 @@
     url.startsWith(ownModulePrefix) &&
     url.endsWith(BRIDGE_MODULE_SUFFIX);
 
+  // A nonce the relay minted is a non-empty string. Shape is deliberately not
+  // checked here: this script is the point where the value is accepted, and
+  // `src/ui/messages.js` owns how one is formatted.
+  const isSessionNonce = (nonce) => typeof nonce === 'string' && nonce.length > 0;
+
   window.addEventListener('message', (event) => {
     const data = event.data;
     if (data === null || typeof data !== 'object' || data.source !== CONTENT_SOURCE) return;
     if (data.kind !== BRIDGE_MODULE_KIND || started) return;
+    const nonce = data[NONCE_FIELD];
+    if (!isSessionNonce(nonce)) {
+      report(`refused an unsigned ${BRIDGE_MODULE_KIND} message; there is no session nonce on it`);
+      return;
+    }
     if (!isOwnBridgeModuleUrl(data.url)) {
       const reason =
         ownModulePrefix === null
@@ -69,7 +93,7 @@
     }
     started = true;
     import(data.url)
-      .then((module) => module.startPageBridge(window))
+      .then((module) => module.startPageBridge(window, { nonce }))
       .catch((error) => {
         started = false;
         report(`could not load the bridge module: ${error.message}`);

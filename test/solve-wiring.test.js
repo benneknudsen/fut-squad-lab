@@ -9,11 +9,13 @@ import { panelLabel } from '../src/ui/copy.js';
 import club from './fixtures/club-items.json';
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import challengeSquadFixture from './fixtures/sbs-challenge-25-squad.json';
+import { TEST_NONCE, stubCrypto } from './helpers/nonce.js';
 import { createTestPacer } from './helpers/pacing.js';
 
 const challengeFixture = set10.challenges.find((entry) => entry.challengeId === 25);
 const COPY_MESSAGE = {
   source: 'fsl-content',
+  nonce: TEST_NONCE,
   kind: 'copy',
   locale: 'da',
   label: panelLabel({ da: copyDa, en: copyEn }, 'da-DK'),
@@ -133,7 +135,7 @@ describe('the Solve action end to end', () => {
   it('posts one worker request, applies the relayed solution and writes through EA', async () => {
     const { pageWindow, view, messages, saveChallenge, submitChallenge, dispatchMessage } =
       createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet(subjectWithSquad());
 
@@ -159,6 +161,7 @@ describe('the Solve action end to end', () => {
     expect(players).toHaveLength(11);
     dispatchMessage({
       source: 'fsl-content',
+      nonce: TEST_NONCE,
       kind: 'solve-response',
       token: requests[0].token,
       result: {
@@ -194,7 +197,7 @@ describe('the Solve action end to end', () => {
 
   it('never writes when the worker reports the solution invalid', async () => {
     const { pageWindow, view, messages, saveChallenge, dispatchMessage } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet(subjectWithSquad());
 
@@ -205,6 +208,7 @@ describe('the Solve action end to end', () => {
     const request = messages.find((message) => message.kind === 'solve-request');
     dispatchMessage({
       source: 'fsl-content',
+      nonce: TEST_NONCE,
       kind: 'solve-response',
       token: request.token,
       result: {
@@ -228,7 +232,7 @@ describe('the Solve action end to end', () => {
 
   it('reports the relayed worker error loudly on the message channel', async () => {
     const { pageWindow, view, messages, dispatchMessage } = createFakeWindow();
-    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet(subjectWithSquad());
 
@@ -239,6 +243,7 @@ describe('the Solve action end to end', () => {
     const request = messages.find((message) => message.kind === 'solve-request');
     dispatchMessage({
       source: 'fsl-content',
+      nonce: TEST_NONCE,
       kind: 'solve-error',
       token: request.token,
       error: { name: 'Error', message: 'solve: the worker found no legal lineup' },
@@ -251,13 +256,57 @@ describe('the Solve action end to end', () => {
     expect(error.message).toContain('solve: the worker found no legal lineup');
   });
 
+  it('ignores a forged solve response, so the page cannot write a squad of its own', async () => {
+    const { pageWindow, view, messages, saveChallenge, dispatchMessage } = createFakeWindow();
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, pacer: createTestPacer() });
+    dispatchMessage(COPY_MESSAGE);
+    new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet(subjectWithSquad());
+
+    mountedButton(view).click();
+    await vi.waitFor(() => {
+      expect(messages.some((message) => message.kind === 'solve-request')).toBe(true);
+    });
+    const request = messages.find((message) => message.kind === 'solve-request');
+    const answer = (nonce) => ({
+      source: 'fsl-content',
+      nonce,
+      kind: 'solve-response',
+      token: request.token,
+      result: {
+        squad: { players: request.payload.pool.slice(0, 11), chemistry: { total: 0 } },
+        cost: 5000,
+        costComplete: true,
+        valid: true,
+        failures: [],
+        unverified: [],
+      },
+    });
+
+    // The right token, a real solution, the right source tag: only the nonce is
+    // wrong, so nothing about the answer may be applied.
+    dispatchMessage(answer('a-nonce-the-page-made-up'));
+    dispatchMessage({ ...answer(TEST_NONCE), nonce: undefined });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(saveChallenge).not.toHaveBeenCalled();
+    expect(messages.some((message) => message.kind === 'summary')).toBe(false);
+
+    // The same answer with the session nonce still lands, so the forge above
+    // was refused and not merely lost.
+    dispatchMessage(answer(TEST_NONCE));
+    await vi.waitFor(() => {
+      expect(saveChallenge).toHaveBeenCalledTimes(1);
+    });
+    expect(messages.filter((message) => message.kind === 'summary')).toHaveLength(2);
+  });
+
   it('solves from the pinned fallback table and reports the unreadable live enum', async () => {
     const { pageWindow, view, messages, saveChallenge, dispatchMessage } = createFakeWindow({
       withEligibilityKeys: false,
     });
     const logs = [];
     pageWindow.console = { info: (line) => logs.push(line) };
-    startPageBridge(pageWindow, { hookPollMs: 1, pacer: createTestPacer() });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, pacer: createTestPacer() });
     dispatchMessage(COPY_MESSAGE);
     new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet(subjectWithSquad());
 
@@ -335,6 +384,7 @@ const startFakeContentRelay = () => {
     navigator: { language: 'en-GB' },
     fetch: async (url) => ({ ok: true, status: 200, url, json: async () => copyEn }),
     console: fakeConsole,
+    crypto: stubCrypto(),
     createWorker: (url) => {
       created.push(url);
       return worker;
@@ -350,12 +400,13 @@ describe('the isolated solve relay', () => {
     const { window, messages, worker, created, dispatch } = startFakeContentRelay();
     expect(created).toEqual([]);
 
-    dispatch('message', { source: 'fsl-page', kind: 'solve-request', token: 3, operation: 'solve', payload: { a: 1 } });
+    // Every page message is signed with the session nonce the relay minted.
+    dispatch('message', { source: 'fsl-page', nonce: TEST_NONCE, kind: 'solve-request', token: 3, operation: 'solve', payload: { a: 1 } });
     expect(created).toEqual(['chrome-extension://abc/src/solver/worker.js']);
     const [request] = worker.posted;
     expect(request).toMatchObject({ kind: 'request', operation: 'solve', payload: { a: 1 } });
 
-    dispatch('message', { source: 'fsl-page', kind: 'solve-request', token: 4, operation: 'solve', payload: { b: 2 } });
+    dispatch('message', { source: 'fsl-page', nonce: TEST_NONCE, kind: 'solve-request', token: 4, operation: 'solve', payload: { b: 2 } });
     expect(created).toHaveLength(1);
     expect(worker.posted.filter((message) => message.kind === 'request')).toHaveLength(2);
 
@@ -364,15 +415,25 @@ describe('the isolated solve relay', () => {
 
     expect(messages).toContainEqual({
       source: 'fsl-content',
+      nonce: TEST_NONCE,
       kind: 'solve-response',
       token: 3,
       result: { squad: 'solved' },
     });
   });
 
+  it('never spawns a worker for a solve request that forges the source tag', () => {
+    const { worker, dispatch, created } = startFakeContentRelay();
+    dispatch('message', { source: 'fsl-page', kind: 'solve-request', token: 11, operation: 'solve', payload: { a: 1 } });
+    dispatch('message', { source: 'fsl-page', nonce: 'not-the-nonce', kind: 'solve-request', token: 12, operation: 'solve', payload: { b: 2 } });
+
+    expect(created).toEqual([]);
+    expect(worker.posted).toEqual([]);
+  });
+
   it('tears the worker down on pagehide and stops later solves', async () => {
     const { worker, dispatch } = startFakeContentRelay();
-    dispatch('message', { source: 'fsl-page', kind: 'solve-request', token: 5, operation: 'solve', payload: {} });
+    dispatch('message', { source: 'fsl-page', nonce: TEST_NONCE, kind: 'solve-request', token: 5, operation: 'solve', payload: {} });
     const [request] = worker.posted;
 
     dispatch('pagehide', {});
@@ -380,20 +441,21 @@ describe('the isolated solve relay', () => {
     expect(worker.terminated).toBe(1);
     expect(worker.posted).toContainEqual({ kind: 'cancel', id: request.id });
 
-    dispatch('message', { source: 'fsl-page', kind: 'solve-request', token: 6, operation: 'solve', payload: {} });
+    dispatch('message', { source: 'fsl-page', nonce: TEST_NONCE, kind: 'solve-request', token: 6, operation: 'solve', payload: {} });
     expect(worker.posted.filter((message) => message.kind === 'request')).toHaveLength(1);
   });
 
   it('cancels the worker request when the page cancels its token', () => {
     const { worker, dispatch, messages } = startFakeContentRelay();
-    dispatch('message', { source: 'fsl-page', kind: 'solve-request', token: 9, operation: 'solve', payload: {} });
+    dispatch('message', { source: 'fsl-page', nonce: TEST_NONCE, kind: 'solve-request', token: 9, operation: 'solve', payload: {} });
     const [request] = worker.posted;
 
-    dispatch('message', { source: 'fsl-page', kind: 'solve-cancel', token: 9 });
+    dispatch('message', { source: 'fsl-page', nonce: TEST_NONCE, kind: 'solve-cancel', token: 9 });
 
     expect(worker.posted).toContainEqual({ kind: 'cancel', id: request.id });
     expect(messages.at(-1)).toMatchObject({
       source: 'fsl-content',
+      nonce: TEST_NONCE,
       kind: 'solve-error',
       token: 9,
       error: { name: 'AbortError' },
@@ -402,7 +464,7 @@ describe('the isolated solve relay', () => {
 
   it('ignores a solve message posted by a foreign frame', () => {
     const { worker, dispatch } = startFakeContentRelay();
-    dispatch('message', { source: 'fsl-page', kind: 'solve-request', token: 10, operation: 'solve', payload: {} }, {});
+    dispatch('message', { source: 'fsl-page', nonce: TEST_NONCE, kind: 'solve-request', token: 10, operation: 'solve', payload: {} }, {});
     expect(worker.posted).toEqual([]);
   });
 });
