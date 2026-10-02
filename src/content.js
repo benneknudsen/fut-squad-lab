@@ -8,12 +8,25 @@
  * `crypto` is handed over rather than read inside the module: the isolated world
  * has the real one, and the relay mints this session's message nonce from it
  * (#88).
+ *
+ * #102: the console prefix lives in `src/ui/messages.js`, which this classic
+ * script cannot import — so the log helper is loaded here, ahead of the relay,
+ * and the one line that says why the boot stopped goes through it. The fallback
+ * covers the one failure this file cannot report any other way: the helper's own
+ * import failing.
  */
 (async () => {
+  // #102: a bootstrap that stops here is the one message that must stand out in a
+  // console full of stage lines, so the failure keeps its own error level instead
+  // of joining them. The prefix is applied as soon as it is importable; before
+  // that there is nothing to prefix with.
+  let report = (line) => console.error(line);
   try {
+    const { bootLine } = await import(chrome.runtime.getURL('src/ui/messages.js'));
+    report = (line) => console.error(bootLine(line));
     const relay = await import(chrome.runtime.getURL('src/content-app.js'));
     relay.startContentApp({ window, document, chrome, navigator, fetch, console, crypto });
   } catch (error) {
-    console.error(`[FUT Squad Lab] content bootstrap failed: ${error.message}`);
+    report(`content bootstrap failed: ${error.message}`);
   }
 })();

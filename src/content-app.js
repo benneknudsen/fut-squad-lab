@@ -11,6 +11,7 @@
 
 import { readCopyPath, resolveCopyLocale } from './ui/copy.js';
 import { createWorkerClient } from './ea/worker-client.js';
+import { BUILD_ID } from './ea/build.js';
 import {
   BRIDGE_MODULE_FILE,
   CONTENT_SOURCE,
@@ -20,6 +21,8 @@ import {
   PAGE_SOURCE,
   PAGE_TO_CONTENT_KINDS,
   WORKER_MODULE_FILE,
+  bootLine,
+  createBootLog,
   formatNonce,
   nonceMatches,
 } from './ui/messages.js';
@@ -172,6 +175,14 @@ export function startContentApp({
   crypto,
   createWorker = (url) => new Worker(url, { type: 'module' }),
 }) {
+  // #102: the boot log. One line per stage, at the point the stage completes, so
+  // a copied log says where the boot got to and stopped. The build marker goes
+  // first, before anything that can throw: an empty console means the extension
+  // never ran, and a first line that names this build means the extension that
+  // ran is the one the reader has in their checkout.
+  const bootLog = createBootLog(console);
+  bootLog(`build ${BUILD_ID} booting`);
+
   // #88: one nonce per page session, and the single `send` choke point that
   // every outbound message goes through. The nonce is spread last, so no caller
   // can override or drop it by accident.
@@ -193,7 +204,7 @@ export function startContentApp({
         copy = loaded;
         send(copyMessage(loaded));
       })
-      .catch((error) => console.warn(`[FUT Squad Lab] ${error.message}`));
+      .catch((error) => console.warn(bootLine(error.message)));
 
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
@@ -224,11 +235,11 @@ export function startContentApp({
       return;
     }
     if (data.kind === PAGE_TO_CONTENT_KINDS.BRIDGE_READY || data.kind === PAGE_TO_CONTENT_KINDS.MOUNTED) {
-      console.log(`[FUT Squad Lab] ${data.message ?? data.kind}`);
+      bootLog(data.message ?? data.kind);
       return;
     }
     if (data.kind === PAGE_TO_CONTENT_KINDS.SUMMARY) {
-      console.log(`[FUT Squad Lab] ${data.summary}`);
+      bootLog(data.summary);
       return;
     }
     if (data.kind === PAGE_TO_CONTENT_KINDS.DIAGNOSTICS) {
@@ -243,7 +254,7 @@ export function startContentApp({
       // block above is still logged, exactly as before.
       if (data.download === null || data.download === undefined) return;
       if (copy === null) {
-        console.warn('[FUT Squad Lab] diagnostics note skipped: the copy bundle has not loaded');
+        console.warn(bootLine('diagnostics note skipped: the copy bundle has not loaded'));
         return;
       }
       const ok =
@@ -256,20 +267,28 @@ export function startContentApp({
           ok,
         });
       } catch (error) {
-        console.warn(`[FUT Squad Lab] diagnostics note failed: ${error.message}`);
+        console.warn(bootLine(`diagnostics note failed: ${error.message}`));
       }
       return;
     }
     if (data.kind === PAGE_TO_CONTENT_KINDS.ERROR) {
-      console.warn(`[FUT Squad Lab] ${data.message}`);
+      console.warn(bootLine(data.message));
     }
   });
+
+  // #102: the relay is ready the moment it holds a nonce and is listening — from
+  // here a message the MAIN world posts is answered. Before the proactive
+  // handshake below, so the log reads as the stages completing in order.
+  bootLog('content relay ready');
 
   window.addEventListener('pagehide', () => workerClient.teardown());
 
   injectStylesheets(document, chrome);
   // Proactive, so the handshake works no matter which world starts first: the
   // MAIN-world loader may have posted its hello before this listener existed.
+  // #102: the one stage line for it — answering the loader's hello sends the very
+  // same message again, and a boot log that repeats is one nobody reads.
   send(bridgeModuleMessage(chrome));
+  bootLog('bridge module handshake sent');
   announceCopy();
 }
