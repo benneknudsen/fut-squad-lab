@@ -26,24 +26,40 @@ describe('message contract', () => {
 });
 
 describe('isBridgeModuleUrl', () => {
+  const OWN_ID = 'abcdefghijklmnopabcdefghijklmnop';
+  const OWN_URL = `chrome-extension://${OWN_ID}/${BRIDGE_MODULE_FILE}`;
+
   it('accepts the extension URL of the bridge module', () => {
-    expect(isBridgeModuleUrl(`chrome-extension://abcdef/${BRIDGE_MODULE_FILE}`)).toBe(true);
+    expect(isBridgeModuleUrl(OWN_URL, OWN_ID)).toBe(true);
+  });
+
+  it('rejects the same module URL under a different extension id', () => {
+    expect(isBridgeModuleUrl(OWN_URL, 'ponmlkjihgfedcbaponmlkjihgfedcba')).toBe(false);
   });
 
   it('rejects a page-supplied URL, even a plausible one', () => {
-    expect(isBridgeModuleUrl('https://evil.example/src/page-bridge-app.js')).toBe(false);
-    expect(isBridgeModuleUrl('http://127.0.0.1:8123/src/page-bridge-app.js')).toBe(false);
-    expect(isBridgeModuleUrl('data:text/javascript,export const x = 1')).toBe(false);
+    expect(isBridgeModuleUrl('https://evil.example/src/page-bridge-app.js', OWN_ID)).toBe(false);
+    expect(isBridgeModuleUrl('http://127.0.0.1:8123/src/page-bridge-app.js', OWN_ID)).toBe(false);
+    expect(isBridgeModuleUrl('data:text/javascript,export const x = 1', OWN_ID)).toBe(false);
   });
 
   it('rejects a different extension file and a missing URL', () => {
-    expect(isBridgeModuleUrl('chrome-extension://abcdef/src/other.js')).toBe(false);
-    expect(isBridgeModuleUrl(undefined)).toBe(false);
-    expect(isBridgeModuleUrl(null)).toBe(false);
-    expect(isBridgeModuleUrl(42)).toBe(false);
+    expect(isBridgeModuleUrl(`chrome-extension://${OWN_ID}/src/other.js`, OWN_ID)).toBe(false);
+    expect(isBridgeModuleUrl(undefined, OWN_ID)).toBe(false);
+    expect(isBridgeModuleUrl(null, OWN_ID)).toBe(false);
+    expect(isBridgeModuleUrl(42, OWN_ID)).toBe(false);
+  });
+
+  it('fails closed when the caller cannot name its own extension id', () => {
+    expect(isBridgeModuleUrl(OWN_URL)).toBe(false);
+    expect(isBridgeModuleUrl(OWN_URL, '')).toBe(false);
+    expect(isBridgeModuleUrl(OWN_URL, null)).toBe(false);
+    expect(isBridgeModuleUrl(OWN_URL, 42)).toBe(false);
   });
 
   it('rejects a suffix that only ends like the module path', () => {
-    expect(isBridgeModuleUrl('chrome-extension://abcdef/not-src/page-bridge-app.js')).toBe(false);
+    expect(isBridgeModuleUrl(`chrome-extension://${OWN_ID}/not-src/page-bridge-app.js`, OWN_ID)).toBe(
+      false
+    );
   });
 });
