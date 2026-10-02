@@ -42,6 +42,15 @@ describe('manifest.json', () => {
     expect(rawManifest).not.toContain('<all_urls>');
   });
 
+  it('states the extension-page CSP rather than inheriting the MV3 default', () => {
+    // The value is exactly MV3's default. The point of writing it out is that a
+    // reviewer can read the guarantee instead of having to know the default, and
+    // so that a future edit which loosens it shows up in this diff.
+    expect(manifest.content_security_policy).toEqual({
+      extension_pages: "script-src 'self'; object-src 'self'",
+    });
+  });
+
   it('exposes the runtime assets only to the EA app', () => {
     expect(manifest.web_accessible_resources).toHaveLength(1);
     const [war] = manifest.web_accessible_resources;
@@ -55,6 +64,43 @@ describe('manifest.json', () => {
       'src/page-bridge-app.js',
     ]) {
       expect(war.resources).toContain(resource);
+    }
+  });
+
+  it('exposes no captured payload fixture to the page', () => {
+    // `test/fixtures/` holds real captures off a live club, sanitised. They are
+    // not loaded at runtime and must never become fetchable from EA's page.
+    const exposed = manifest.web_accessible_resources
+      .flatMap((entry) => entry.resources)
+      .filter((resource) => /(?:^|\/)test\/fixtures\//.test(resource));
+
+    expect(exposed, 'web_accessible_resources must not expose a test fixture').toEqual([]);
+  });
+
+  it('exposes only extension-root-relative paths, so no entry can reach outside the package', () => {
+    const exposed = manifest.web_accessible_resources
+      .flatMap((entry) => entry.resources)
+      .filter(
+        (resource) => resource.startsWith('/') || resource.split('/').includes('..'),
+      );
+
+    expect(exposed, 'web_accessible_resources must be relative to the extension root').toEqual([]);
+  });
+
+  it('serves the MAIN-world module graph from the static origin, not a dynamic one', () => {
+    // `use_dynamic_url: true` does not put a prefix on the path. Chromium
+    // replaces the URL's *host* with the extension's per-installation GUID
+    // (`WebAccessibleResourcesInfo::IsResourceWebAccessible` accepts a dynamic
+    // resource only when `extension.guid() == target_url.host()`), so the URL
+    // becomes `chrome-extension://<guid>/src/page-bridge-app.js`.
+    //
+    // `src/page-bridge.js` is a manifest content script, not a web-accessible
+    // resource, so its own `document.currentScript.src` keeps the static id and
+    // the MAIN world can never learn the GUID. The id pin in that script could
+    // therefore not survive the switch: it would either refuse every URL or stop
+    // checking the id at all. See #89 for the full write-up.
+    for (const entry of manifest.web_accessible_resources) {
+      expect(entry.use_dynamic_url ?? false).toBe(false);
     }
   });
 

@@ -8,6 +8,7 @@ import {
   CONTENT_TO_PAGE_KINDS,
   NONCE_FIELD,
   PAGE_SOURCE,
+  isBridgeModuleUrl,
 } from '../src/ui/messages.js';
 import {
   FOREIGN_EXTENSION_ID,
@@ -126,6 +127,71 @@ describe('main-world bootstrap module gate', () => {
     });
 
     expect(bridge.importCalls).toEqual([]);
+  });
+
+  it('refuses a path that only ends like the module, so a traversal cannot name it', () => {
+    // A suffix check admits every one of these, because each ends in the module
+    // path. The gate has to be on the whole path, not on its tail.
+    for (const path of [
+      '../src/page-bridge-app.js',
+      'src/../src/page-bridge-app.js',
+      'src/ui/../page-bridge-app.js',
+      'assets/src/page-bridge-app.js',
+      // `use_dynamic_url` replaces the URL's host, it does not add a `_/`
+      // segment to the path, so no accepted path carries one either (#89).
+      '_/src/page-bridge-app.js',
+    ]) {
+      const bridge = loadMainWorldBootstrap();
+      bridge.dispatch(moduleMessage({ url: `chrome-extension://${OWN_EXTENSION_ID}/${path}` }));
+
+      expect(bridge.importCalls).toEqual([]);
+    }
+  });
+
+  it('pins the extension id character for character, not just the scheme', () => {
+    // #85's whole point: a gate that accepted "some chrome-extension host"
+    // would import this. Only the id comparison refuses it.
+    const nearMissId = `x${OWN_EXTENSION_ID.slice(1)}`;
+    const nearMissUrl = `chrome-extension://${nearMissId}/${BRIDGE_MODULE_FILE}`;
+
+    const refused = loadMainWorldBootstrap();
+    refused.dispatch(moduleMessage({ url: nearMissUrl }));
+    expect(refused.importCalls).toEqual([]);
+
+    // And the refusal is the id pin rather than anything else: the same URL is
+    // imported once the script derives that very id for itself.
+    const accepted = loadMainWorldBootstrap({
+      ownScriptUrl: `chrome-extension://${nearMissId}/src/page-bridge.js`,
+    });
+    accepted.dispatch(moduleMessage({ url: nearMissUrl }));
+    expect(accepted.importCalls).toEqual([nearMissUrl]);
+  });
+
+  it('decides every candidate URL the same way the shared contract does', () => {
+    // The two gates cannot import each other, so they are the same rule written
+    // twice. `use_dynamic_url` and #85 both moved what a valid URL looks like;
+    // this is where one side being left behind shows up.
+    const candidates = [
+      `chrome-extension://${OWN_EXTENSION_ID}/${BRIDGE_MODULE_FILE}`,
+      `chrome-extension://${OWN_EXTENSION_ID}/_/${BRIDGE_MODULE_FILE}`,
+      `chrome-extension://${OWN_EXTENSION_ID}/../${BRIDGE_MODULE_FILE}`,
+      `chrome-extension://${OWN_EXTENSION_ID}/src/ui/../page-bridge-app.js`,
+      `chrome-extension://${OWN_EXTENSION_ID}/assets/${BRIDGE_MODULE_FILE}`,
+      `chrome-extension://${OWN_EXTENSION_ID}/src/other.js`,
+      `chrome-extension://${FOREIGN_EXTENSION_ID}/${BRIDGE_MODULE_FILE}`,
+      `x${OWN_EXTENSION_ID.slice(1)}/${BRIDGE_MODULE_FILE}`,
+      'https://evil.example/src/page-bridge-app.js',
+      'data:text/javascript,export const x = 1',
+    ];
+
+    for (const url of candidates) {
+      const bridge = loadMainWorldBootstrap();
+      bridge.dispatch(moduleMessage({ url }));
+
+      expect(bridge.importCalls, `the bootstrap refused ${url}`).toEqual(
+        isBridgeModuleUrl(url, OWN_EXTENSION_ID) ? [url] : [],
+      );
+    }
   });
 
   it('imports once, so a second signed module message cannot restart the bridge', async () => {
