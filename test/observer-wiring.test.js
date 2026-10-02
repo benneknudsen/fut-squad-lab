@@ -15,10 +15,11 @@ const createFakeWindow = () => {
   const originalSearch = (criteria) => reply;
 
   function UTSBCSquadDetailPanelViewController() {}
-  UTSBCSquadDetailPanelViewController.prototype.initWithSBCSet = function (subject) {
+  const eaPanelHook = function (subject) {
     this.subject = subject;
     return 'original result';
   };
+  UTSBCSquadDetailPanelViewController.prototype.initWithSBCSet = eaPanelHook;
 
   const pageWindow = {
     services: { Club: { search: originalSearch } },
@@ -46,6 +47,7 @@ const createFakeWindow = () => {
   return {
     pageWindow,
     originalSearch,
+    eaPanelHook,
     reply,
     logs,
     messages,
@@ -111,5 +113,20 @@ describe('the bridge installs the observer', () => {
 
     expect(pageWindow.services.Club.search).toBe(originalSearch);
     expect(pageWindow.console.groupEnd).toHaveBeenCalled();
+  });
+
+  // #90: the observer wraps the button patch, not the other way round, so
+  // `pagehide` unwraps two layers. Restoring the prototype while the observer's
+  // wrapper is still on top of it would find its own function gone and quietly
+  // do nothing, leaving the patch in place after the page is gone.
+  it('hands EA its panel method back even though the observer wrapped our patch', () => {
+    const { pageWindow, eaPanelHook, dispatch } = createFakeWindow();
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, hookTimeoutMs: 20 });
+    new pageWindow.UTSBCSquadDetailPanelViewController().initWithSBCSet({ elgReq: [] });
+    const { prototype } = pageWindow.UTSBCSquadDetailPanelViewController;
+
+    dispatch('pagehide');
+
+    expect(prototype.initWithSBCSet).toBe(eaPanelHook);
   });
 });

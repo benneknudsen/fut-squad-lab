@@ -83,6 +83,15 @@ result in action against your account. You use this software at your own risk.
 The extension deliberately does not auto-submit challenges, so that a human
 remains in the loop.
 
+To put the Solve button inside EA's own SBC panel, the extension patches one EA
+class prototype: `UTSBCSquadDetailPanelViewController.initWithSBCSet` is wrapped
+with a function that calls EA's own method with the same `this` and the same
+arguments, returns its result unchanged, and mounts the button afterwards. It is
+the only mutation the extension makes to EA's objects, and it is undone when the
+page unloads — EA's own function is put back. The one case that keeps the patch
+is a back/forward-cache navigation, where the page is frozen and comes back on
+the same heap, so the wrapper is still there when it resumes.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

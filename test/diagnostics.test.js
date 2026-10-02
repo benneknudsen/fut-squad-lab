@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -876,6 +878,89 @@ describe('the diagnostic path never sends anything anywhere', () => {
       expect(source).not.toMatch(networkCalls);
     });
   }
+});
+
+// Every DOM write in `src/` goes through `createElement` plus `textContent` or
+// `setAttribute`. That is the discipline which keeps a string read out of EA's
+// page — a player name, a challenge title, an error message — from being parsed
+// as markup on an authenticated page, and it is why there is no stored-XSS path
+// today. This asserts the property rather than today's state: the next person
+// who reaches for `innerHTML` to render a player name finds a red test that
+// names the file and the line.
+//
+// The scope is `src/`, the directory Chrome loads. `design/` is deliberately out
+// of it: `design/reference/vision.html` is a reference board and
+// `design/tools/vision-smoke-test.js` is a dev tool, neither of which ships, and
+// both of which build markup from strings on purpose. Scanning them would give a
+// permanently red test nobody would then trust.
+describe('no shipped module reaches an HTML sink', () => {
+  const repoRoot = fileURLToPath(new URL('../', import.meta.url));
+  const srcRoot = fileURLToPath(new URL('../src/', import.meta.url));
+  const toRelative = (file) => path.relative(repoRoot, file).split(path.sep).join('/');
+
+  // A plain recursive walk, so a module that is not in git yet is still scanned.
+  const listFiles = (directory) =>
+    readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      const full = path.join(directory, entry.name);
+      return entry.isDirectory() ? listFiles(full) : [full];
+    });
+
+  const shippedFiles = listFiles(srcRoot).sort();
+
+  const HTML_SINKS = [
+    ['innerHTML', /\binnerHTML\b/g],
+    ['outerHTML', /\bouterHTML\b/g],
+    ['insertAdjacentHTML', /\binsertAdjacentHTML\b/g],
+    ['document.write', /\bdocument\s*\.\s*writeln?\s*\(/g],
+    ['srcdoc', /\bsrcdoc\b/g],
+    ['createContextualFragment', /\bcreateContextualFragment\b/g],
+    ['eval', /\beval\s*\(/g],
+    ['new Function', /\bnew\s+Function\s*\(/g],
+    ['a string-form setTimeout', /\bsetTimeout\s*\(\s*['"`]/g],
+    ['a string-form setInterval', /\bsetInterval\s*\(\s*['"`]/g],
+  ];
+
+  it('reads the whole of src/, so the scan below cannot pass by reading nothing', () => {
+    const files = shippedFiles.map(toRelative);
+
+    expect(files.length).toBeGreaterThan(20);
+    expect(files.every((file) => file.startsWith('src/'))).toBe(true);
+    for (const module of [
+      'src/page-bridge-app.js',
+      'src/page-bridge.js',
+      'src/solver/solve.js',
+      'src/ui/solve-button.js',
+      'src/ui/styles.css',
+    ]) {
+      expect(files).toContain(module);
+    }
+  });
+
+  it('finds no HTML sink in any shipped module', () => {
+    // Matched against the whole file rather than line by line, so a call whose
+    // whitespace falls on a newline — `eval(\n…)`, `document\n.write(…)` — is
+    // still caught. A property name split across lines (`node.inner` / `HTML`)
+    // is not, because the token itself is broken; that would need a whitespace-
+    // stripped pass, and nobody wraps an identifier that way by accident. The
+    // line number is worked out from where the match landed, so the failure
+    // still names a place to look.
+    const violations = shippedFiles.flatMap((file) => {
+      const source = readFileSync(file, 'utf8');
+      const relative = toRelative(file);
+      return HTML_SINKS.flatMap(([name, pattern]) =>
+        [...source.matchAll(pattern)].map((match) => {
+          const line = source.slice(0, match.index).split('\n').length;
+          return (
+            `${relative}:${line} uses ${name}: matched "${match[0]}". Build DOM` +
+            ' with createElement plus textContent or setAttribute, so no string from the EA' +
+            ' page is ever parsed as markup.'
+          );
+        })
+      );
+    });
+
+    expect(violations).toEqual([]);
+  });
 });
 
 // A plain-object DOM and a fake page window, same shape the existing page-bridge
