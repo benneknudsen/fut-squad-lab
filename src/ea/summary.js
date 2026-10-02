@@ -17,6 +17,7 @@
  */
 
 import { BUILD_ID, buildMarker } from './build.js';
+import { scrubExternalText } from '../shape.js';
 
 /**
  * The number of constraints in a read challenge: one per distinct
@@ -178,6 +179,26 @@ export const DIAGNOSTIC_STAGES = Object.freeze([
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /**
+ * Scrubs every string in a diagnostics value, recursively. The report is built
+ * from EA's own text and is pasted into public support threads, so a URL query,
+ * a long digit run or a newline must not cross this boundary. The walk is the
+ * one place external text enters the report, which covers every stage reason,
+ * detail, observer entry and the challenge name by construction. Property names
+ * are left alone: they are this project's own field names, and the redaction
+ * list in `src/shape.js` already owns a name that must not be reported.
+ */
+const scrubDiagnosticsValue = (value) => {
+  if (typeof value === 'string') return scrubExternalText(value);
+  if (Array.isArray(value)) return value.map(scrubDiagnosticsValue);
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, scrubDiagnosticsValue(child)])
+    );
+  }
+  return value;
+};
+
+/**
  * Fills every stage the pipeline never reached with an explicit not-reached
  * outcome, so the rendered report always shows the full chain and the first
  * stage that did not finish. Recorded stages keep their identity; unknown and
@@ -222,7 +243,11 @@ export function completeStages(recorded) {
  * stopped without a debugger. `build` states which build produced the report
  * and the reader-chain ids it compiled, so a stale module beside fresh code is
  * visible in the pasted block itself (#50). A stage outcome that was never
- * recorded is a defect and throws naming the stage.
+ * recorded is a defect and throws naming the stage. The built report is the
+ * single boundary where external text is scrubbed (#86): every string in it
+ * goes through `scrubExternalText`, so the evidence file, the
+ * `__FSL_DIAGNOSE__` global and the pasted block all carry the same safe
+ * content.
  *
  * @param {Array<object>} stages the stages recorded by `createSolveService`
  * @param {{ id: string, readers: object }} [build] the build marker; defaults
@@ -270,7 +295,7 @@ export function buildDiagnosticsReport(
   }
   const completed = completeStages(stages);
   const stopped = completed.find((stage) => stage.ok !== true) ?? null;
-  return {
+  return scrubDiagnosticsValue({
     schema: DIAGNOSTIC_SCHEMA,
     build,
     pacing: pacing ?? null,
@@ -279,7 +304,7 @@ export function buildDiagnosticsReport(
     ok: stopped === null,
     stoppedAt: stopped === null ? null : stopped.id,
     stages: completed,
-  };
+  });
 }
 
 /**

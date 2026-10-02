@@ -11,9 +11,14 @@ import {
   formatDiagnosticsFileName,
   summarizeWritePlan,
 } from '../src/ea/summary.js';
-import { crossCheckEligibilityModel, readEligibilityKeys } from '../src/ea/adapter.js';
+import {
+  crossCheckEligibilityModel,
+  readEligibilityKeys,
+  resolveClubItems,
+} from '../src/ea/adapter.js';
 import { readClubItems } from '../src/ea/club-reader.js';
 import { createSolveService } from '../src/ea/solve-service.js';
+import { scrubExternalText } from '../src/shape.js';
 import { startPageBridge, writeDiagnosticsFile } from '../src/page-bridge-app.js';
 import club from './fixtures/club-items.json';
 import set10 from './fixtures/sbs-set-10-challenges.json';
@@ -735,6 +740,46 @@ describe('solve-service staged diagnostics', () => {
   });
 });
 
+const collectStringValues = (value) => {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(collectStringValues);
+  if (value === null || typeof value !== 'object') return [];
+  return Object.values(value).flatMap(collectStringValues);
+};
+
+describe('scrubExternalText', () => {
+  it('drops a URL query and fragment while keeping the path', () => {
+    const scrubbed = scrubExternalText(
+      'request failed for https://utas.example/ut/game/fc27/club?personaId=987654321#access_token'
+    );
+
+    expect(scrubbed).toContain('https://utas.example/ut/game/fc27/club');
+    expect(scrubbed).not.toContain('personaId');
+    expect(scrubbed).not.toContain('987654321');
+    expect(scrubbed).not.toContain('access_token');
+  });
+
+  it('collapses a run of six or more digits and keeps a shorter number', () => {
+    expect(scrubExternalText('persona 987654321')).not.toMatch(/\d{6,}/);
+    expect(scrubExternalText('cost 12345 coins')).toContain('12345');
+    expect(scrubExternalText('item 123456')).not.toContain('123456');
+  });
+
+  it('collapses newlines so a message cannot smuggle a block boundary', () => {
+    const scrubbed = scrubExternalText('line one\nline two\r\nline three');
+
+    expect(scrubbed).not.toContain('\n');
+    expect(scrubbed).not.toContain('\r');
+    expect(scrubbed).toContain('line one');
+    expect(scrubbed).toContain('line three');
+  });
+
+  it('returns a value that is not a string unchanged', () => {
+    expect(scrubExternalText(null)).toBeNull();
+    expect(scrubExternalText(undefined)).toBeUndefined();
+  });
+});
+
 describe('the diagnostics block is safe to paste', () => {
   it('carries no token, session, account or club item field', async () => {
     const steps = createSteps();
@@ -764,6 +809,43 @@ describe('the diagnostics block is safe to paste', () => {
     for (const unplaced of report.stages.find((stage) => stage.id === 'payload').detail.unplaced) {
       expect(Object.keys(unplaced).sort()).toEqual(['concept', 'index', 'reason']);
     }
+  });
+
+  it('scrubs an EA error URL and persona id out of the string values, and keeps the challenge name', async () => {
+    const eaMessage = 'request failed for https://utas.example/ut/game/fc27/club?personaId=987654321';
+    const eaPageWindow = {
+      services: {
+        UTSBCRepository: {
+          getClubItems: () => ({
+            observe(subscriber, callback) {
+              void subscriber;
+              callback({ unobserve() {} }, { error: { message: eaMessage } });
+            },
+          }),
+        },
+      },
+    };
+    const steps = createSteps({
+      resolveClubItems: (ignoredPageWindow, options) => resolveClubItems(eaPageWindow, options),
+    });
+    const service = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+    const report = buildDiagnosticsReport(outcome.stages);
+    const block = formatDiagnosticsBlock(report);
+    const parsed = JSON.parse(block.slice(block.indexOf('{'), block.lastIndexOf('}') + 1));
+    const values = collectStringValues(parsed);
+
+    // The real adapter path produced the reason, so the assertions below are
+    // exercised against EA text and not against a string the test wrote into
+    // the stage list itself.
+    const clubReason = report.stages.find((stage) => stage.id === 'club').reason;
+    expect(clubReason).toContain('the observable reported an error');
+    expect(clubReason).toContain('https://utas.example/ut/game/fc27/club');
+
+    expect(values.some((value) => value.includes('987654321'))).toBe(false);
+    expect(values.some((value) => value.includes('personaId=987654321'))).toBe(false);
+    expect(values).toContain('3 Leagues & 2 Nations');
   });
 });
 
