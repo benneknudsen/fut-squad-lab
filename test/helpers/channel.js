@@ -4,9 +4,10 @@
  * calls in isolation.
  *
  * `postMessage` queues instead of delivering and `settle` drains the queue to
- * every listener, which is what a real page does: a message posted before a
- * listener exists is lost, not buffered. That matters here, because the MAIN
- * world starts before the relay's listener is attached in production too.
+ * every listener. A browser queues a dispatch task, so a listener attached in the
+ * same task still receives the message — the queue holds it until drained, it does
+ * not drop it. That is the realistic model and what this harness does; a listener
+ * added after `settle` genuinely sees nothing.
  *
  * The console is one object both worlds are given — the relay through its
  * `console` option, the MAIN world through `window.console` — so a single

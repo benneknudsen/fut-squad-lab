@@ -65,7 +65,10 @@ export const NONCE_FIELD = 'nonce';
 export const NONCE_BYTES = 16;
 
 /**
- * The prefix every line this extension writes to the page console carries (#102).
+ * The prefix every stage line this extension writes to the page console carries
+ * (#102). Two lines are deliberately outside it: the bootstrap failure in
+ * `src/content.js`, which can only prefix once this module has imported, and the
+ * diagnostics block, which is pasted verbatim.
  *
  * It is the one string both worlds put in front of every line, so it lives here
  * with the rest of the cross-world literals. `src/page-bridge.js` is a classic
