@@ -197,7 +197,7 @@ const createFakePanelDocument = () => {
 };
 
 describe('startContentApp diagnostics relay', () => {
-  const FILE = 'fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json';
+  const FILE = 'fsl-diagnostics-fsl-build-11-2026-09-27.json';
   const BLOCK =
     '=== FUT Squad Lab diagnostics (fsl-diagnostics/1, fsl-build/11) — copy from here ===\n' +
     '{"schema":"fsl-diagnostics/1"}\n' +
@@ -266,15 +266,27 @@ describe('startContentApp diagnostics relay', () => {
       expect(messages.some((message) => message.kind === 'copy')).toBe(true);
     });
 
-    dispatchMessage(relayed('fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json'));
-    dispatchMessage(
-      relayed('fsl-diagnostics-fsl-build-11-2026-09-27T14-03-02Z.json')
-    );
+    dispatchMessage(relayed('fsl-diagnostics-fsl-build-11-2026-09-27.json'));
+    dispatchMessage(relayed('fsl-diagnostics-fsl-build-11-2026-09-28.json'));
 
     expect(root.children).toHaveLength(1);
     expect(root.children[0].textContent).toBe(
-      'Diagnostics saved to fsl-diagnostics-fsl-build-11-2026-09-27T14-03-02Z.json'
+      'Diagnostics saved to fsl-diagnostics-fsl-build-11-2026-09-28.json'
     );
+  });
+
+  it('logs the block but states nothing in the panel when the Solve did not attempt a download', async () => {
+    const { document, root } = createFakePanelDocument();
+    const { dispatchMessage, fakeConsole, messages } = startFakeContentApp({ document });
+    await vi.waitFor(() => {
+      expect(messages.some((message) => message.kind === 'copy')).toBe(true);
+    });
+
+    dispatchMessage(relayed(null, null));
+
+    expect(fakeConsole.log).toHaveBeenCalledWith(BLOCK);
+    expect(root.children).toHaveLength(0);
+    expect(fakeConsole.warn).not.toHaveBeenCalled();
   });
 
   it('ignores a diagnostics message from a foreign frame', () => {

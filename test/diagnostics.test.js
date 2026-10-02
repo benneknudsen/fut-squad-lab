@@ -284,16 +284,24 @@ describe('formatDiagnosticsBlock', () => {
 });
 
 describe('formatDiagnosticsFileName', () => {
-  it('names the evidence file with the build id and a filesystem-safe timestamp', () => {
+  it('names the evidence file with the build id and a date, and no time of day', () => {
     const name = formatDiagnosticsFileName('fsl-build/13', new Date('2026-09-27T14:02:11.000Z'));
 
-    expect(name).toBe('fsl-diagnostics-fsl-build-13-2026-09-27T14-02-11Z.json');
+    expect(name).toBe('fsl-diagnostics-fsl-build-13-2026-09-27.json');
+    expect(name).not.toContain('T');
+    expect(name).not.toContain('Z');
+    expect(name).not.toMatch(/\d{2}-\d{2}-\d{2}Z/);
   });
 
-  it('drops the milliseconds so the name matches the documented shape exactly', () => {
-    const name = formatDiagnosticsFileName('fsl-build/13', new Date('2026-09-27T14:02:11.987Z'));
+  it('names two solves on the same day identically, so the file records no play time', () => {
+    const midnight = formatDiagnosticsFileName('fsl-build/13', new Date('2026-09-27T00:00:00.000Z'));
+    const lastSecond = formatDiagnosticsFileName(
+      'fsl-build/13',
+      new Date('2026-09-27T23:59:59.999Z')
+    );
 
-    expect(name).toBe('fsl-diagnostics-fsl-build-13-2026-09-27T14-02-11Z.json');
+    expect(midnight).toBe('fsl-diagnostics-fsl-build-13-2026-09-27.json');
+    expect(lastSecond).toBe(midnight);
   });
 
   it('rejects a report without a build id instead of writing an unnamed file', () => {
@@ -342,13 +350,13 @@ describe('writeDiagnosticsFile', () => {
     const { pageWindow, blobs, clicked, revoked } = createFilePage();
     const report = { schema: DIAGNOSTIC_SCHEMA, stages: [], download: { ok: true } };
 
-    writeDiagnosticsFile(pageWindow, 'fsl-diagnostics-fsl-build-13-2026-09-27T14-02-11Z.json', report);
+    writeDiagnosticsFile(pageWindow, 'fsl-diagnostics-fsl-build-13-2026-09-27.json', report);
 
     expect(blobs).toHaveLength(1);
     expect(blobs[0].settings).toEqual({ type: 'application/json' });
     expect(JSON.parse(blobs[0].parts[0])).toEqual(report);
     expect(clicked).toHaveLength(1);
-    expect(clicked[0].download).toBe('fsl-diagnostics-fsl-build-13-2026-09-27T14-02-11Z.json');
+    expect(clicked[0].download).toBe('fsl-diagnostics-fsl-build-13-2026-09-27.json');
     expect(clicked[0].href).toBe('blob:fsl/1');
     expect(revoked).toEqual(['blob:fsl/1']);
   });
@@ -988,6 +996,10 @@ const createDiagnosticsWindow = (options = {}) => {
     },
     services: {
       UTSBCRepository: { getClubItems: async () => clubResponse },
+      // The fake page exposes EA's own challenge save path, so the default
+      // bridge Solve is a full success (every stage ok) and the write gate can
+      // be tested against a genuinely successful Solve.
+      UTSquadBuildingChallengeDAO: { saveChallenge: async () => undefined },
     },
     console: {
       log: vi.fn((...args) => logs.push(args.join(' '))),
@@ -1170,18 +1182,42 @@ const runBridgeSolve = async (options = {}) => {
   return fake;
 };
 
-describe('the page bridge writes one evidence file per Solve', () => {
-  it('writes the exact __FSL_DIAGNOSE__() object under the documented file name and relays the block once', async () => {
+describe('the page bridge writes the evidence file only for a failed Solve', () => {
+  it('writes nothing and relays no download outcome when the Solve succeeded', async () => {
     const { pageWindow, logs, messages, blobs, created } = await runBridgeSolve();
 
     const report = pageWindow.__FSL_DIAGNOSE__();
+    expect(report.ok).toBe(true);
+    expect(report.stoppedAt).toBeNull();
+    expect(report.download).toBeNull();
+    expect(report.mount).not.toBeUndefined();
+
+    // The observable effect: no Blob was constructed and no anchor was clicked.
+    expect(blobs).toHaveLength(0);
+    expect(created.some((node) => node.tagName === 'A')).toBe(false);
+
+    // The block still goes to the isolated console verbatim.
+    const relayed = messages.filter((message) => message.kind === 'diagnostics');
+    expect(relayed).toHaveLength(1);
+    expect(relayed[0].block).toBe(formatDiagnosticsBlock(report));
+    expect(relayed[0].file).toBeNull();
+    expect(relayed[0].download).toBeNull();
+    expect(logs.filter((line) => line === relayed[0].block)).toHaveLength(1);
+  });
+
+  it('writes the exact __FSL_DIAGNOSE__() object for a failed Solve under the date-granular name', async () => {
+    const { pageWindow, logs, messages, blobs, created } = await runBridgeSolve({
+      clubResponse: { items: [{ id: 116927068448054 }] },
+    });
+
+    const report = pageWindow.__FSL_DIAGNOSE__();
+    expect(report.ok).toBe(false);
+    expect(report.stoppedAt).toBe('club');
     expect(report.download).toEqual({
       ok: true,
-      file: expect.stringMatching(
-        /^fsl-diagnostics-fsl-build-13-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\.json$/
-      ),
+      file: expect.stringMatching(/^fsl-diagnostics-fsl-build-13-\d{4}-\d{2}-\d{2}\.json$/),
     });
-    expect(report.mount).not.toBeUndefined();
+    expect(report.download.file).not.toContain('T');
 
     expect(blobs).toHaveLength(1);
     expect(blobs[0].settings).toEqual({ type: 'application/json' });
@@ -1195,13 +1231,18 @@ describe('the page bridge writes one evidence file per Solve', () => {
     expect(relayed).toHaveLength(1);
     expect(relayed[0].block).toBe(formatDiagnosticsBlock(report));
     expect(relayed[0].file).toBe(report.download.file);
+    expect(relayed[0].download).toEqual(report.download);
     expect(logs.filter((line) => line === relayed[0].block)).toHaveLength(1);
   });
 
-  it('records a blocked download in the report instead of swallowing it', async () => {
-    const { pageWindow, logs, messages, blobs } = await runBridgeSolve({ downloadBlocked: true });
+  it('records a blocked write for a failed Solve instead of swallowing it', async () => {
+    const { pageWindow, logs, messages, blobs } = await runBridgeSolve({
+      clubResponse: { items: [{ id: 116927068448054 }] },
+      downloadBlocked: true,
+    });
 
     const report = pageWindow.__FSL_DIAGNOSE__();
+    expect(report.ok).toBe(false);
     expect(report.download.ok).toBe(false);
     expect(report.download.reason).toMatch(/Blob/);
     expect(blobs).toHaveLength(0);
@@ -1209,6 +1250,7 @@ describe('the page bridge writes one evidence file per Solve', () => {
     const relayed = messages.filter((message) => message.kind === 'diagnostics');
     expect(relayed).toHaveLength(1);
     expect(relayed[0].file).toBeNull();
+    expect(relayed[0].download).toEqual(report.download);
     expect(logs.filter((line) => line === relayed[0].block)).toHaveLength(1);
   });
 

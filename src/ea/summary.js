@@ -332,16 +332,19 @@ export function formatDiagnosticsBlock(report) {
 }
 
 /**
- * The name of the evidence file one Solve writes to the user's Downloads
- * folder (#75): `fsl-diagnostics-<buildId>-<timestamp>.json`. The build id's
- * `/` becomes `-` and the ISO timestamp loses its milliseconds and has its
- * `:` replaced by `-`, so the name is valid on every filesystem a browser may
- * target while staying sortable and readable. Pure, with the clock injected,
- * so the exact name is provable without a browser.
+ * The name of the failed-Solve evidence file the bridge writes to the user's
+ * Downloads folder (#75, #87): `fsl-diagnostics-<buildId>-<YYYY-MM-DD>.json`.
+ * The build id's `/` becomes `-` and the date carries no time of day, so a
+ * directory listing records which day had a failed Solve but not when the
+ * player was in the game. Two failed Solves on one day produce the same name;
+ * the browser appends its own ` (1)` suffix, so a same-day collision costs a
+ * suffix rather than a file, and this code deliberately adds no counter of its
+ * own. Pure, with the clock injected, so the exact name is provable without a
+ * browser.
  *
  * @param {string} buildId the `build.id` carried by the report, e.g. `fsl-build/11`
- * @param {Date} [at] the solve's timestamp; defaults to now
- * @returns {string} e.g. `fsl-diagnostics-fsl-build-11-2026-09-27T14-02-11Z.json`
+ * @param {Date} [at] the solve's date; defaults to now
+ * @returns {string} e.g. `fsl-diagnostics-fsl-build-11-2026-09-27.json`
  * @throws {Error} when `buildId` is not a non-empty string or `at` is not a
  *   valid `Date`
  */
@@ -353,8 +356,8 @@ export function formatDiagnosticsFileName(buildId, at = new Date()) {
     throw new Error('formatDiagnosticsFileName: at must be a valid Date');
   }
   const id = buildId.replaceAll('/', '-');
-  const stamp = at.toISOString().replace(/\.\d{3}Z$/, 'Z').replaceAll(':', '-');
-  return `fsl-diagnostics-${id}-${stamp}.json`;
+  const date = at.toISOString().slice(0, 10);
+  return `fsl-diagnostics-${id}-${date}.json`;
 }
 
 /**
