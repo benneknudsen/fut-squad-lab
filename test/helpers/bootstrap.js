@@ -11,6 +11,11 @@
  * module hands in a real dynamic `import()`. Passing `window` and `document`
  * runs the body against a shared fake the caller owns, which is how the two
  * worlds get onto one channel.
+ *
+ * `logged` and `warned` are the console lines the bootstrap wrote, and they are
+ * only recorded when the harness owns the console. Given a shared `window` the
+ * lines are forwarded to that window's own console instead, so a caller
+ * recording one console for both worlds sees every line exactly once.
  */
 
 import { readFileSync } from 'node:fs';
@@ -40,6 +45,7 @@ export const loadMainWorldBootstrap = ({
   const posted = [];
   const importCalls = [];
   const listeners = [];
+  const logged = [];
   const warned = [];
   const startPageBridge = vi.fn();
 
@@ -55,15 +61,21 @@ export const loadMainWorldBootstrap = ({
       },
     };
   if (targetWindow === undefined) {
-    window.console = { warn: (line) => warned.push(line) };
+    // The bootstrap owns this console, so it records every line itself.
+    window.console = {
+      log: (line) => logged.push(line),
+      warn: (line) => warned.push(line),
+    };
   } else {
+    // The caller owns that console and records it. Forwarding rather than
+    // recording here as well is what keeps every line in the caller's list
+    // exactly once, which is the whole point of sharing one console across both
+    // worlds.
     const inner = window.console ?? {};
     window.console = {
       ...inner,
-      warn: (line) => {
-        warned.push(line);
-        inner.warn?.(line);
-      },
+      log: (line) => inner.log?.(line),
+      warn: (line) => inner.warn?.(line),
     };
     window.addEventListener('message', (handler) => listeners.push(handler));
   }
@@ -95,6 +107,7 @@ export const loadMainWorldBootstrap = ({
     window,
     posted,
     warned,
+    logged,
     importCalls,
     startPageBridge,
     dispatch(data) {

@@ -45,6 +45,7 @@ import {
   NONCE_FIELD,
   PAGE_SOURCE,
   PAGE_TO_CONTENT_KINDS,
+  createBootLog,
   nonceMatches,
 } from './ui/messages.js';
 import { FALLBACK_VIA, describeMountShape, findPanelMount } from './ui/panel-mount.js';
@@ -126,6 +127,11 @@ export function startPageBridge(pageWindow, options = {}) {
   const hookTimeoutMs = options.hookTimeoutMs ?? DEFAULT_HOOK_TIMEOUT_MS;
   const nonce = typeof options.nonce === 'string' && options.nonce.length > 0 ? options.nonce : null;
 
+  // #102: the boot log, written to the page's own console. These lines do not go
+  // through the relay, so a MAIN-world failure stays legible even when the
+  // isolated world is the one that did not boot.
+  const bootLog = createBootLog(pageWindow.console);
+
   const state = {
     label: null,
     controller: null,
@@ -181,8 +187,13 @@ export function startPageBridge(pageWindow, options = {}) {
   const installObservation = () => {
     try {
       observer.install(resolveObservationTargets(pageWindow).targets);
-    } catch {
-      // A read-only observer must never be able to lose the bridge.
+      bootLog('observer installed');
+    } catch (error) {
+      // A read-only observer must never be able to lose the bridge, so the
+      // failure is still swallowed — but it is logged as well, because an
+      // observer that never installed is otherwise indistinguishable from one
+      // that did and the report it feeds would quietly carry no captures.
+      bootLog(`observer install failed: ${error.message}`);
     }
   };
 
@@ -365,12 +376,14 @@ export function startPageBridge(pageWindow, options = {}) {
 
   const patchPanel = (Controller) => {
     if (typeof Controller !== 'function' || Controller.prototype === undefined) {
+      bootLog('panel hook not found');
       reportError(`EA global ${EA_GLOBALS.squadDetailPanel} is not a constructor with a prototype`);
       return;
     }
     const entry = EA_PANEL_HOOK.entry;
     const original = Controller.prototype[entry];
     if (typeof original !== 'function') {
+      bootLog('panel hook not found');
       reportError(
         `EA class ${EA_GLOBALS.squadDetailPanel} has no ${entry} method; cannot hook the SBC` +
           ' panel'
@@ -394,6 +407,7 @@ export function startPageBridge(pageWindow, options = {}) {
     };
     patched[PATCH_FLAG] = true;
     Controller.prototype[entry] = patched;
+    bootLog('panel hook found');
     // #90: the reference to EA's own function, kept so the restore is exact
     // rather than re-derived. The record is what makes the restore idempotent
     // and safe on a page that was never patched.
@@ -482,9 +496,17 @@ export function startPageBridge(pageWindow, options = {}) {
     if (Controller === null) {
       if (Date.now() >= deadline) {
         pageWindow.clearInterval(timer);
+        const waited = `${Math.round(hookTimeoutMs / 1000)}s`;
         reportError(
           `EA global ${EA_GLOBALS.squadDetailPanel} was not found on the page window after` +
-            ` ${Math.round(hookTimeoutMs / 1000)}s; the FC27 web app may have renamed it`
+            ` ${waited}; the FC27 web app may have renamed it`
+        );
+        // #102: the one line that tells "EA renamed the class" apart from every
+        // other failed boot, and the failure a first live run is most likely to
+        // hit. Nothing posts anything else on this path, so without it the button
+        // simply never appears.
+        bootLog(
+          `panel hook not found: timed out after ${waited} waiting for ${EA_GLOBALS.squadDetailPanel}`
         );
       }
       return;
@@ -497,6 +519,11 @@ export function startPageBridge(pageWindow, options = {}) {
   };
   const timer = pageWindow.setInterval(poll, hookPollMs);
   poll();
+
+  // #102: last, so a log that stops anywhere above names the stage it stopped
+  // at: the hook poll is installed and the module is running. The button may
+  // still be waiting on EA calling the panel entry point.
+  bootLog('ready');
 
   post(PAGE_TO_CONTENT_KINDS.BRIDGE_HELLO);
 }

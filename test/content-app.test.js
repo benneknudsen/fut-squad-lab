@@ -9,6 +9,7 @@ import {
   mintSessionNonce,
   startContentApp,
 } from '../src/content-app.js';
+import { BUILD_ID } from '../src/ea/build.js';
 import { NONCE_BYTES, formatNonce } from '../src/ui/messages.js';
 import { TEST_NONCE, stubCrypto } from './helpers/nonce.js';
 
@@ -162,6 +163,17 @@ const startFakeContentApp = (options = {}) => {
   return { ...fake, fakeConsole, created, workers };
 };
 
+// #102: the relay writes its own boot lines, so "nothing was logged" is no
+// longer the thing these tests assert. They assert that the forged or foreign
+// text was not logged, and that the boot lines are the only thing that was.
+const loggedLines = (spy) => spy.mock.calls.map(([line]) => line);
+
+const BOOT_LINES = [
+  `[FUT Squad Lab] build ${BUILD_ID} booting`,
+  '[FUT Squad Lab] content relay ready',
+  '[FUT Squad Lab] bridge module handshake sent',
+];
+
 describe('startContentApp message listener', () => {
   it('ignores a summary and a bridge hello posted by a foreign frame', () => {
     const { dispatchMessage, messages, fakeConsole } = startFakeContentApp();
@@ -174,7 +186,7 @@ describe('startContentApp message listener', () => {
       {}
     );
     dispatchMessage({ source: 'fsl-page', kind: 'bridge-hello' }, {});
-    expect(fakeConsole.log).not.toHaveBeenCalled();
+    expect(loggedLines(fakeConsole.log)).toEqual(BOOT_LINES);
     expect(messages.filter((message) => message.kind === 'bridge-module')).toHaveLength(1);
   });
 
@@ -423,7 +435,7 @@ describe('the session nonce on the channel', () => {
       download: { ok: true, file: 'forged.json' },
     });
 
-    expect(fakeConsole.log).not.toHaveBeenCalled();
+    expect(loggedLines(fakeConsole.log)).toEqual(BOOT_LINES);
     expect(root.children).toEqual([]);
   });
 
@@ -502,8 +514,7 @@ describe('startContentApp diagnostics relay', () => {
 
     dispatchMessage(relayed());
 
-    expect(fakeConsole.log).toHaveBeenCalledTimes(1);
-    expect(fakeConsole.log).toHaveBeenCalledWith(BLOCK);
+    expect(loggedLines(fakeConsole.log).filter((line) => line === BLOCK)).toHaveLength(1);
     expect(root.children).toHaveLength(1);
     expect(root.children[0].textContent).toBe(`Diagnostics saved to ${FILE}`);
     expect(root.children[0].getAttribute('role')).toBe('status');
@@ -578,7 +589,7 @@ describe('startContentApp diagnostics relay', () => {
 
     dispatchMessage(relayed(), {});
 
-    expect(fakeConsole.log).not.toHaveBeenCalled();
+    expect(loggedLines(fakeConsole.log)).toEqual(BOOT_LINES);
     expect(root.children).toHaveLength(0);
   });
 
@@ -588,6 +599,6 @@ describe('startContentApp diagnostics relay', () => {
 
     dispatchMessage({ source: 'fsl-page', nonce: TEST_NONCE, kind: 'diagnostics', file: FILE });
 
-    expect(fakeConsole.log).not.toHaveBeenCalled();
+    expect(loggedLines(fakeConsole.log)).toEqual(BOOT_LINES);
   });
 });

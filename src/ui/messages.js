@@ -22,6 +22,10 @@
  * script must be on the channel and know this session's value to exercise one.
  * What it stops is forgery that does not bother to observe the channel, and
  * another script that happens to speak these tags by accident.
+ *
+ * #102 adds the console half of that contract: the prefix and the one boot-log
+ * writer both worlds use, so a pasted console log says which stage the boot
+ * reached without the reader having to know any of this.
  */
 
 export const PAGE_SOURCE = 'fsl-page';
@@ -59,6 +63,38 @@ export const NONCE_FIELD = 'nonce';
 
 /** Bytes of entropy behind one session nonce. */
 export const NONCE_BYTES = 16;
+
+/**
+ * The prefix every line this extension writes to the page console carries (#102).
+ *
+ * It is the one string both worlds put in front of every line, so it lives here
+ * with the rest of the cross-world literals. `src/page-bridge.js` is a classic
+ * MAIN-world script and cannot import this module, so it spells the prefix out
+ * itself; `test/bootstrap.test.js` locks the two together. Nothing else may
+ * hold a copy.
+ */
+export const LOG_PREFIX = '[FUT Squad Lab]';
+
+/**
+ * Builds one console line: the prefix, and nothing else.
+ *
+ * @param {string} line the stage description
+ * @returns {string} the prefixed line
+ */
+export const bootLine = (line) => `${LOG_PREFIX} ${line}`;
+
+/**
+ * The one boot-log writer, bound to the console of the world that logs (#102).
+ *
+ * One stage per call, at the point the stage completes: a line in a pasted log
+ * is evidence that the stage happened, so nothing here logs speculatively. It
+ * takes no level — a caller that already had one keeps it and composes its own
+ * line with `bootLine`.
+ *
+ * @param {{ log: Function }|undefined|null} console the console of this world
+ * @returns {Function} writes one prefixed line
+ */
+export const createBootLog = (console) => (line) => console?.log?.(bootLine(line));
 
 /**
  * Renders random bytes as the hex nonce that travels on the channel. Hex, not

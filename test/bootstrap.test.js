@@ -6,6 +6,7 @@ import {
   BRIDGE_MODULE_FILE,
   CONTENT_SOURCE,
   CONTENT_TO_PAGE_KINDS,
+  LOG_PREFIX,
   NONCE_FIELD,
   PAGE_SOURCE,
   isBridgeModuleUrl,
@@ -43,6 +44,20 @@ describe('main-world bootstrap', () => {
     const source = read(PAGE_BRIDGE);
     expect(source).not.toMatch(/^\s*import\s+(?!\()/m);
     expect(source).not.toMatch(/^\s*export\b/m);
+  });
+});
+
+// #102: the console prefix is the one string both worlds write on every line, so
+// a copy of it that drifted would silently split the boot log in two. Exactly
+// one classic script may spell it out; the other must reach the shared constant
+// through the log helper it loads at runtime.
+describe('the console prefix in the classic scripts', () => {
+  const occurrences = (source, value) => source.split(`'${value}'`).length - 1;
+
+  it('is spelled once in the MAIN-world loader and nowhere in the isolated one', () => {
+    expect(LOG_PREFIX).toBe('[FUT Squad Lab]');
+    expect(occurrences(read(PAGE_BRIDGE), LOG_PREFIX)).toBe(1);
+    expect(occurrences(read(CONTENT), LOG_PREFIX)).toBe(0);
   });
 });
 

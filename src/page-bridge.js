@@ -18,6 +18,12 @@
  * isolated relay and arrives on the message — so what it checks is that a
  * bridge-module message carries one at all, and it hands the value to the
  * module, which requires it on everything from then on.
+ *
+ * #102 adds two console lines: one when this script announces itself, one when
+ * the module has loaded and been started. Neither has a breadcrumb anywhere
+ * else — the relay drops every message that does not carry the session nonce, so
+ * the normal path of the handshake is silent by design, which is what made a
+ * failed boot the hardest failure to read from the outside.
  */
 (() => {
   const PAGE_SOURCE = 'fsl-page';
@@ -27,6 +33,11 @@
   const BRIDGE_MODULE_PATH = BRIDGE_MODULE_SUFFIX.slice(1);
   const CHROME_EXTENSION_PREFIX = 'chrome-extension://';
   const NONCE_FIELD = 'nonce';
+  // #102: the shared console prefix, mirrored from `src/ui/messages.js` because
+  // this classic script cannot import it. This is the one file allowed to spell
+  // it out; `test/bootstrap.test.js` locks the two together, as it locks the
+  // tags above.
+  const LOG_PREFIX = '[FUT Squad Lab]';
 
   const extensionIdFromScriptUrl = (url) => {
     if (typeof url !== 'string' || !url.startsWith(CHROME_EXTENSION_PREFIX)) return null;
@@ -54,6 +65,10 @@
 
   let started = false;
 
+  // #102: one console line per stage, written the moment the stage completes, so
+  // a pasted log says which half of the handshake a live run reached.
+  const log = (message) => window.console?.log?.(`${LOG_PREFIX} ${message}`);
+
   // #88: the relay drops everything that does not carry the session nonce, and
   // this script has no nonce of its own to sign an error with, so a refusal is
   // also written straight to the console. Without that, refusing a hostile
@@ -61,7 +76,7 @@
   // silently. The message names the URL's origin, never the nonce.
   const report = (message) => {
     window.postMessage({ source: PAGE_SOURCE, kind: 'error', message }, '*');
-    window.console?.warn?.(`[FUT Squad Lab] ${message}`);
+    window.console?.warn?.(`${LOG_PREFIX} ${message}`);
   };
 
   const isOwnBridgeModuleUrl = (url) =>
@@ -94,7 +109,10 @@
     }
     started = true;
     import(data.url)
-      .then((module) => module.startPageBridge(window, { nonce }))
+      .then((module) => {
+        module.startPageBridge(window, { nonce });
+        log('bridge module loaded');
+      })
       .catch((error) => {
         started = false;
         report(`could not load the bridge module: ${error.message}`);
@@ -102,4 +120,5 @@
   });
 
   window.postMessage({ source: PAGE_SOURCE, kind: 'bridge-hello' }, '*');
+  log('loader acknowledged bridge-hello');
 })();
