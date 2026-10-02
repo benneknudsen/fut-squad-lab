@@ -72,11 +72,14 @@ const createFakeWindow = ({ withController = true, withHook = true } = {}) => {
   function UTSBCSquadDetailPanelViewController() {
     this.view = view;
   }
+  // The reference a teardown test needs: EA's own method, kept by identity so
+  // "restored" can be asserted as `toBe(eaPanelHook)` rather than as a flag.
+  const eaPanelHook = function (subject) {
+    this.subject = subject;
+    return 'original result';
+  };
   if (withHook) {
-    UTSBCSquadDetailPanelViewController.prototype.initWithSBCSet = function (subject) {
-      this.subject = subject;
-      return 'original result';
-    };
+    UTSBCSquadDetailPanelViewController.prototype.initWithSBCSet = eaPanelHook;
   }
 
   const document = {
@@ -95,7 +98,7 @@ const createFakeWindow = ({ withController = true, withHook = true } = {}) => {
       messages.push(message);
     },
     addEventListener(type, handler) {
-      if (type === 'message') listeners.push(handler);
+      listeners.push({ type, handler });
     },
     setInterval(handler, ms) {
       return setInterval(handler, ms);
@@ -109,9 +112,17 @@ const createFakeWindow = ({ withController = true, withHook = true } = {}) => {
   return {
     pageWindow,
     view,
+    eaPanelHook,
     messages,
     dispatchMessage(data, source = pageWindow) {
-      for (const listener of listeners) listener({ data, source });
+      for (const listener of listeners) {
+        if (listener.type === 'message') listener.handler({ data, source });
+      }
+    },
+    dispatchPageHide({ persisted = false } = {}) {
+      for (const listener of listeners) {
+        if (listener.type === 'pagehide') listener.handler({ type: 'pagehide', persisted });
+      }
     },
   };
 };
@@ -217,6 +228,87 @@ describe('startPageBridge', () => {
     });
     const summary = messages.find((message) => message.kind === 'summary');
     expect(summary.summary).toMatch(/challenge not detected/i);
+  });
+});
+
+// Issue #90: the button needs a prototype hook, because EA re-renders the panel
+// and the extension has no event to listen to. The mutation is a decision, so
+// teardown hands EA its own function back rather than leaving a first-party
+// prototype patched after the page is gone.
+describe('the patched EA prototype', () => {
+  it('is EA\'s own function again on pagehide, by identity and not by a cleared flag', () => {
+    const { pageWindow, eaPanelHook, dispatchPageHide } = createFakeWindow();
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
+    const { prototype } = pageWindow.UTSBCSquadDetailPanelViewController;
+    // The bridge owns two layers here: its own wrapper, and the observer's on
+    // top of it. Identity is the only assertion that sees through both.
+    expect(prototype.initWithSBCSet).not.toBe(eaPanelHook);
+
+    dispatchPageHide();
+
+    expect(prototype.initWithSBCSet).toBe(eaPanelHook);
+    // EA's own method still behaves: the wrapper passed arguments through and
+    // returned its result, so the restored function is the same behaviour.
+    expect(prototype.initWithSBCSet.call({}, challengeFixture)).toBe('original result');
+  });
+
+  it('restores exactly once, and a second pagehide over a live bridge does not throw', () => {
+    const { pageWindow, eaPanelHook, dispatchPageHide, messages } = createFakeWindow();
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
+    const { prototype } = pageWindow.UTSBCSquadDetailPanelViewController;
+    const before = messages.length;
+
+    dispatchPageHide();
+    dispatchPageHide();
+
+    expect(prototype.initWithSBCSet).toBe(eaPanelHook);
+    // A teardown path that reported on itself would put noise in the console of
+    // a page the player is leaving.
+    expect(messages.slice(before).some((message) => message.kind === 'error')).toBe(false);
+  });
+
+  it('survives a back/forward cache round trip, so the button still mounts after the page comes back', () => {
+    // `pagehide` with `persisted: true` means the document is going into the
+    // bfcache: its heap, its listeners and this patch all come back untouched,
+    // and nothing re-patches it. Restoring here would remove the only hook the
+    // button has, silently, on every Back button press inside the SPA.
+    const { pageWindow, view, eaPanelHook, dispatchMessage, dispatchPageHide } = createFakeWindow();
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
+    dispatchMessage(COPY_MESSAGE);
+    const Controller = pageWindow.UTSBCSquadDetailPanelViewController;
+
+    dispatchPageHide({ persisted: true });
+
+    expect(Controller.prototype.initWithSBCSet).not.toBe(eaPanelHook);
+    new Controller().initWithSBCSet(challengeFixture);
+    expect(mountedButton(view)?.textContent).toBe('Løs denne udfordring');
+  });
+
+  it('restores a hook EA replaced itself, without clobbering what is there now', () => {
+    const { pageWindow, eaPanelHook, dispatchPageHide } = createFakeWindow();
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1 });
+    const { prototype } = pageWindow.UTSBCSquadDetailPanelViewController;
+    // EA hot-swapped the method after we patched it. Restoring over that would
+    // silently reinstate a function the page has already discarded.
+    const easReplacement = function () {
+      return 'ea replaced this';
+    };
+    prototype.initWithSBCSet = easReplacement;
+
+    dispatchPageHide();
+
+    expect(prototype.initWithSBCSet).toBe(easReplacement);
+    expect(prototype.initWithSBCSet).not.toBe(eaPanelHook);
+  });
+
+  it('tears down on a page that was never patched, without throwing', async () => {
+    const { pageWindow, dispatchPageHide } = createFakeWindow({ withController: false });
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 2, hookTimeoutMs: 10 });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(() => {
+      dispatchPageHide();
+    }).not.toThrow();
   });
 });
 

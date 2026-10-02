@@ -137,6 +137,7 @@ export function startPageBridge(pageWindow, options = {}) {
     mount: null,
     diagnostics: null,
     observerGrouped: false,
+    panelPatch: null,
   };
 
   // #88: the one `post` choke point every message to the isolated world goes
@@ -393,9 +394,37 @@ export function startPageBridge(pageWindow, options = {}) {
     };
     patched[PATCH_FLAG] = true;
     Controller.prototype[entry] = patched;
+    // #90: the reference to EA's own function, kept so the restore is exact
+    // rather than re-derived. The record is what makes the restore idempotent
+    // and safe on a page that was never patched.
+    state.panelPatch = { Controller, entry, original, patched };
     post(PAGE_TO_CONTENT_KINDS.BRIDGE_READY, {
       message: `hooked ${EA_GLOBALS.squadDetailPanel}.${entry}`,
     });
+  };
+
+  /**
+   * #90: hands EA's own function back, undoing the one mutation this bridge
+   * makes to a first-party object.
+   *
+   * Two things it deliberately does not do. It does not re-derive the original:
+   * the reference captured at patch time is the only exact one. And it does not
+   * overwrite whatever is on the prototype now — if EA replaced the method
+   * after we patched it, reinstating our stale copy would resurrect a function
+   * the page has already discarded.
+   *
+   * Call order matters. The observer wraps this patch, so `observer.remove()`
+   * has to run first; restoring before that would find its own function
+   * missing and quietly do nothing.
+   */
+  const restorePanelPatch = () => {
+    const patch = state.panelPatch;
+    if (patch === null) return;
+    // Cleared before the write, so a second call is a no-op whatever happens
+    // next, and a throw below cannot leave the bridge restoring in a loop.
+    state.panelPatch = null;
+    if (patch.Controller.prototype[patch.entry] !== patch.patched) return;
+    patch.Controller.prototype[patch.entry] = patch.original;
   };
 
   pageWindow.addEventListener('message', (event) => {
@@ -425,7 +454,7 @@ export function startPageBridge(pageWindow, options = {}) {
     }
   });
 
-  pageWindow.addEventListener('pagehide', () => {
+  pageWindow.addEventListener('pagehide', (event) => {
     service.cancel();
     transport.cancel();
     // Never leave an observer wrapper installed: restore EA's own functions
@@ -435,6 +464,16 @@ export function startPageBridge(pageWindow, options = {}) {
       state.observerGrouped = false;
       pageWindow.console?.groupEnd?.();
     }
+    // #90: `persisted: true` means this document is going into the back/forward
+    // cache, not away. Its heap, its listeners and this patch all come back
+    // untouched, and nothing re-patches it — the poll that patched it has
+    // already stopped, and a content script does not re-run on a cache
+    // restore. Restoring here would remove the only hook the button has, so the
+    // Solve button would silently stop appearing on every Back press inside the
+    // SPA. A cached page is frozen and running nothing, so keeping the patch
+    // across the round trip costs nothing; a real unload gets EA's function
+    // back.
+    if (event?.persisted !== true) restorePanelPatch();
   });
 
   const deadline = Date.now() + hookTimeoutMs;
