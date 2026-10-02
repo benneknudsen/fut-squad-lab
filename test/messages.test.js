@@ -151,4 +151,35 @@ describe('isBridgeModuleUrl', () => {
       false
     );
   });
+
+  it('rejects any path that is not the module path, including a traversal out of one', () => {
+    // A suffix check admits every one of these, because they all end in the
+    // module path: the gate has to be on the whole path, not on its tail.
+    for (const path of [
+      '../src/page-bridge-app.js',
+      'src/../src/page-bridge-app.js',
+      'src/ui/../page-bridge-app.js',
+      'assets/src/page-bridge-app.js',
+      // The `use_dynamic_url` shape is a replaced host, not a `_/` path segment
+      // (`TransformToDynamicURLIfNecessary` swaps the host and keeps the path),
+      // so no path of ours may carry one either.
+      '_/src/page-bridge-app.js',
+    ]) {
+      expect(isBridgeModuleUrl(`chrome-extension://${OWN_ID}/${path}`, OWN_ID)).toBe(false);
+    }
+  });
+
+  it('pins the extension id character for character, not just the scheme', () => {
+    // #85's whole point. If the id comparison were dropped in favour of "some
+    // chrome-extension host", every one of these would be admitted.
+    const nearMissId = `x${OWN_ID.slice(1)}`;
+    expect(
+      isBridgeModuleUrl(`chrome-extension://${nearMissId}/${BRIDGE_MODULE_FILE}`, OWN_ID),
+    ).toBe(false);
+    // And the refusal is the id pin, not something else: the same URL is
+    // accepted under its own id, so only the comparison can be responsible.
+    expect(
+      isBridgeModuleUrl(`chrome-extension://${nearMissId}/${BRIDGE_MODULE_FILE}`, nearMissId),
+    ).toBe(true);
+  });
 });

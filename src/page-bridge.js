@@ -24,6 +24,7 @@
   const CONTENT_SOURCE = 'fsl-content';
   const BRIDGE_MODULE_KIND = 'bridge-module';
   const BRIDGE_MODULE_SUFFIX = '/src/page-bridge-app.js';
+  const BRIDGE_MODULE_PATH = BRIDGE_MODULE_SUFFIX.slice(1);
   const CHROME_EXTENSION_PREFIX = 'chrome-extension://';
   const NONCE_FIELD = 'nonce';
 
@@ -67,7 +68,7 @@
     ownModulePrefix !== null &&
     typeof url === 'string' &&
     url.startsWith(ownModulePrefix) &&
-    url.endsWith(BRIDGE_MODULE_SUFFIX);
+    url.slice(ownModulePrefix.length) === BRIDGE_MODULE_PATH;
 
   // A nonce the relay minted is a non-empty string. Shape is deliberately not
   // checked here: this script is the point where the value is accepted, and
@@ -87,7 +88,7 @@
       const reason =
         ownModulePrefix === null
           ? 'this extension could not determine its own id'
-          : `expected ${ownModulePrefix}${BRIDGE_MODULE_SUFFIX.slice(1)}`;
+          : `expected ${ownModulePrefix}${BRIDGE_MODULE_PATH}`;
       report(`refused bridge module URL ${extensionOrigin(data.url)}; ${reason}`);
       return;
     }

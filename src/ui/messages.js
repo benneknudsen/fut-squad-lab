@@ -106,10 +106,16 @@ export function nonceMatches(expected, candidate) {
 
 /**
  * True only for a `chrome-extension://` URL from the given extension id whose
- * path ends in the bridge module. The URL arrives by postMessage, where any
- * page script can see it and post its own; scheme and path alone are not
- * enough, so the caller must pass its own extension id and a caller that cannot
- * name one rejects everything.
+ * path is the bridge module. The URL arrives by postMessage, where any page
+ * script can see it and post its own; scheme and path alone are not enough, so
+ * the caller must pass its own extension id and a caller that cannot name one
+ * rejects everything.
+ *
+ * The check is on the whole path, not on its tail: a suffix test would admit
+ * `chrome-extension://<own-id>/../src/page-bridge-app.js` and
+ * `.../assets/src/page-bridge-app.js`, neither of which is this module. Both
+ * `src/page-bridge.js` and this function must agree — see the note on the copy
+ * in the MAIN-world bootstrap, which cannot import this module.
  *
  * @param {*} url the candidate URL
  * @param {*} extensionId the extension id that must serve the URL
@@ -118,6 +124,5 @@ export function nonceMatches(expected, candidate) {
 export function isBridgeModuleUrl(url, extensionId) {
   if (typeof url !== 'string') return false;
   if (typeof extensionId !== 'string' || extensionId.length === 0) return false;
-  if (!url.startsWith(`chrome-extension://${extensionId}/`)) return false;
-  return url.endsWith(`/${BRIDGE_MODULE_FILE}`);
+  return url === `chrome-extension://${extensionId}/${BRIDGE_MODULE_FILE}`;
 }
