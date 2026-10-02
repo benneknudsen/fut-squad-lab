@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  BRIDGE_LOADER_FILE,
   BRIDGE_MODULE_FILE,
   CONTENT_SOURCE,
   CONTENT_TO_PAGE_KINDS,
@@ -14,7 +15,13 @@ import {
 import {
   FOREIGN_EXTENSION_ID,
   OWN_EXTENSION_ID,
-  loadMainWorldBootstrap,
+  OWN_LOADER_URL,
+  OWN_MODULE_URL,
+  createScriptElement,
+  injectLoaderScript,
+  parkInjectedScript,
+  startInjectedLoader,
+  startUnidentifiedLoader,
 } from './helpers/bootstrap.js';
 import { TEST_NONCE } from './helpers/nonce.js';
 
@@ -26,6 +33,32 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 
 const PAGE_BRIDGE = 'src/page-bridge.js';
 const CONTENT = 'src/content.js';
+
+/** A document that has not been injected into yet, and the list that records it. */
+const createDocument = () => {
+  const injectedScripts = [];
+  return {
+    injectedScripts,
+    document: {
+      // A real document has this, and it is `null` outside a script's own
+      // evaluation — which is the whole of #105's problem in one property.
+      currentScript: null,
+      createElement: (tagName) => (String(tagName).toLowerCase() === 'script' ? createScriptElement() : {}),
+      head: { appendChild: parkInjectedScript(injectedScripts) },
+    },
+  };
+};
+
+/**
+ * The relay's injection followed by the browser's evaluation — the only way into
+ * the loader body since #105. There is deliberately no option for handing it a
+ * script element some other way.
+ */
+const startLoader = ({ url = OWN_LOADER_URL, importModule } = {}) => {
+  const { document, injectedScripts } = createDocument();
+  injectLoaderScript(document, { url });
+  return startInjectedLoader({ document, injectedScripts, importModule });
+};
 
 describe('main-world bootstrap', () => {
   it('uses the message contract tags from messages.js', () => {
@@ -61,21 +94,130 @@ describe('the console prefix in the classic scripts', () => {
   });
 });
 
+// #105: the loader reads its own extension id off the `<script>` element it was
+// injected through, because that is the only thing in the MAIN world that names
+// this extension. These tests pin where that element comes from and what the
+// loader does without one — the state a manifest-declared MAIN-world content
+// script is in, and the reason the first live run refused the relay's own message.
+describe('the script element the MAIN world reads its extension id from', () => {
+  it('is the element the relay injected, not a fabricated one', async () => {
+    const { document, injectedScripts } = createDocument();
+    const injected = injectLoaderScript(document);
+
+    expect(injected.src).toBe(OWN_LOADER_URL);
+    expect(injectedScripts).toEqual([injected]);
+
+    const bridge = startInjectedLoader({ document, injectedScripts });
+    bridge.dispatch({
+      source: CONTENT_SOURCE,
+      kind: CONTENT_TO_PAGE_KINDS.BRIDGE_MODULE,
+      nonce: TEST_NONCE,
+      url: OWN_MODULE_URL,
+    });
+
+    await vi.waitFor(() => {
+      expect(bridge.importCalls).toEqual([OWN_MODULE_URL]);
+    });
+  });
+
+  it('does not exist in a document that never injected it, so there is no id to pin', () => {
+    const { document } = createDocument();
+
+    // The state a manifest-declared MAIN-world content script is in, and the one
+    // this harness used to paper over. Here `document.currentScript` is null
+    // before the body runs and null after it, as it is in a real document at
+    // rest.
+    expect(document.currentScript).toBeNull();
+    const bridge = startUnidentifiedLoader({ document });
+    expect(document.currentScript).toBeNull();
+
+    bridge.dispatch({
+      source: CONTENT_SOURCE,
+      kind: CONTENT_TO_PAGE_KINDS.BRIDGE_MODULE,
+      nonce: TEST_NONCE,
+      url: OWN_MODULE_URL,
+    });
+
+    // Failing closed is the point: this is the gate that #105 left intact, and a
+    // loosening of it would let an unidentified origin choose the module URL.
+    expect(bridge.importCalls).toEqual([]);
+    const error = bridge.posted.find((message) => message.kind === 'error');
+    // The line a player saw on fsl-build/13, verbatim. Two things are being kept
+    // apart on purpose: an extension that cannot name itself, and an extension
+    // that named something else.
+    expect(error.message).toBe(
+      `refused bridge module URL chrome-extension://${OWN_EXTENSION_ID}; ` +
+        'this extension could not determine its own id',
+    );
+    expect(bridge.warned.join('\n')).toBe(`[FUT Squad Lab] ${error.message}`);
+  });
+
+  it('is never invented for a document that injected nothing', () => {
+    // The harness must not be able to conjure the one element the whole design
+    // now rests on: a test that wants a loader has to inject one.
+    const { document, injectedScripts } = createDocument();
+
+    expect(() => startInjectedLoader({ document, injectedScripts })).toThrow(
+      /exactly one injected MAIN-world script/,
+    );
+  });
+
+  it('cannot be run twice off one injection, the way a page gets one loader', () => {
+    const { document, injectedScripts } = createDocument();
+    injectLoaderScript(document);
+    startInjectedLoader({ document, injectedScripts });
+
+    expect(() => startInjectedLoader({ document, injectedScripts })).toThrow(
+      /exactly one injected MAIN-world script/,
+    );
+  });
+
+  it('cannot be run at all off an element with no src, which a browser would fetch as the page', () => {
+    const { document, injectedScripts } = createDocument();
+    const element = document.createElement('script');
+    document.head.appendChild(element);
+
+    expect(() => startInjectedLoader({ document, injectedScripts })).toThrow(/no src/);
+  });
+
+  it('pins the extension that served it, so an element from elsewhere moves the pin', () => {
+    // The id is not a constant and not a message field: it is whichever extension
+    // the browser fetched this body from. So an element served by another
+    // extension pins *that* id, and this extension's own module URL is then the
+    // one refused. That is the direction the id is supposed to fail in — it takes
+    // the page's element at its word, and the element is the only thing naming it.
+    const foreignLoaderUrl = `chrome-extension://${FOREIGN_EXTENSION_ID}/${BRIDGE_LOADER_FILE}`;
+    const bridge = startLoader({ url: foreignLoaderUrl });
+    bridge.dispatch({
+      source: CONTENT_SOURCE,
+      kind: CONTENT_TO_PAGE_KINDS.BRIDGE_MODULE,
+      nonce: TEST_NONCE,
+      url: OWN_MODULE_URL,
+    });
+
+    expect(bridge.importCalls).toEqual([]);
+    const error = bridge.posted.find((message) => message.kind === 'error');
+    expect(error.message).toBe(
+      `refused bridge module URL chrome-extension://${OWN_EXTENSION_ID}; ` +
+        `expected ${foreignLoaderUrl.replace(BRIDGE_LOADER_FILE, BRIDGE_MODULE_FILE)}`,
+    );
+  });
+});
+
 describe('main-world bootstrap module gate', () => {
-  const ownModuleUrl = `chrome-extension://${OWN_EXTENSION_ID}/${BRIDGE_MODULE_FILE}`;
   const moduleMessage = (extra) => ({
     source: CONTENT_SOURCE,
     kind: 'bridge-module',
     nonce: TEST_NONCE,
-    url: ownModuleUrl,
+    url: OWN_MODULE_URL,
     ...extra,
   });
 
   it('imports the bridge module from this extension id and starts it with the nonce', async () => {
-    const bridge = loadMainWorldBootstrap();
+    const bridge = startLoader();
     bridge.dispatch(moduleMessage());
 
-    expect(bridge.importCalls).toEqual([ownModuleUrl]);
+    expect(bridge.importCalls).toEqual([OWN_MODULE_URL]);
     await vi.waitFor(() => {
       // The nonce the module is started with is the one the relay minted, so
       // the module can require it on everything it accepts from here on.
@@ -85,7 +227,7 @@ describe('main-world bootstrap module gate', () => {
 
   it('refuses an unsigned bridge-module message and never imports it', () => {
     for (const nonce of [undefined, null, '', 42, {}]) {
-      const bridge = loadMainWorldBootstrap();
+      const bridge = startLoader();
       bridge.dispatch(moduleMessage({ nonce }));
 
       expect(bridge.importCalls).toEqual([]);
@@ -97,7 +239,7 @@ describe('main-world bootstrap module gate', () => {
   });
 
   it('names the session nonce nowhere in its own output', () => {
-    const bridge = loadMainWorldBootstrap();
+    const bridge = startLoader();
     bridge.dispatch(
       moduleMessage({ url: `chrome-extension://${FOREIGN_EXTENSION_ID}/${BRIDGE_MODULE_FILE}` })
     );
@@ -107,7 +249,7 @@ describe('main-world bootstrap module gate', () => {
   });
 
   it('refuses a bridge-module URL from another extension and never imports it', () => {
-    const bridge = loadMainWorldBootstrap();
+    const bridge = startLoader();
     const foreignUrl = `chrome-extension://${FOREIGN_EXTENSION_ID}/${BRIDGE_MODULE_FILE}`;
     bridge.dispatch(moduleMessage({ url: foreignUrl }));
 
@@ -122,9 +264,14 @@ describe('main-world bootstrap module gate', () => {
     expect(bridge.warned.join('\n')).toContain(`chrome-extension://${FOREIGN_EXTENSION_ID}`);
   });
 
-  it('refuses every bridge-module message when it cannot derive its own id', () => {
-    for (const ownScriptUrl of [null, 'https://www.ea.com/src/page-bridge.js']) {
-      const bridge = loadMainWorldBootstrap({ ownScriptUrl });
+  it('refuses every bridge-module message when its script element is not an extension', () => {
+    // The id source is the URL the loader itself was loaded from, so anything
+    // that is not a `chrome-extension://` URL names no extension and the gate
+    // refuses rather than pinning against an origin it cannot verify. An element
+    // with no `src` at all never gets this far: a browser would fetch the page
+    // URL, so the harness refuses to run it.
+    for (const url of ['https://www.ea.com/src/page-bridge.js', 'about:blank', 'data:,']) {
+      const bridge = startLoader({ url });
       bridge.dispatch(moduleMessage());
 
       expect(bridge.importCalls).toEqual([]);
@@ -135,7 +282,7 @@ describe('main-world bootstrap module gate', () => {
   });
 
   it('refuses this extension id when the path is not the bridge module', () => {
-    const bridge = loadMainWorldBootstrap();
+    const bridge = startLoader();
     bridge.dispatch({
       ...moduleMessage(),
       url: `chrome-extension://${OWN_EXTENSION_ID}/src/other.js`,
@@ -156,7 +303,7 @@ describe('main-world bootstrap module gate', () => {
       // segment to the path, so no accepted path carries one either (#89).
       '_/src/page-bridge-app.js',
     ]) {
-      const bridge = loadMainWorldBootstrap();
+      const bridge = startLoader();
       bridge.dispatch(moduleMessage({ url: `chrome-extension://${OWN_EXTENSION_ID}/${path}` }));
 
       expect(bridge.importCalls).toEqual([]);
@@ -169,14 +316,14 @@ describe('main-world bootstrap module gate', () => {
     const nearMissId = `x${OWN_EXTENSION_ID.slice(1)}`;
     const nearMissUrl = `chrome-extension://${nearMissId}/${BRIDGE_MODULE_FILE}`;
 
-    const refused = loadMainWorldBootstrap();
+    const refused = startLoader();
     refused.dispatch(moduleMessage({ url: nearMissUrl }));
     expect(refused.importCalls).toEqual([]);
 
     // And the refusal is the id pin rather than anything else: the same URL is
-    // imported once the script derives that very id for itself.
-    const accepted = loadMainWorldBootstrap({
-      ownScriptUrl: `chrome-extension://${nearMissId}/src/page-bridge.js`,
+    // imported once the loader's own script element carries that very id.
+    const accepted = startLoader({
+      url: `chrome-extension://${nearMissId}/${BRIDGE_LOADER_FILE}`,
     });
     accepted.dispatch(moduleMessage({ url: nearMissUrl }));
     expect(accepted.importCalls).toEqual([nearMissUrl]);
@@ -200,7 +347,7 @@ describe('main-world bootstrap module gate', () => {
     ];
 
     for (const url of candidates) {
-      const bridge = loadMainWorldBootstrap();
+      const bridge = startLoader();
       bridge.dispatch(moduleMessage({ url }));
 
       expect(bridge.importCalls, `the bootstrap refused ${url}`).toEqual(
@@ -210,7 +357,7 @@ describe('main-world bootstrap module gate', () => {
   });
 
   it('imports once, so a second signed module message cannot restart the bridge', async () => {
-    const bridge = loadMainWorldBootstrap();
+    const bridge = startLoader();
     bridge.dispatch(moduleMessage());
     await vi.waitFor(() => {
       expect(bridge.startPageBridge).toHaveBeenCalledTimes(1);
@@ -218,7 +365,7 @@ describe('main-world bootstrap module gate', () => {
 
     bridge.dispatch(moduleMessage());
 
-    expect(bridge.importCalls).toEqual([ownModuleUrl]);
+    expect(bridge.importCalls).toEqual([OWN_MODULE_URL]);
     expect(bridge.startPageBridge).toHaveBeenCalledTimes(1);
   });
 });

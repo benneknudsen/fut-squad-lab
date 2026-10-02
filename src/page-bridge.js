@@ -1,12 +1,32 @@
 /**
  * MAIN-world bootstrap for the FUT Squad Lab bridge.
  *
- * Manifest-declared content scripts are classic scripts: they cannot use static
- * `import`, and the MAIN world has no `chrome.*` APIs to resolve an extension
- * URL. So this file does the minimum a MAIN-world script must do itself — learn
- * its own extension id from `document.currentScript`, listen for the relay's
- * message, validate the module URL against that id and dynamically import
- * `src/page-bridge-app.js` — and all real logic lives in that ES module.
+ * The isolated relay injects this file as a real `<script src>` element (#105),
+ * which is what makes the extension id readable at all. Chrome creates no
+ * `<script>` element for a manifest-declared MAIN-world content script, so in
+ * that world `document.currentScript` is `null`: #85 pinned the extension id off
+ * it, could never resolve one, and refused every message including the relay's
+ * own. An injected element is a genuine element, so the pin below is now a fact
+ * about this page rather than an assumption.
+ *
+ * So this file does the minimum a MAIN-world script must do itself — learn its
+ * own extension id from the element it was loaded through, listen for the
+ * relay's message, validate the module URL against that id and dynamically
+ * import `src/page-bridge-app.js` — and all real logic lives in that ES module.
+ *
+ * What the id source is and is not worth, now that it is load-bearing. It is not
+ * a value off the channel: nothing a page script posts can name an extension
+ * here, which is what #85 bought and what option B of #105 would have given
+ * back. It is a DOM read, so a page script that installs its own
+ * `document.currentScript` on the document *before* this element evaluates can
+ * lie about the id — the page and this script share one `window` and one
+ * `document`, and there is no second channel to be private on. The window for
+ * that is a script that already runs in the page, racing one injection at
+ * `document_start`; what it buys is the ability to have this loader import a
+ * `chrome-extension://` URL of the attacker's choosing. An ES-module loader
+ * reading `import.meta.url` would close it, and would also mean this file could
+ * no longer be run for real by `test/helpers/bootstrap.js`, which is the reason
+ * the read below stays.
  *
  * The tag literals below mirror `src/ui/messages.js`; the two files cannot
  * import each other, so `test/bootstrap.test.js` locks them together and tests
@@ -30,13 +50,14 @@
   const CONTENT_SOURCE = 'fsl-content';
   const BRIDGE_MODULE_KIND = 'bridge-module';
   const BRIDGE_MODULE_SUFFIX = '/src/page-bridge-app.js';
+  // The path with no leading slash, because the gate compares it against a URL
+  // that has already had `chrome-extension://<own-id>/` stripped off the front.
   const BRIDGE_MODULE_PATH = BRIDGE_MODULE_SUFFIX.slice(1);
   const CHROME_EXTENSION_PREFIX = 'chrome-extension://';
   const NONCE_FIELD = 'nonce';
-  // #102: the shared console prefix, mirrored from `src/ui/messages.js` because
-  // this classic script cannot import it. This is the one file allowed to spell
-  // it out; `test/bootstrap.test.js` locks the two together, as it locks the
-  // tags above.
+  // The one file allowed to spell out the console prefix, mirrored from
+  // `src/ui/messages.js` because this classic script cannot import it;
+  // `test/bootstrap.test.js` locks the two together, as it locks the tags above.
   const LOG_PREFIX = '[FUT Squad Lab]';
 
   const extensionIdFromScriptUrl = (url) => {
@@ -54,10 +75,15 @@
     return `${CHROME_EXTENSION_PREFIX}${slash === -1 ? rest : rest.slice(0, slash)}`;
   };
 
-  // `document.currentScript` is only readable during synchronous evaluation, so
-  // capture it before any listener can run. A page cannot change it mid-script;
-  // if it is missing or not an extension URL, every module message is refused
-  // rather than trusting an unidentified origin.
+  // The URL that names the extension this file belongs to: its own. Nothing on the
+  // channel has to be believed to reach it.
+  //
+  // #105: `document.currentScript` is only readable during synchronous
+  // evaluation, so this is read before any listener can run. It is an element
+  // here because the relay injected one; where there is no element — a document
+  // that never injected this script, or an element served from somewhere that is
+  // not this extension — there is no id to pin, and every module message is
+  // refused rather than trusting an unidentified origin.
   const ownScriptUrl = document.currentScript && document.currentScript.src;
   const ownExtensionId = extensionIdFromScriptUrl(ownScriptUrl);
   const ownModulePrefix =

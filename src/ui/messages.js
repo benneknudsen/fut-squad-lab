@@ -52,6 +52,21 @@ export const PAGE_TO_CONTENT_KINDS = Object.freeze({
   SOLVE_CANCEL: 'solve-cancel',
 });
 
+/**
+ * The classic MAIN-world loader, which the isolated relay injects as a real
+ * `<script src>` element rather than declaring in the manifest (#105).
+ *
+ * A manifest-declared MAIN-world content script gets no `<script>` element, so
+ * `document.currentScript` is `null` in it and the MAIN world cannot learn its own
+ * extension id at all. An injected element has one, which is what lets the loader
+ * pin the extension id before it imports anything (#85). It is listed here because
+ * the two files on either side of the injection — the relay that injects it and
+ * the loader that reads it — cannot import each other: `test/manifest.test.js`
+ * says the page must be able to load this exact file, and `test/content-app.test.js`
+ * locks the literal the relay injects to this one.
+ */
+export const BRIDGE_LOADER_FILE = 'src/page-bridge.js';
+
 /** The bridge module the classic MAIN-world loader dynamically imports. */
 export const BRIDGE_MODULE_FILE = 'src/page-bridge-app.js';
 
