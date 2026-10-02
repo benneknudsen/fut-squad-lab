@@ -46,6 +46,38 @@ const SENSITIVE_NAME =
 const REDACTED_NAME = '<redacted>';
 
 /**
+ * The placeholders `scrubExternalText` writes in place of removed content. They
+ * stay visible, so a reader can tell a scrubbed value from one that was never
+ * there, exactly as `REDACTED_NAME` does for names.
+ */
+const SCRUBBED_URL = '<redacted-url>';
+const SCRUBBED_DIGITS = '<redacted-digits>';
+
+/**
+ * Sanitises a string this project did not author — an EA error message, a live
+ * challenge name, an endpoint from a thrown failure — before it can be pasted
+ * into a public report. It keeps the useful shape (the URL path, short numbers)
+ * and replaces the parts that can identify a player or smuggle a block
+ * boundary: a URL query or fragment can carry a session token or an account id,
+ * a run of six or more digits is an EA persona, squad or item instance id (the
+ * same threshold the documentation guard uses), and a newline inside EA's text
+ * could forge a boundary in the diagnostics block a human pastes into a public
+ * issue. Pure and idempotent: scrubbing already-scrubbed text changes nothing,
+ * because neither placeholder contains a digit, a query or a newline.
+ *
+ * @param {*} text the value to scrub; anything that is not a string is returned
+ *   unchanged, so a caller may pass a mixed value without a type check
+ * @returns {*} the scrubbed string, or `text` unchanged
+ */
+export function scrubExternalText(text) {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/[?#][\s\S]*$/g, SCRUBBED_URL)
+    .replace(/\d{6,}/g, SCRUBBED_DIGITS)
+    .replace(/\r\n?|\n/g, ' ');
+}
+
+/**
  * Replaces a name that must not be reported with `<redacted>`. It stays in the
  * output, so a reader can tell a hidden field from an absent one.
  *
