@@ -10,7 +10,10 @@
 
 **Tech Stack:** Vanilla ES modules (no framework), Web Worker, Chrome MV3, Vitest for the solver core. Build step: none required (static files, `Load unpacked`). Node 20+ only for tests.
 
-**Status:** Plan only. No implementation until approved.
+**Status (2026-10-02):** M0–M6 implemented and green — 51 test files, 1179 tests
+against real captured fixtures. M7 (solution panel with per-slot alternatives) and
+M8 (design polish, README, publish) are open. The OpenDesign question in §7 is
+answered: the design bundle in `design/` is the contract — see `AGENTS.md`.
 
 ---
 
@@ -309,35 +312,61 @@ Two related features, both confirmed as in scope.
 ## 3. Repository layout
 
 ```
-fc27-sbc-solver/
+fut-squad-lab/
 ├─ manifest.json                 MV3 manifest
 ├─ src/
-│  ├─ page-bridge.js             MAIN world — hooks EA objects, injects Solve button
+│  ├─ page-bridge.js             MAIN world — hooks EA objects
+│  ├─ page-bridge-app.js         MAIN world — mounts the solve flow
 │  ├─ content.js                 ISOLATED world — relay between page and extension
-│  ├─ background.js              service worker — fut.gg price fetch + cache
+│  ├─ content-app.js             ISOLATED world — diagnostics + solve handoff
 │  ├─ ea/
 │  │  ├─ adapter.js              THE ONLY file that knows EA class/API names
+│  │  ├─ observable.js           EA's observable calling convention (.observe/.unobserve)
+│  │  ├─ observer.js             classifies a call by its innermost caller
+│  │  ├─ pacing.js               serialised, bounded request queue
+│  │  ├─ service-shape.js        runtime discovery of EA's own service objects
 │  │  ├─ challenge-reader.js     normalise challenge payload
 │  │  ├─ club-reader.js          normalise club items
-│  │  └─ squad-writer.js         write solution back into the challenge squad
-│  ├─ solver/
+│  │  ├─ build.js                builds the candidate pool
+│  │  ├─ solve-service.js        orchestrates one Solve
+│  │  ├─ solve-runner.js         runs the worker, applies the result
+│  │  ├─ solve-transport.js      page <-> worker messaging
+│  │  ├─ worker-client.js        worker handle
+│  │  ├─ squad-writer.js         write solution back into the challenge squad
+│  │  └─ summary.js              the === FUT Squad Lab diagnostics === block
+│  ├─ solver/                    pure — no DOM, no chrome.*, no network
 │  │  ├─ requirements.js         elgReq[] -> normalised constraint set
 │  │  ├─ chemistry.js            link/chem computation from /chemistry/profiles
 │  │  ├─ candidates.js           club -> trimmed candidate pool
 │  │  ├─ prices.js               cost model + price source merge
 │  │  ├─ validate.js             replicate EA's eligibility checks
-│  │  ├─ solve.js                greedy seed + local search
+│  │  ├─ solve.js                greedy seed + local search + reevaluate
+│  │  ├─ worker-protocol.js      worker message contract
 │  │  └─ worker.js               Web Worker entry
+│  ├─ shape.js                   shared payload-shape guards
 │  └─ ui/
-│     ├─ panel.js                in-page button + solution preview
-│     ├─ options.html/.js        settings
-│     └─ styles.css
-├─ test/
-│  ├─ fixtures/                  sanitised recon payloads
+│     ├─ solve-button.js         the Solve button and its states
+│     ├─ panel-mount.js          mounts the solution panel
+│     ├─ copy.js                 every UI string, from design/copy.*.json
+│     ├─ messages.js             message-type constants
+│     └─ styles.css              scoped under .fsl-root
+├─ test/                         51 files, 1179 tests
+│  ├─ fixtures/                  sanitised recon payloads from the live app
+│  ├─ helpers/
 │  └─ *.test.js
+├─ design/                       OpenDesign bundle — the contract for src/ui/
+├─ docs/PLAN.md                  this file
+├─ AGENTS.md                     repository conventions
 ├─ README.md
 └─ package.json                  vitest only, devDependency
 ```
+
+Files the plan once listed that do **not** exist, by design or decision:
+`background.js` (price fetching moved into `solver/prices.js` with EA's own
+`marketAverage` as the offline fallback, so there is no service worker doing
+network work), `ui/panel.js` (the panel is `ui/panel-mount.js` plus
+`ui/solve-button.js`), and `ui/options.html`/`options.js` — the options page has
+not been built; it is part of M8 if it survives scope.
 
 **Isolation rule:** all EA-specific naming lives in `src/ea/adapter.js`. When EA renames something (as they did between FC26 and FC27 — `UTSBCSquadDetailPanelView` → `UTSBCSquadDetailPanelViewController`), exactly one file changes.
 
@@ -364,45 +393,45 @@ Being honest about the alternative: for a v1 that ships, competent hand-written 
 
 ## 4. Milestones
 
-### M0 — Scaffold, fixtures, name
+### M0 — Scaffold, fixtures, name ✅ done
 - Create public repo `squad-lab`, MIT LICENSE, `package.json`, vitest, `.gitignore`.
 - Sanitise the recon JSON into `test/fixtures/` (strip persona id `208426089`, club identifiers, anything account-identifying).
 - **Exit:** `npm test` runs, fixtures load, no personal data in the repo.
 
-### M1 — Prove the hook (no solving)
+### M1 — Prove the hook (no solving) ✅ done
 - `page-bridge.js` detects the SBC detail panel and adds a "Solve" button.
 - Clicking it reads the challenge + club and prints a normalised summary to the console.
 - **Exit:** a real club count and a real `elgReq` list appear in the console on a live challenge.
 
-### M2 — Requirement decoder + validator
+### M2 — Requirement decoder + validator ✅ done
 - `requirements.js`: map `eligibilityKey` → normalised constraint (`MIN_CHEM`, `MIN_RATING`, `SAME_LEAGUE_MIN`, `NATION_COUNT`, …). Build the key table by reading the live `SBCEligibilityKey` enum at runtime rather than hardcoding numbers.
 - `validate.js`: given a candidate 11, return pass/fail per constraint.
 - **Exit:** unit tests over the captured challenge payloads; validator agrees with the challenge's own description strings.
 
-### M3 — Chemistry engine
+### M3 — Chemistry engine ✅ done
 - Implement `chemistry.js` from `/chemistry/profiles` + `/chemistry/teamlinks`.
 - **Exit:** for a squad we build, our computed chemistry equals the number EA displays in `UTSBCSquadStatsView`. This is the acceptance test.
 
-### M4 — Pricing
+### M4 — Pricing ✅ done
 - fut.gg client in the service worker: batching, caching, backoff, offline fallback to `marketAverage`, and a concept-card pricing path (§2.6).
 - **Exit:** a solve produces a total fodder cost, and the same solve works with the network disabled.
 
-### M5 — Solver v1
+### M5 — Solver v1 ✅ done
 - `candidates.js` trim: keep the cheapest N per (slot, rating band) — keeps the search space sane.
 - `solve.js`: greedy seed over constraint slots → swap-based local search (1-for-1, then 2-for-1) scoring on cost with a hard validity gate.
 - `solve.js` exposes **both** `solve(challenge, pool, options)` and `reevaluate(squad, lockedSlots, pool)` — the second is what M7 needs, and it must exist from the start (§2.6).
 - **Exit:** produces a valid squad for every captured challenge, under a time budget, in a Web Worker.
 
-### M6 — Apply
+### M6 — Apply ✅ done
 - `squad-writer.js` writes the solution into the challenge squad so EA's own UI renders it.
 - **Exit:** a solved squad displays correctly in the web app and you can submit it manually.
 
-### M7 — Interactive alternatives
+### M7 — Interactive alternatives ⬜ open (issue #14)
 - Slot list with ranked alternatives per slot; click to swap; lock/unlock slots; instant re-validation and re-optimisation around locked players.
 - Concept-player "buy these" section with names, ratings, prices and market links.
 - **Exit:** swapping any slot re-solves in well under a second and never produces an invalid squad.
 
-### M8 — Design pass, polish and publish
+### M8 — Design pass, polish and publish ⬜ open (issue #15, plus #20 a11y, #21 copy keys, #26 chemistry)
 - One OpenDesign brief covering the preview panel, options page and logo/icons (see §3).
 - Error states, empty-club and no-valid-solution handling, README with hero screenshot and a clear risk note.
 - **Exit:** public repo is presentable and a friend can install it from the README.
@@ -447,5 +476,5 @@ Being honest about the alternative: for a v1 that ships, competent hand-written 
 
 ### Still open
 
-1. **OpenDesign for the UI?** §3 lays out the surfaces. Recommendation: one brief for the preview panel + options page + logo. The alternative — hand-written CSS in EA's visual language — is defensible if you would rather keep the design work in the code. Needs a yes/no before M8.
-2. **Development approach.** Local work here, or dispatch the milestones through the usual OpenCode pipeline (`/oc-issue` with `z-ai/glm-5.3-flash`, independent QA on `deepseek/deepseek-v4-flash-0731`, one GitHub issue per milestone)? Given M0–M8 are already bite-sized and independently verifiable, the pipeline fits well — but the page-bridge milestones (M1, M6) need a logged-in EA session to verify, which only you can do. That is worth splitting: delegate the pure solver core (M2–M5, M7), keep the browser-coupled work local.
+1. **OpenDesign for the UI?** **Answered: yes.** The design bundle in `design/` is the contract for `src/ui/` — see `AGENTS.md`, which also records that `design/README.md` wins over OpenDesign's generic `DESIGN-HANDOFF.md`.
+2. **Development approach.** **Answered: the OpenCode pipeline.** One GitHub issue per milestone, coded with `deepseek/deepseek-v4.1-flash`, QA'd independently with `z-ai/glm-5.3-flash`. The split holds: the solver core is delegated, and every page-bridge milestone closes with Benjamin pasting the real console log, because only he has a logged-in EA session.

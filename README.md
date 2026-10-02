@@ -6,20 +6,37 @@ A free, open-source Chrome extension that solves EA SPORTS FC 27 Ultimate Team
 Everything runs locally in your browser. No backend, no account, no subscription,
 no telemetry.
 
-> **Status: early development.** The solver core is being built. See
-> [`docs/PLAN.md`](docs/PLAN.md) for the full plan and current progress.
+> **Status: alpha.** The engine is built and green — 51 test files, 1179 tests,
+> against real payload fixtures captured from the live FC27 web app. What is
+> **not** done yet is the solution panel with per-slot alternatives (issue #14)
+> and the last README/docs pass (issue #15). Live browser verification is done
+> by hand, against your own club.
+>
+> Milestones M0–M6 are complete; M7 and M8 are not. See
+> [`docs/PLAN.md`](docs/PLAN.md) for the full plan and the current state.
 
 ---
 
 ## What it does
 
+Built and tested today:
+
+- Reads the challenge's own requirements and your club straight from the page,
+  using EA's own service objects — no scraping, no guesswork
 - Solves a single SBC challenge from the players already in your club
 - Minimises fodder cost, weighting untradeable duplicates so they get used first
-- Shows **per-slot alternatives** — swap any single player for a ranked alternative
-  and let the squad re-optimise around your choice
-- Can include **concept players**, so it can tell you exactly which card to buy when
-  your club cannot satisfy a challenge on its own
-- Lets you **lock** players you want to keep and solve around them
+- Validates the solution against EA's rating, chemistry and scope rules before it
+  ever touches the squad
+- Writes the solved squad into EA's own panel, so you review it where you already work
+
+Landing with M7/M8 (issues [#14](https://github.com/benneknudsen/fut-squad-lab/issues/14)
+and [#15](https://github.com/benneknudsen/fut-squad-lab/issues/15)):
+
+- A solution panel with **per-slot alternatives** — swap any single player for a
+  ranked alternative and let the squad re-optimise around your choice
+- **Locking** players you want to keep, and solving around them
+- **Concept players**, so it can tell you exactly which card to buy when your club
+  cannot satisfy a challenge on its own
 
 ## What it does not do
 
@@ -44,9 +61,13 @@ npm test -- --run --reporter=dot    # unit tests
 ```
 
 No build step. The extension is plain ES modules and ships as static files.
+51 test files, 1179 tests, all green — run against sanitised payloads captured
+from the live FC27 web app rather than hand-written fixtures.
 
 See [`AGENTS.md`](AGENTS.md) for repository conventions and
-[`docs/PLAN.md`](docs/PLAN.md) for the design and milestones.
+[`docs/PLAN.md`](docs/PLAN.md) for the design and milestones. Issues are one
+milestone-sized piece of work each, and the closed ones are the honest record of
+what has been verified.
 
 ---
 
