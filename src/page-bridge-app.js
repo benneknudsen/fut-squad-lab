@@ -276,26 +276,32 @@ export function startPageBridge(pageWindow, options = {}) {
         observerReport,
         criteriaDiff
       );
-      // #75: one evidence file per Solve, written from the world that already
-      // owns the report, and the same block relayed to the isolated console
-      // between its own markers. A blocked write is recorded inside the report
-      // itself, never swallowed. The file carries the exact object the global
-      // returns: the staged report, the mount shape and this download outcome.
-      const file = formatDiagnosticsFileName(diagnostics.build.id);
-      state.diagnostics = { ...diagnostics, mount: state.mount, download: { ok: true, file } };
-      try {
-        writeDiagnosticsFile(pageWindow, file, state.diagnostics);
-      } catch (error) {
-        state.diagnostics = {
-          ...state.diagnostics,
-          download: { ok: false, reason: error.message },
-        };
+      // #75 / #87: the report object the global returns is the staged report
+      // plus the mount shape and the download outcome. A successful Solve
+      // writes nothing: the user needs no evidence, and a file per Solve would
+      // leave a behavioural record in the Downloads folder. A failed Solve is
+      // exactly where the evidence file earns its existence, so only then does
+      // the bridge attempt the write. `download: null` is the third state: no
+      // write was attempted, as opposed to attempted and blocked, which is
+      // recorded inside the report itself and never swallowed.
+      state.diagnostics = { ...diagnostics, mount: state.mount, download: null };
+      if (diagnostics.ok === false) {
+        const file = formatDiagnosticsFileName(diagnostics.build.id);
+        state.diagnostics = { ...state.diagnostics, download: { ok: true, file } };
+        try {
+          writeDiagnosticsFile(pageWindow, file, state.diagnostics);
+        } catch (error) {
+          state.diagnostics = {
+            ...state.diagnostics,
+            download: { ok: false, reason: error.message },
+          };
+        }
       }
       const block = formatDiagnosticsBlock(state.diagnostics);
       pageWindow.console?.log?.(block);
       post(PAGE_TO_CONTENT_KINDS.DIAGNOSTICS, {
         block,
-        file: state.diagnostics.download.ok === true ? file : null,
+        file: state.diagnostics.download?.ok === true ? state.diagnostics.download.file : null,
         download: state.diagnostics.download,
       });
       post(PAGE_TO_CONTENT_KINDS.SUMMARY, {

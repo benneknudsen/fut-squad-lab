@@ -198,12 +198,16 @@ export function startContentApp({
       // malformed message never produces a second.
       if (typeof data.block !== 'string' || data.block.length === 0) return;
       console.log(data.block);
+      // #87: a successful Solve attempts no write, so it carries no download
+      // outcome and the panel says nothing — there is nothing to state. The
+      // block above is still logged, exactly as before.
+      if (data.download === null || data.download === undefined) return;
       if (copy === null) {
         console.warn('[FUT Squad Lab] diagnostics note skipped: the copy bundle has not loaded');
         return;
       }
       const ok =
-        data.download?.ok === true && typeof data.file === 'string' && data.file.length > 0;
+        data.download.ok === true && typeof data.file === 'string' && data.file.length > 0;
       try {
         showDiagnosticsNote({
           document,
