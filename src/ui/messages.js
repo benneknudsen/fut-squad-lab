@@ -8,8 +8,9 @@
  *
  * Page scripts can post to the same channel and can read every message, so the
  * bridge validates what it accepts: the copy label is a string, and the module
- * URL handed to `import()` must point at this extension's bridge module (see
- * `isBridgeModuleUrl`), never at a page-controlled URL.
+ * URL handed to `import()` must come from this extension (see
+ * `isBridgeModuleUrl`, which the caller must pin to its own extension id),
+ * never from a page-controlled URL.
  */
 
 export const PAGE_SOURCE = 'fsl-page';
@@ -43,16 +44,19 @@ export const BRIDGE_MODULE_FILE = 'src/page-bridge-app.js';
 export const WORKER_MODULE_FILE = 'src/solver/worker.js';
 
 /**
- * True only for a `chrome-extension://` URL whose path is exactly the bridge
- * module. The URL arrives by postMessage, where any page script can see it and
- * post its own; this check keeps a hostile page from pointing `import()` at a
- * page-controlled script.
+ * True only for a `chrome-extension://` URL from the given extension id whose
+ * path ends in the bridge module. The URL arrives by postMessage, where any
+ * page script can see it and post its own; scheme and path alone are not
+ * enough, so the caller must pass its own extension id and a caller that cannot
+ * name one rejects everything.
  *
  * @param {*} url the candidate URL
+ * @param {*} extensionId the extension id that must serve the URL
  * @returns {boolean}
  */
-export function isBridgeModuleUrl(url) {
+export function isBridgeModuleUrl(url, extensionId) {
   if (typeof url !== 'string') return false;
-  if (!url.startsWith('chrome-extension://')) return false;
+  if (typeof extensionId !== 'string' || extensionId.length === 0) return false;
+  if (!url.startsWith(`chrome-extension://${extensionId}/`)) return false;
   return url.endsWith(`/${BRIDGE_MODULE_FILE}`);
 }
