@@ -15,7 +15,13 @@
  *   queue moves on, while the underlying promise is left to settle on its own;
  * - cancellable waits, so a cancel never leaves a timer running and a solve
  *   never becomes unresponsive while waiting;
- * - counters (`calls`, `waits`, `retries`, `waitedMs`) a diagnostic can report.
+ * - counters (`calls`, `waits`, `retries`, `waitedMs`, and the HTTP statuses EA
+ *   answered with) a diagnostic can report.
+ *
+ * Two conditions are called out separately because they cost this project's own
+ * account more than an ordinary error (#115): the set-challenges endpoint has
+ * its own, longer gap (`CHALLENGE_SET_CALL_GAP_MS`), and the Cloudflare-style
+ * statuses back off `EDGE_BACKOFF_SCALE` times longer than a plain 5xx.
  *
  * The constants are a defensive configuration adopted from another project's
  * experience; they are **not** a measurement of FC27's real limits. They live
@@ -37,6 +43,18 @@ export const MIN_CALL_GAP_MS = 950;
 export const SUBMIT_CALL_GAP_MS = 2200;
 
 /**
+ * Minimum gap before a `requestChallengesForSet` call — the set-challenges
+ * endpoint, the one this project's own volume pushed EA into rejecting
+ * (#115). The `fsl-build/14` live run walked 22 sets at the general
+ * `MIN_CALL_GAP_MS` cadence and EA answered sixteen times with 429, 426, 512 or
+ * 521, all of them inside the player's own authenticated account. That endpoint
+ * gets a floor more than twice the general gap: since #115 the normal path asks
+ * for exactly **one** set, so one slow call costs the run 2.5 s and cannot be
+ * traded for twenty-two fast ones.
+ */
+export const CHALLENGE_SET_CALL_GAP_MS = 2500;
+
+/**
  * Upward-only jitter on waits: a wait is `base * (1 + random * ratio)`. Upward
  * only so the documented minimum stays a floor instead of an average.
  */
@@ -47,6 +65,15 @@ export const BACKOFF_BASE_MS = 2500;
 
 /** Hard ceiling on any backoff delay, applied after jitter. */
 export const BACKOFF_MAX_MS = 20000;
+
+/**
+ * How much longer an edge error backs off than a plain server error. 512 and
+ * 521 are Cloudflare-style answers, not an EA application error: they mean the
+ * request never reached the service, so the next attempt has to leave more room.
+ * The `fsl-build/14` run saw both on the same endpoint that 429 and 426 came
+ * from (#115).
+ */
+export const EDGE_BACKOFF_SCALE = 3;
 
 /**
  * The bound on one task attempt. Reads already settle through the observable
@@ -75,10 +102,13 @@ export const DEFAULT_ATTEMPT_BUDGET = 1;
  * the reference configuration's named budgets; `clubPage` and `squadRead` are
  * reads given the same two-attempt ceiling as a challenge load, because a read
  * writes nothing and the alternative is falling through to a less reliable
- * strategy. A budget is a total attempt count, not a retry count.
+ * strategy. `challengeSet` is a read as well and gets the same two attempts: a
+ * set-challenges call EA pushed back on is worth exactly one more try. A budget
+ * is a total attempt count, not a retry count.
  */
 export const ATTEMPT_BUDGETS = Object.freeze({
   challengeLoad: 2,
+  challengeSet: 2,
   clubPage: 2,
   squadRead: 2,
   save: 3,
@@ -89,10 +119,13 @@ export const ATTEMPT_BUDGETS = Object.freeze({
  * The call kinds the pacing layer distinguishes. A kind selects the gap before
  * the call and the attempt budget; `save` and `submit` additionally mark a
  * status 475 as EA's show-stopper rejection rather than a transient condition.
+ * `challengeSet` is the set-challenges class and carries its own, longer gap
+ * (#115).
  */
 export const CALL_KINDS = Object.freeze({
   READ: 'read',
   CHALLENGE_LOAD: 'challengeLoad',
+  CHALLENGE_SET: 'challengeSet',
   CLUB_PAGE: 'clubPage',
   SQUAD_READ: 'squadRead',
   SAVE: 'save',
@@ -111,6 +144,7 @@ export const STAGE_NAMES = Object.freeze({
   CLUB: 'club',
   SQUAD: 'squad',
   WRITE: 'write',
+  SET_WALK: 'setWalk',
 });
 
 /**
@@ -118,9 +152,16 @@ export const STAGE_NAMES = Object.freeze({
  * stage's own strategy list can do, so no stage can spend another stage's
  * allowance:
  *
- * - `bridge`: one `requestSets` + one `requestChallengesForSet` per set
- *   (`fsl-build/13` saw 21) + the by-id and by-entity loads, with headroom for
- *   a retry at each boundary = 32;
+ * - `bridge`: **one** `requestChallengesForSet` for the set the panel named
+ *   (#115) plus the three panel-argument load calls that may still run when the
+ *   panel named nothing, with two retries of headroom = 8. It was 32 before
+ *   #115, sized for the 22-set walk that spent it and then starved the club
+ *   read; a budget for a path that now makes one call is a defect waiting to
+ *   happen;
+ * - `setWalk`: the last-resort walk's own allowance, so its cost can never be
+ *   charged to the bridge. The `fsl-build/14` run saw 22 sets, plus one
+ *   `requestSets` and three retries of headroom = 26. Only the walk ever opens
+ *   this stage, and only when the panel argument carried no set id at all;
  * - `club`: the page cap (`CLUB_SEARCH_PAGE_CAP`, 50) plus one retry of the
  *   first page = 52;
  * - `squad`: the active-squad method chain plus the property fallbacks = 12;
@@ -130,14 +171,39 @@ export const STAGE_NAMES = Object.freeze({
  * A budget is a total call count, not a retry count; each retry is one call.
  */
 export const STAGE_CALL_BUDGETS = Object.freeze({
-  [STAGE_NAMES.BRIDGE]: 32,
+  [STAGE_NAMES.BRIDGE]: 8,
+  [STAGE_NAMES.SET_WALK]: 26,
   [STAGE_NAMES.CLUB]: 52,
   [STAGE_NAMES.SQUAD]: 12,
   [STAGE_NAMES.WRITE]: 6,
 });
 
-/** Status EA returns when its service is asking the caller to slow down. */
+/**
+ * Status EA returns when its service is asking the caller to slow down.
+ * `RATE_LIMIT_STATUS` is the name this project has used since #52; the live
+ * `fsl-build/14` run proved EA answers the same condition with two statuses, so
+ * the table is the honest one and the single-status export stays for callers
+ * that only need the canonical one.
+ */
 export const RATE_LIMIT_STATUS = 429;
+
+/**
+ * "Upgrade Required". The live run received it sixteen times across the walk
+ * alongside 429, 512 and 521. `fsl-build/14` had no branch for it, so it fell
+ * through to the message pattern — and EA's wording ("Upgrade Required") carries
+ * no rate/limit/throttle word, so the call was abandoned instead of retried.
+ */
+export const UPGRADE_REQUIRED_STATUS = 426;
+
+/** Both statuses that mean "you are going too fast"; both are retried. */
+export const RATE_LIMIT_STATUSES = Object.freeze([RATE_LIMIT_STATUS, UPGRADE_REQUIRED_STATUS]);
+
+/**
+ * Cloudflare-style statuses. They are not EA application errors: the request
+ * never reached the service, so the retry waits `EDGE_BACKOFF_SCALE` times
+ * longer than a plain 5xx.
+ */
+export const EDGE_STATUSES = Object.freeze([512, 521]);
 
 /**
  * The doubly meaningful status: in a read context it is the transient "slow
@@ -196,14 +262,16 @@ const resolveBudget = (kind, explicit, budgets) => {
 
 /**
  * The documented minimum gap for a call kind. The pacer instance has its own
- * `minGapMs`/`submitGapMs` so tests can run without real waiting; this pure
- * helper is the one the constants are stated in.
+ * `minGapMs`/`challengeSetGapMs`/`submitGapMs` so tests can run without real
+ * waiting; this pure helper is the one the constants are stated in.
  *
  * @param {string} kind a value of `CALL_KINDS`
  * @returns {number} the minimum gap, in milliseconds, before that call starts
  */
 export function gapMsFor(kind) {
-  return kind === CALL_KINDS.SUBMIT ? SUBMIT_CALL_GAP_MS : MIN_CALL_GAP_MS;
+  if (kind === CALL_KINDS.SUBMIT) return SUBMIT_CALL_GAP_MS;
+  if (kind === CALL_KINDS.CHALLENGE_SET) return CHALLENGE_SET_CALL_GAP_MS;
+  return MIN_CALL_GAP_MS;
 }
 
 /**
@@ -243,16 +311,26 @@ export function backoffDelay(attempt, options = {}) {
   );
 }
 
+const classify = (retry, reason, backoffScale = 1) =>
+  Object.freeze({ retry, reason, backoffScale });
+
 /**
- * Decides whether one failed EA call may be retried, and why. This is the
- * entire retry table: status 429, status 475 *when the context says it is
- * transient*, any 5xx, and a message matching `RETRYABLE_MESSAGE_PATTERN`.
- * Everything else fails fast with a reason.
+ * Decides whether one failed EA call may be retried, how long the next attempt
+ * waits, and why. This is the entire retry table: status 429, status 426
+ * ("Upgrade Required"), status 475 *when the context says it is transient*, any
+ * other 5xx, and a message matching `RETRYABLE_MESSAGE_PATTERN`. Everything
+ * else fails fast with a reason.
  *
  * Status 475 is explicit here, never one thing: an ineligible-squad message is
  * final in every context, and a 475 from a save or submit is EA rejecting the
  * squad, while a 475 from a read is the transient "slow down" condition. The
- * two interpretations never share a branch.
+ * two interpretations never share a branch. 426 and 429 share the other branch:
+ * both mean the same thing — EA is asking the caller to slow down — and the
+ * `fsl-build/14` run proved EA uses both for one condition.
+ *
+ * `backoffScale` multiplies the delay this attempt waits before the next one. It
+ * is 1 for every ordinary transient condition and `EDGE_BACKOFF_SCALE` for the
+ * Cloudflare-style statuses, which never reached the service and need more room.
  *
  * A pacing task timeout (`error.pacingTimedOut`) is never retried: an
  * abandoned call has an unknown outcome, and repeating a write could duplicate
@@ -261,8 +339,8 @@ export function backoffDelay(attempt, options = {}) {
  *
  * @param {{ status?: number, message?: string, pacingTimedOut?: boolean }|Error} error the failed call
  * @param {{ kind?: string }} [context] the call kind the failure happened in
- * @returns {{ retry: boolean, reason: string }} frozen decision; `reason` is
- *   always a non-empty sentence a diagnostic can print
+ * @returns {{ retry: boolean, reason: string, backoffScale: number }} frozen
+ *   decision; `reason` is always a non-empty sentence a diagnostic can print
  */
 export function classifyFailure(error, context = {}) {
   const status = Number.isFinite(error?.status) ? error.status : null;
@@ -270,42 +348,46 @@ export function classifyFailure(error, context = {}) {
   const kind = context.kind ?? CALL_KINDS.READ;
 
   if (error?.pacingTimedOut === true) {
-    return Object.freeze({
-      retry: false,
-      reason: `the call did not settle within its pacing timeout; an abandoned call is not retried: ${message}`,
-    });
+    return classify(
+      false,
+      `the call did not settle within its pacing timeout; an abandoned call is not retried: ${message}`
+    );
   }
   if (status === DUAL_STATUS) {
     if (INELIGIBLE_SQUAD_PATTERN.test(message)) {
-      return Object.freeze({
-        retry: false,
-        reason: `status ${DUAL_STATUS} with an ineligible-squad message: EA rejected the squad, not a transient condition`,
-      });
+      return classify(
+        false,
+        `status ${DUAL_STATUS} with an ineligible-squad message: EA rejected the squad, not a transient condition`
+      );
     }
     if (REJECTION_CALL_KINDS.includes(kind)) {
-      return Object.freeze({
-        retry: false,
-        reason: `status ${DUAL_STATUS} from a ${kind} call: EA rejected the squad as ineligible`,
-      });
+      return classify(
+        false,
+        `status ${DUAL_STATUS} from a ${kind} call: EA rejected the squad as ineligible`
+      );
     }
-    return Object.freeze({
-      retry: true,
-      reason: `status ${DUAL_STATUS} from a ${kind} call: a transient EA condition`,
-    });
+    return classify(true, `status ${DUAL_STATUS} from a ${kind} call: a transient EA condition`);
   }
-  if (status === RATE_LIMIT_STATUS) {
-    return Object.freeze({ retry: true, reason: `status ${RATE_LIMIT_STATUS}: rate limited` });
+  if (RATE_LIMIT_STATUSES.includes(status)) {
+    return classify(true, `status ${status}: EA is asking the caller to slow down`);
+  }
+  if (EDGE_STATUSES.includes(status)) {
+    return classify(
+      true,
+      `status ${status}: an edge error, so the retry waits ${EDGE_BACKOFF_SCALE} times longer`,
+      EDGE_BACKOFF_SCALE
+    );
   }
   if (status !== null && status >= SERVER_ERROR_FLOOR) {
-    return Object.freeze({ retry: true, reason: `status ${status}: transient server error` });
+    return classify(true, `status ${status}: transient server error`);
   }
   if (RETRYABLE_MESSAGE_PATTERN.test(message)) {
-    return Object.freeze({
-      retry: true,
-      reason: `the error message matches the rate-limit pattern: ${message}`,
-    });
+    return classify(
+      true,
+      `the error message matches the rate-limit pattern: ${message}`
+    );
   }
-  return Object.freeze({ retry: false, reason: `not a documented retry condition: ${message}` });
+  return classify(false, `not a documented retry condition: ${message}`);
 }
 
 const cancelledError = (label) => {
@@ -370,7 +452,8 @@ export function defaultPacer() {
  * Creates one serialised pacer. All options are overrides for tests or for a
  * caller with a different configuration; production uses the defaults.
  *
- * @param {{ minGapMs?: number, submitGapMs?: number, jitterRatio?: number,
+ * @param {{ minGapMs?: number, submitGapMs?: number, challengeSetGapMs?: number,
+ *   jitterRatio?: number,
  *   backoffBaseMs?: number, backoffMaxMs?: number, taskTimeoutMs?: number,
  *   random?: () => number, budgets?: object, stageBudgets?: object }} [options]
  *   `taskTimeoutMs` bounds one task attempt and defaults to
@@ -382,11 +465,16 @@ export function defaultPacer() {
  *   solve with that stage; `cancel()` clears the active timer and rejects every
  *   queued call; `reset()` re-arms the pacer and clears the per-stage counters
  *   after a cancel; `snapshot()` returns a frozen counter report, including
- *   each stage's calls next to its budget
+ *   each stage's calls next to its budget and the HTTP statuses EA answered
  */
 export function createPacer(options = {}) {
   const minGapMs = resolveNumber(options.minGapMs, MIN_CALL_GAP_MS, 0);
   const submitGapMs = resolveNumber(options.submitGapMs, SUBMIT_CALL_GAP_MS, 0);
+  const challengeSetGapMs = resolveNumber(
+    options.challengeSetGapMs,
+    CHALLENGE_SET_CALL_GAP_MS,
+    0
+  );
   const jitterRatio = resolveNumber(options.jitterRatio, JITTER_RATIO, 0);
   const backoffBaseMs = resolveNumber(options.backoffBaseMs, BACKOFF_BASE_MS, 0);
   const backoffMaxMs = resolveNumber(options.backoffMaxMs, BACKOFF_MAX_MS, 0);
@@ -398,6 +486,7 @@ export function createPacer(options = {}) {
     : STAGE_CALL_BUDGETS;
 
   const counters = { calls: 0, waits: 0, retries: 0, waitedMs: 0 };
+  const statusCounters = new Map();
   const stageCounters = new Map();
   const queue = [];
   let inFlight = false;
@@ -427,8 +516,14 @@ export function createPacer(options = {}) {
       ])
     );
 
-  const gapForKind = (kind) =>
-    kind === CALL_KINDS.SUBMIT ? Math.max(submitGapMs, minGapMs) : minGapMs;
+  const gapForKind = (kind) => {
+    if (kind === CALL_KINDS.SUBMIT) return Math.max(submitGapMs, minGapMs);
+    if (kind === CALL_KINDS.CHALLENGE_SET) return Math.max(challengeSetGapMs, minGapMs);
+    return minGapMs;
+  };
+
+  const snapshotStatuses = () =>
+    Object.fromEntries([...statusCounters.entries()].map(([status, count]) => [status, count]));
 
   const snapshot = () =>
     Object.freeze({
@@ -436,6 +531,7 @@ export function createPacer(options = {}) {
       waits: counters.waits,
       retries: counters.retries,
       waitedMs: counters.waitedMs,
+      statuses: snapshotStatuses(),
       stages: snapshotStages(),
     });
 
@@ -507,6 +603,13 @@ export function createPacer(options = {}) {
       try {
         return await runWithTimeout(entry, attempt);
       } catch (error) {
+        // Every failure that carried an HTTP status is counted, retried or not,
+        // so the next run's report shows whether EA pushed back (#115) instead
+        // of the reader having to read a stack.
+        if (Number.isFinite(error?.status)) {
+          const status = error.status;
+          statusCounters.set(status, (statusCounters.get(status) ?? 0) + 1);
+        }
         const decision = classifyFailure(error, { kind: entry.kind });
         if (decision.retry !== true) throw error;
         if (cancelled) throw cancelledError(entry.label);
@@ -515,7 +618,9 @@ export function createPacer(options = {}) {
         await wait(
           backoffDelay(attempt - 1, {
             random,
-            baseMs: backoffBaseMs,
+            // The scale is applied to the base, not to the capped result, so the
+            // documented `BACKOFF_MAX_MS` stays the absolute maximum.
+            baseMs: backoffBaseMs * decision.backoffScale,
             capMs: backoffMaxMs,
             jitterRatio,
           })

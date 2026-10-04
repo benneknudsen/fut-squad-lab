@@ -70,7 +70,7 @@
 
 import { describeMethodShape, describeOwnPropertyTypes, redactName } from '../shape.js';
 import { DEFAULT_OBSERVABLE_TIMEOUT_MS, isObservable, observeOnce } from './observable.js';
-import { CALL_KINDS, EA_CALL_FAILURE_NAME, defaultPacer } from './pacing.js';
+import { CALL_KINDS, EA_CALL_FAILURE_NAME, STAGE_NAMES, defaultPacer } from './pacing.js';
 
 /**
  * The eleven starting slot positions of every SBC formation the solver may
@@ -795,22 +795,29 @@ const readRoleList = (rawItem, field) => {
 };
 
 /**
- * The one translation from a raw `/club` payload item to the stable item schema
- * the solver core codes against:
+ * The one translation from a `/club` item to the stable item schema the solver
+ * core codes against, in **both** of the layers EA hands this project (#115):
  *
  *   { id, assetId, rating, nationId, leagueId, clubId, rarity, cardSubtype,
  *     playStyles, preferredPosition, possiblePositions, rolePlus,
  *     rolePlusPlus, untradeable, pile, owners, collected, marketAverage,
  *     marketMin, marketMax, discardValue }
  *
- * `nation` becomes `nationId`, `teamid` becomes `clubId`, `rareflag` becomes
- * `rarity`, `cardsubtypeid` becomes `cardSubtype`, `playStyle` becomes
- * `playStyles` and `isCollected` becomes `collected`; `id`, `assetId`,
- * `rating`, `leagueId`, `preferredPosition`, `possiblePositions`,
- * `untradeable`, `pile`, `owners`, `marketAverage`, `discardValue` keep their
- * names. This is the only place that may know the raw `/club` field names —
- * `src/solver/validate.js` reads the stable schema only, and rejects an
- * un-normalised item.
+ * The **wire** layer is the raw `POST /club` body. `nation` becomes `nationId`,
+ * `teamid` becomes `clubId`, `rareflag` becomes `rarity`, `cardsubtypeid` becomes
+ * `cardSubtype`, `playStyle` becomes `playStyles` and `isCollected` becomes
+ * `collected`; `id`, `assetId`, `rating`, `leagueId`, `preferredPosition`,
+ * `possiblePositions`, `untradeable`, `pile`, `owners`, `marketAverage` and
+ * `discardValue` keep their names.
+ *
+ * The **observable** layer is EA's own entity model, which the `fsl-build/14` run
+ * proved is a different vocabulary for the same facts (`definitionId`, `_rating`,
+ * `_staticData`, `teamId`, `subtype`, `basePossiblePositions`, `tradable`,
+ * `utasPile`, …). It is read through `CLUB_ITEM_SOURCES` instead, which names the
+ * observable field for every stable field and reports where each value came from
+ * through `clubItemSources`. This is the only place that may know either set of
+ * raw names — `src/solver/validate.js` reads the stable schema only, and rejects
+ * an un-normalised item.
  *
  * The raw payload must carry every non-price field as its declared type
  * (finite number, non-empty string, array of position strings, or boolean).
@@ -819,7 +826,9 @@ const readRoleList = (rawItem, field) => {
  * `undefined` that only surfaces later as a confusing solver error. A rejected
  * item additionally reports the field that failed and the key names it does
  * carry, sorted and renamed through the shared paste-safety list, so the next
- * live log states what EA actually sent without carrying any value (#74).
+ * live log states what EA actually sent without carrying any value (#74). An
+ * observable item also names every location it probed and the shape of the
+ * sub-objects it probed them in.
  * The four price fields are the exception: `marketAverage`, `marketDataMinPrice`,
  * `marketDataMaxPrice` and `discardValue` normalise a `null` or absent value
  * to `null`, meaning "price unknown", never to 0.
@@ -830,7 +839,10 @@ const readRoleList = (rawItem, field) => {
  * signal about the payload shape. A list that is present is still validated as
  * dense and numeric.
  *
- * @param {object} rawItem one item from the `/club` response
+ * @param {object} rawItem one item from the `/club` response, in either of the
+ *   two layers `CLUB_ITEM_LAYERS` names: the raw wire body, or the observable
+ *   entity model EA resolves it into. The layer is detected, never assumed, and
+ *   the two are read through two tables that produce the same stable record
  * @returns {{ id: number, assetId: number, rating: number, nationId: number,
  *   leagueId: number, clubId: number, rarity: number, cardSubtype: number,
  *   playStyles: number, preferredPosition: string,
@@ -848,6 +860,7 @@ export function normaliseClubItem(rawItem) {
       'normaliseClubItem: raw item must be an object; the /club payload shape may have changed'
     );
   }
+  if (isObservableClubItem(rawItem)) return normaliseObservableClubItem(rawItem);
   for (const field of RAW_ITEM_NUMBER_FIELDS) {
     requireRawField(rawItem, field, Number.isFinite, `a finite ${field}`);
   }
@@ -888,6 +901,438 @@ export function normaliseClubItem(rawItem) {
     marketMin: rawItem.marketDataMinPrice ?? null,
     marketMax: rawItem.marketDataMaxPrice ?? null,
     discardValue: rawItem.discardValue ?? null,
+  };
+}
+
+/**
+ * The two club-item layers EA hands this project, and which one an item is (#115).
+ *
+ * `wire` is the raw `POST /club` body: the capture of the `fsl-build/14` session
+ * proves its entries are `itemData[]` carrying `assetId`, `rating`, `nation`,
+ * `teamid`, `rareflag`, `cardsubtypeid`, `marketAverage` and the rest. `wire` is
+ * what `test/fixtures/club-items.json` holds and what `normaliseClubItem` has
+ * always read.
+ *
+ * `observable` is the *entity* model EA's observable resolves the response into
+ * before handing it over: the same `fsl-build/14` run received items whose own
+ * keys were `definitionId`, `id`, `_rating`, `_stats`, `_staticData`, `_metaData`,
+ * `attributes`, `keyAttributes`, `amount`, `stackCount`, `nationId`, `leagueId`,
+ * `teamId`, `preferredPosition`, `basePossiblePositions`, `_playStyles`,
+ * `_skillMoves`, `_weakFoot`, `_preferredFoot`, `_rareflag`, `_basePlusRoles`,
+ * `_basePlusPlusRoles`, `untradeableCount`, `tradable`, `discardable`, `amount`,
+ * `utasPile`, `subtype`, `owners` and `isCollected`. Two layers, two vocabularies
+ * — the same trap this project already documents for `itemData` vs `items`.
+ *
+ * The marker is `_staticData`: a sub-object only the observable layer carries,
+ * named from the diagnostics. Its presence is the whole detection rule, so no
+ * item is ever read through the wrong vocabulary.
+ */
+export const CLUB_ITEM_LAYERS = Object.freeze({ WIRE: 'wire', OBSERVABLE: 'observable' });
+
+/**
+ * The observable-layer key that identifies that layer and nothing else.
+ *
+ * `_staticData` is the marker, not `definitionId`: a `definitionId` is a name
+ * either vocabulary could plausibly use, so an item that arrived without its
+ * sub-objects would be read through the wire table and produce a message about
+ * the wrong one. `_staticData` is the static-definition sub-object every
+ * observed item in that layer carried and no wire item has.
+ */
+const OBSERVABLE_ITEM_MARKER = '_staticData';
+
+/** The sub-objects of an observable item this layer reads a candidate out of. */
+const OBSERVABLE_ITEM_SUBLAYERS = Object.freeze(['_staticData', '_metaData']);
+
+/**
+ * Where each stable record field is read in the **observable** layer, with the
+ * evidence for the name. One table drives both `normaliseClubItem` and
+ * `clubItemSources`, so the value a record carries and the field it is credited
+ * with cannot drift apart; `test/club-observable-items.test.js` drives every
+ * reported source back through the fixture to prove it.
+ *
+ * `paths` is the probe order. Every probe is recorded, whatever the outcome.
+ * A candidate answers only when its value has the declared `kind`. When more
+ * than one candidate answers they must agree; when none does the read fails
+ * loudly, naming every probe. A price is the one exception: its unresolved state
+ * is `null` — "price unknown", never 0 — which the stable schema already
+ * documents.
+ *
+ * `invert: true` means the observable field is the *opposite* of the stable
+ * field, and the provenance is reported with a leading `!` so the inversion is
+ * never invisible.
+ *
+ * @typedef {{ field: string, kind: 'number'|'string'|'boolean'|'positions'|'roles'|'price',
+ *   paths: ReadonlyArray<string>, invert?: boolean, note: string }} ClubItemSource
+ */
+
+/** @type {ReadonlyArray<ClubItemSource>} */
+export const CLUB_ITEM_SOURCES = Object.freeze([
+  Object.freeze({ field: 'id', kind: 'number', paths: Object.freeze(['id']), note: 'the same name' }),
+  Object.freeze({
+    field: 'assetId',
+    kind: 'number',
+    paths: Object.freeze(['_staticData.assetId']),
+    note:
+      'the one proven observable location, and the only one this table will read it from: a' +
+      ' `definitionId` is a finite number, so accepting one as an asset id would resolve without' +
+      ' ever looking broken while naming a different concept, and whether the two coincide live is' +
+      ' not established. An item without this key is refused, and `_staticData`\'s own key names are' +
+      ' reported so the next live run can settle where the id lives',
+  }),
+  Object.freeze({
+    field: 'rating',
+    kind: 'number',
+    paths: Object.freeze(['_rating']),
+    note: "EA's own `_name` backing field for the public `rating` accessor",
+  }),
+  Object.freeze({ field: 'nationId', kind: 'number', paths: Object.freeze(['nationId']), note: 'the same name' }),
+  Object.freeze({ field: 'leagueId', kind: 'number', paths: Object.freeze(['leagueId']), note: 'the same name' }),
+  Object.freeze({
+    field: 'clubId',
+    kind: 'number',
+    paths: Object.freeze(['teamId']),
+    note: "the wire `teamid` field's camel-case twin",
+  }),
+  Object.freeze({
+    field: 'rarity',
+    kind: 'number',
+    paths: Object.freeze(['_rareflag']),
+    note: "the wire `rareflag` field's backing field",
+  }),
+  Object.freeze({
+    field: 'cardSubtype',
+    kind: 'number',
+    paths: Object.freeze(['subtype']),
+    note: 'the observable name for the wire `cardsubtypeid`',
+  }),
+  Object.freeze({ field: 'playStyles', kind: 'number', paths: Object.freeze(['playStyle']), note: 'the same name' }),
+  Object.freeze({
+    field: 'preferredPosition',
+    kind: 'string',
+    paths: Object.freeze(['preferredPosition']),
+    note: 'the same name',
+  }),
+  Object.freeze({
+    field: 'possiblePositions',
+    kind: 'positions',
+    paths: Object.freeze(['basePossiblePositions']),
+    note: "the observable name for the wire `possiblePositions`",
+  }),
+  Object.freeze({
+    field: 'rolePlus',
+    kind: 'roles',
+    paths: Object.freeze(['_basePlusRoles']),
+    note: "the wire `plusRoles` field's backing field",
+  }),
+  Object.freeze({
+    field: 'rolePlusPlus',
+    kind: 'roles',
+    paths: Object.freeze(['_basePlusPlusRoles']),
+    note: "the wire `plusPlusRoles` field's backing field",
+  }),
+  Object.freeze({
+    field: 'untradeable',
+    kind: 'boolean',
+    paths: Object.freeze(['tradable']),
+    invert: true,
+    note: "the observable layer states the opposite flag: the item is `tradable`",
+  }),
+  Object.freeze({
+    field: 'pile',
+    kind: 'number',
+    paths: Object.freeze(['utasPile']),
+    note: "the observable name for the wire `pile`",
+  }),
+  Object.freeze({ field: 'owners', kind: 'number', paths: Object.freeze(['owners']), note: 'the same name' }),
+  Object.freeze({
+    field: 'collected',
+    kind: 'boolean',
+    paths: Object.freeze([
+      'isCollected',
+      // The fsl-build/14 diagnostics list no `isCollected` on the observable
+      // layer, so the ownership *count* is the second candidate: the captured
+      // wire item carries `owners: 1` together with `isCollected: true`, and an
+      // item returned by a club read is owned. `owners > 0` is written into the
+      // provenance, so the derivation is visible rather than implied.
+      Object.freeze({
+        path: 'owners',
+        label: 'owners>0',
+        coerce: (value) => value > 0,
+      }),
+    ]),
+    note: 'the wire `isCollected` flag, or the observable ownership count read as "at least one owner"',
+  }),
+  Object.freeze({
+    field: 'marketAverage',
+    kind: 'price',
+    paths: Object.freeze(['_metaData.marketAverage', 'marketAverage']),
+    note: "the wire `marketAverage` field; unresolved is `null`, never 0",
+  }),
+  Object.freeze({
+    field: 'marketMin',
+    kind: 'price',
+    paths: Object.freeze(['_metaData.marketDataMinPrice', 'marketDataMinPrice']),
+    note: "the wire `marketDataMinPrice` field; unresolved is `null`, never 0",
+  }),
+  Object.freeze({
+    field: 'marketMax',
+    kind: 'price',
+    paths: Object.freeze(['_metaData.marketDataMaxPrice', 'marketDataMaxPrice']),
+    note: "the wire `marketDataMaxPrice` field; unresolved is `null`, never 0",
+  }),
+  Object.freeze({
+    field: 'discardValue',
+    kind: 'price',
+    paths: Object.freeze(['_metaData.discardValue', 'discardValue']),
+    note: "the wire `discardValue` field; unresolved is `null`, never 0",
+  }),
+]);
+
+/**
+ * True when an item is the observable entity model rather than the raw `/club`
+ * body. The marker is one own-or-inherited data property read, never an
+ * accessor, for the reason every other read in this file refuses one: it would
+ * run a live getter inside the player's session.
+ */
+export const isObservableClubItem = (rawItem) => {
+  if (rawItem === null || typeof rawItem !== 'object' || Array.isArray(rawItem)) return false;
+  return readDataProperty(rawItem, OBSERVABLE_ITEM_MARKER).ok === true;
+};
+
+/** The shape of one observable sub-object: its key names and types, never a value. */
+const describeSubLayer = (item, name) => {
+  const read = readDataProperty(item, name);
+  if (!read.ok || !isRecordObject(read.value)) return null;
+  return { keys: describeOwnPropertyTypes(read.value) };
+};
+
+/** Every probed sub-object's shape, so a report can show what `_staticData` held. */
+const describeObservableSubLayers = (rawItem) =>
+  Object.fromEntries(
+    OBSERVABLE_ITEM_SUBLAYERS.flatMap((name) => {
+      const shape = describeSubLayer(rawItem, name);
+      return shape === null ? [] : [[name, shape]];
+    })
+  );
+
+/** Renders one sub-layer's key names for a reason string. */
+const describeSubLayerKeys = (shapes) =>
+  Object.entries(shapes)
+    .map(
+      ([name, shape]) =>
+        `${name} carries [${shape.keys.map((key) => `${key.name}: ${key.type}`).join(', ')}]`
+    )
+    .join('; ');
+
+/** The value kinds a stable field accepts, as predicates over a raw value. */
+const KIND_PREDICATES = Object.freeze({
+  number: Number.isFinite,
+  string: isNonEmptyString,
+  boolean: isBoolean,
+  positions: isStringArray,
+  roles: isFiniteNumberArray,
+  // A price is nullable by design: `null` and an absent value both mean unknown.
+  price: isNullablePrice,
+});
+
+/** Copies a probe value into the stable record, validating its shape first. */
+const readKindValue = (source, rawValue) => {
+  if (source.kind === 'positions' || source.kind === 'roles') return [...rawValue];
+  return rawValue;
+};
+
+/**
+ * Reads one raw candidate path without ever invoking an accessor, returning
+ * whether it answered and why it did not. Each probe is a data-property read
+ * along the item and, for a dotted path, one named sub-object.
+ */
+const probeObservablePath = (rawItem, candidate) => {
+  const { path, label = path, coerce = null } =
+    typeof candidate === 'string' ? { path: candidate } : candidate;
+  const segments = path.split('.');
+  let target = rawItem;
+  if (segments.length > 1) {
+    const owner = readDataProperty(rawItem, segments[0]);
+    if (!owner.ok) {
+      return {
+        id: label,
+        ok: false,
+        reason:
+          owner.reason === null
+            ? `the item carries no ${segments[0]} object`
+            : `the item's ${segments[0]} is ${owner.reason}`,
+      };
+    }
+    if (!isRecordObject(owner.value)) {
+      return { id: path, ok: false, reason: `${segments[0]} is ${describeValue(owner.value)}, not an object` };
+    }
+    target = owner.value;
+  }
+  const read = readDataProperty(target, segments.at(-1));
+  if (!read.ok) {
+    return {
+      id: label,
+      ok: false,
+      reason:
+        read.reason === null
+          ? `${segments.at(-1)} is absent`
+          : `${segments.at(-1)} is ${read.reason}`,
+    };
+  }
+  return { id: label, ok: true, reason: null, value: coerce === null ? read.value : coerce(read.value) };
+};
+
+/**
+ * Resolves one stable field from an observable item: probes every candidate in
+ * order, requires the answering ones to agree, and reports every probe.
+ *
+ * Agreement is the safety rule that matters here. `assetId` decides which card a
+ * squad slot resolves to, and it is read from its one proven location, so there
+ * is nothing to pick between and an item without it is refused. For a field that
+ * really does have two spellings, picking the first candidate that happens to
+ * hold a number is how the wrong player ends up in someone's squad — so two
+ * probes that disagree are a loud failure, never a preference.
+ *
+ * @returns {{ ok: boolean, value?: *, from?: string|null, probes: Array<object> }}
+ */
+const resolveObservableField = (rawItem, source) => {
+  const isValid = KIND_PREDICATES[source.kind];
+  const probes = source.paths.map((candidate) => {
+    const probe = probeObservablePath(rawItem, candidate);
+    if (!probe.ok) return { id: probe.id, ok: false, reason: probe.reason };
+    if (!isValid(probe.value)) {
+      return {
+        id: probe.id,
+        ok: false,
+        reason: `${probe.id} is ${describeValue(probe.value)}, not the required ${source.kind}`,
+      };
+    }
+    return { id: probe.id, ok: true, reason: null, value: probe.value };
+  });
+  const answering = probes.filter((probe) => probe.ok === true);
+  const distinct = [...new Set(answering.map((probe) => probe.value))];
+  if (answering.length === 0) {
+    // A price has a documented unresolved state: "unknown", never 0. Every other
+    // field is a fact the solver needs, so an unresolved one is a loud failure.
+    if (source.kind === 'price') return { ok: true, value: null, from: null, probes };
+    return { ok: false, from: null, probes, unresolved: true };
+  }
+  if (distinct.length > 1) {
+    return {
+      ok: false,
+      from: null,
+      probes: probes.map((probe) =>
+        probe.ok === true ? { ...probe, reason: `${probe.id} disagrees with the other probes` } : probe
+      ),
+      conflicting: answering.map((probe) => probe.id),
+    };
+  }
+  const single = distinct[0];
+  const value = source.invert === true ? !single : readKindValue(source, single);
+  const from = answering.map((probe) => probe.id).join('+');
+  return {
+    ok: true,
+    value,
+    from: source.invert === true ? `!${from}` : from,
+    probes,
+  };
+};
+
+/**
+ * The observable-layer rejection. It carries the probed locations and the
+ * sub-object shapes on `rawItemShape`, exactly like the wire layer's rejection,
+ * so `readClubItems` can locate the offending item in its page and a pasted
+ * report can say what was probed. Only names, types and counts appear.
+ */
+const rejectedObservableItemError = (rawItem, source, resolved, subLayers) => {
+  const probes = resolved.probes
+    .map((probe) => `${probe.id}: ${probe.reason ?? 'answered'}`)
+    .join('; ');
+  const shapes = describeSubLayerKeys(subLayers);
+  const conflict = resolved.conflicting
+    ? `; the probes that answered disagree (${resolved.conflicting.join(', ')}), and picking one would` +
+      ' write the wrong card'
+    : '';
+  const detail =
+    resolved.unresolved === true
+      ? `; none of them carried it`
+      : '';
+  const keys = carriedKeys(rawItem);
+  const error = new Error(
+    `normaliseClubItem: the observable club item must carry a resolvable ${source.field}; probed` +
+      ` [${probes}]${detail}${conflict}${shapes === '' ? '' : `; ${shapes}`}; rejected field ${source.field};` +
+      ` it carries keys [${keys.join(', ')}]; the observable club item shape may have changed`
+  );
+  error.rawItemShape = {
+    field: source.field,
+    keys,
+    layer: CLUB_ITEM_LAYERS.OBSERVABLE,
+    probes: resolved.probes.map(({ id, ok, reason }) => ({ id, ok, reason })),
+    subLayers,
+  };
+  return error;
+};
+
+/**
+ * Translates one observable entity item into the stable record shape, through
+ * `CLUB_ITEM_SOURCES` and nothing else.
+ *
+ * @param {object} rawItem one item from EA's observable club response
+ * @returns {object} the same stable record `normaliseClubItem` returns for a
+ *   wire item
+ * @throws {Error} when a required field resolves from no probe, or from probes
+ *   that disagree
+ */
+const normaliseObservableClubItem = (rawItem) => {
+  const subLayers = describeObservableSubLayers(rawItem);
+  const record = {};
+  for (const source of CLUB_ITEM_SOURCES) {
+    const resolved = resolveObservableField(rawItem, source);
+    if (!resolved.ok) {
+      throw rejectedObservableItemError(rawItem, source, resolved, subLayers);
+    }
+    record[source.field] = resolved.value;
+  }
+  return record;
+};
+
+/**
+ * The provenance of one club item: which layer it is, which field each stable
+ * value was read from, every location that was probed for the fields that have
+ * more than one candidate, and the shape of the sub-objects those probes read.
+ *
+ * This is the report a live run needs, and it is derived from `CLUB_ITEM_SOURCES`
+ * — the same frozen table `normaliseClubItem` reads — so it cannot claim a source
+ * the normaliser does not use. It never throws for a resolvable item and never
+ * carries a value: only field names, probe names, types and counts.
+ *
+ * @param {object} rawItem one club item, in either layer
+ * @returns {{ layer: string, fields: Record<string, string|null>,
+ *   probes: Array<{field: string, id: string, ok: boolean, reason: string|null}>,
+ *   subLayers: Record<string, {keys: Array<{name: string, type: string}>}> }}
+ */
+export function clubItemSources(rawItem) {
+  if (!isObservableClubItem(rawItem)) {
+    return { layer: CLUB_ITEM_LAYERS.WIRE, fields: {}, probes: [], subLayers: {} };
+  }
+  const fields = {};
+  const probes = [];
+  for (const source of CLUB_ITEM_SOURCES) {
+    const resolved = resolveObservableField(rawItem, source);
+    fields[source.field] = resolved.from ?? null;
+    if (source.paths.length > 1) {
+      probes.push(
+        ...resolved.probes.map(({ id, ok, reason }) => ({ field: source.field, id, ok, reason }))
+      );
+    }
+  }
+  return {
+    layer: CLUB_ITEM_LAYERS.OBSERVABLE,
+    fields,
+    // Every probe of every field that has more than one candidate location, each
+    // tagged with the field it was read for, so a report can be read per field.
+    probes,
+    subLayers: describeObservableSubLayers(rawItem),
   };
 }
 
@@ -2492,14 +2937,16 @@ const callMethodOnce = async (found, base, callArguments, label, timeoutMs) => {
 
 /**
  * Calls one resolved method through the paced queue, so a retryable failure is
- * retried under the pacer's policy.
+ * retried under the pacer's policy. `pacing.stage` names the allowance these
+ * calls spend, so a call can be charged to a stage other than the one currently
+ * open — the last-resort set walk opens its own (#115).
  */
 const callReadMethod = async (found, base, callArguments, label, timeoutMs, pacing) => {
   try {
     const event = await pacing.pacer.run(
       label,
       () => callMethodOnce(found, base, callArguments, label, timeoutMs),
-      { kind: pacing.kind }
+      { kind: pacing.kind, stage: pacing.stage }
     );
     return { ok: true, event };
   } catch (error) {
@@ -3571,16 +4018,246 @@ const describeLoadAttempt = (via, call) => {
 };
 
 /**
- * Walks the SBC set API to a challenge payload with requirements: request the
- * sets, list each set's challenges through `requestChallengesForSet` and
- * `set.getChallenges()`, and select the open challenge. A selected challenge
- * whose own `elgReq` array is non-empty answers directly (#77); otherwise the
- * challenge is loaded by id through the DAO — with the entity's own
- * `isInProgress()`, a throw meaning false — and then, when that yields no
- * requirements, by the entity itself. The set entities may already carry their
- * challenges for the live page; the request is still made first because the
- * reference makes it and that is the only verified way the entities are
- * populated.
+ * The named-set challenge-load strategy (#115), in its own frozen table rather
+ * than appended to `CHALLENGE_LOAD_STRATEGIES`.
+ *
+ * The walk that table describes is the *fallback*: it costs one
+ * `requestChallengesForSet` per set, and the `fsl-build/14` live run paid 22 of
+ * them inside the player's own account until EA answered sixteen times with
+ * 429/426/512/521. Inserting the named-set read into that table would have
+ * changed the walk's index and its documented contract; keeping it separate
+ * means the table still describes exactly what it always described, and the
+ * marker states both.
+ */
+export const CHALLENGE_SET_ID_STRATEGIES = Object.freeze([
+  Object.freeze({ id: 'services.SBC.requestChallengesForSet+namedSet', setApi: true }),
+]);
+
+/** The reason the set walk ran, recorded on its own attempt. */
+export const SET_WALK_FALLBACK_REASON =
+  'the panel argument carried no set id, so the set walk ran as the last-resort fallback';
+
+/**
+ * Prefixes the walk's own reason with `SET_WALK_FALLBACK_REASON`, so a report
+ * that shows this attempt always also shows *why* the expensive path ran.
+ */
+const noteSetWalk = (reason) =>
+  reason === null || reason === undefined
+    ? SET_WALK_FALLBACK_REASON
+    : `${SET_WALK_FALLBACK_REASON}; ${reason}`;
+
+/**
+ * Reads the challenge entries out of one set-challenges payload. The wire field
+ * is `challenges`, proven by the capture of the `fsl-build/14` session
+ * (`GET /sbs/setId/23/challenges` answered `{"challenges":[{…}]}`). A payload
+ * with no such array is a named failure carrying the payload's own key names,
+ * never a silent empty list — an empty list would read as "this set has no such
+ * challenge" and produce the wrong refusal.
+ */
+const readSetChallengeEntries = (payload) => {
+  if (!isRecordObject(payload)) {
+    return {
+      ok: false,
+      seen: 0,
+      reason: `the set-challenges payload is ${describeValue(payload)}, not an object`,
+    };
+  }
+  const read = readDataProperty(payload, SBC_SET_API.challenges);
+  if (!read.ok) {
+    return {
+      ok: false,
+      seen: 0,
+      reason:
+        read.reason === null
+          ? `the set-challenges payload carries no ${SBC_SET_API.challenges} array`
+          : `the set-challenges payload ${SBC_SET_API.challenges} is ${read.reason}`,
+    };
+  }
+  if (!Array.isArray(read.value)) {
+    return {
+      ok: false,
+      seen: 0,
+      reason: `the set-challenges payload ${SBC_SET_API.challenges} is ${describeValue(
+        read.value
+      )}, not an array`,
+    };
+  }
+  return { ok: true, seen: read.value.length, entries: read.value };
+};
+
+/**
+ * Picks the entry the panel's second argument named, out of one set's
+ * challenges, by the wire `challengeId`. That field is the one the capture
+ * proves (`challengeId: 50` on the single entry of set 23), so it is the only
+ * name read here: matching on an entity's `id` instead would be a second guess
+ * at the same value, and the live `fsl-build/13` run already showed what a
+ * wrong identity costs.
+ *
+ * A named id that matches nothing fails with the count and selects nothing.
+ * Re-ranking the entries by `status` would hand back a challenge the player
+ * never opened, which is the wrong-solve this whole identity chain exists to
+ * prevent.
+ */
+const selectSetChallengeEntry = (entries, challengeId, setId) => {
+  const list = Array.isArray(entries) ? entries : [];
+  for (const entry of list) {
+    if (!isRecordObject(entry)) continue;
+    const read = readDataProperty(entry, CHALLENGE_FIELDS.challengeId);
+    if (read.ok && read.value === challengeId) {
+      return {
+        ok: true,
+        entry,
+        seen: list.length,
+        reason:
+          `set ${setId} returned ${list.length} challenges; the panel argument named challenge` +
+          ` ${challengeId} and this entry carries it`,
+      };
+    }
+  }
+  return {
+    ok: false,
+    entry: null,
+    seen: list.length,
+    reason:
+      `the panel argument named challenge ${challengeId}, but set ${setId} returned ${list.length}` +
+      ` challenges and none carries ${CHALLENGE_FIELDS.challengeId} ${challengeId}; refusing to` +
+      ' select another',
+  };
+};
+
+/**
+ * Reads the one challenge the player opened, from the one set the panel named.
+ *
+ * This is the whole normal path, and it is one EA call: `services.SBC
+ * .requestChallengesForSet(set)` with the panel's own set entity, whose
+ * `challenges` array is matched by `challengeId`. The capture of the
+ * `fsl-build/14` session proves that endpoint answers the requirements directly
+ * — `elgReq`, `elgOperation`, `formation`, `challengeId` and `name` are all on
+ * the entry — so a located entry needs no load at all.
+ *
+ * There is deliberately no load fallback here. Loading needs an entity or an
+ * `isInProgress` argument list, neither of which a payload entry carries, and
+ * inventing one is how this project writes the wrong squad. An entry without
+ * requirements is a loud failure naming its own key names instead.
+ *
+ * @returns {{ ok: boolean, reason: string, payload?: object, via?: string,
+ *   requirementsFrom?: string, requirementsReason?: string, setId?: number,
+ *   sets?: number, selection?: object }}
+ */
+const loadChallengeFromNamedSet = async ({
+  pageWindow,
+  strategy,
+  timeoutMs,
+  pacer,
+  set,
+  setId,
+  challengeId,
+}) => {
+  const base = resolveStrategyBase(pageWindow, SBC_SERVICE_TARGET);
+  if (!base.ok) return { ok: false, reason: base.reason, selection: null };
+
+  const requestChallenges = findMethod(base.value, SBC_SET_API.requestChallengesForSet);
+  if (!requestChallenges.ok) {
+    return {
+      ok: false,
+      reason: describeMissingMethod(
+        base.name,
+        SBC_SET_API.requestChallengesForSet,
+        requestChallenges.reason
+      ),
+      selection: null,
+    };
+  }
+
+  const label = `${strategy.id} set ${setId}`;
+  const call = await callReadMethod(requestChallenges, base.value, [set], label, timeoutMs, {
+    pacer,
+    kind: CALL_KINDS.CHALLENGE_SET,
+    stage: STAGE_NAMES.BRIDGE,
+  });
+  const selection = (extra) => ({
+    ok: true,
+    seen: 0,
+    open: null,
+    inProgress: null,
+    chosenId: challengeId,
+    sets: 1,
+    ...extra,
+  });
+  if (!call.ok) {
+    const statusPart = call.status === null ? '' : ` [HTTP ${call.status}]`;
+    return {
+      ok: false,
+      reason: `${label}${statusPart}: ${call.reason}`,
+      selection: selection({ ok: false, reason: `${label}${statusPart}: ${call.reason}` }),
+    };
+  }
+
+  const payload = call.event.payload;
+  const listed = readSetChallengeEntries(payload);
+  if (!listed.ok) {
+    return { ok: false, reason: `${label}: ${listed.reason}`, selection: selection({ ok: false }) };
+  }
+  const picked = selectSetChallengeEntry(listed.entries, challengeId, setId);
+  if (!picked.ok) {
+    return {
+      ok: false,
+      reason: `${label}: ${picked.reason}; the payload carried keys [${carriedKeyNames(
+        payload
+      )}]`,
+      selection: selection({ ok: false, seen: picked.seen, reason: picked.reason }),
+    };
+  }
+
+  const entryRequirements = readChallengeEntityRequirements(picked.entry);
+  if (!entryRequirements.carried) {
+    return {
+      ok: false,
+      reason:
+        `${label}: challenge ${challengeId} carries no ${SBC_SET_API.elgReq} (${entryRequirements.reason});` +
+        ` the entry carries keys [${carriedKeyNames(picked.entry)}]; no challenge load was attempted, because a` +
+        ' payload entry carries no entity and no isInProgress argument to load it with',
+      selection: selection({ ok: true, seen: picked.seen, reason: picked.reason }),
+    };
+  }
+
+  return {
+    ok: true,
+    payload: entryRequirements.payload,
+    challenge: picked.entry,
+    via: entryRequirements.via,
+    requirementsFrom: `payload.${entryRequirements.source}`,
+    requirementsReason:
+      `the ${setId} set-challenges payload carried challenge ${challengeId} with` +
+      ` ${entryRequirements.source}[${entryRequirements.count}]; one request, no challenge load and no set walk`,
+    setId,
+    sets: 1,
+    selection: selection({ ok: true, seen: picked.seen, reason: picked.reason }),
+  };
+};
+
+/**
+ * The **last-resort** walk: request every set, list each set's challenges
+ * through `requestChallengesForSet` and `set.getChallenges()`, and select a
+ * challenge. It exists only for the case the panel argument cannot cover — a
+ * panel that named no set at all — and every call it makes is charged to the
+ * `setWalk` stage, because its cost is the reason #115 exists: the
+ * `fsl-build/14` run walked 22 sets inside the player's own account until EA
+ * answered sixteen times with 429/426/512/521.
+ *
+ * Each call names the stage instead of inheriting the one the solve service has
+ * open: the walk runs inside the bridge stage, so a call that left it unnamed
+ * would spend the allowance that one named-set call is sized for. The two
+ * set-challenges calls keep the set-challenges gap; the two loads that follow
+ * are ordinary reads and keep the general one.
+ *
+ * A selected challenge whose own `elgReq` array is non-empty answers directly
+ * (#77); otherwise the challenge is loaded by id through the DAO — with the
+ * entity's own `isInProgress()`, a throw meaning false — and then, when that
+ * yields no requirements, by the entity itself. The set entities may already
+ * carry their challenges for the live page; the request is still made first
+ * because the reference makes it and that is the only verified way the entities
+ * are populated.
  *
  * A set whose listing fails is recorded and skipped; a load that yields no
  * requirements keeps every attempt and the payload's own key names so the
@@ -3611,7 +4288,7 @@ const loadChallengeFromSetApi = async ({
     [],
     `${strategy.id} ${SBC_SET_API.requestSets}`,
     timeoutMs,
-    { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
+    { pacer, kind: CALL_KINDS.CHALLENGE_SET, stage: STAGE_NAMES.SET_WALK }
   );
   if (!setsCall.ok) return { ok: false, reason: setsCall.reason, selection: null };
 
@@ -3650,7 +4327,7 @@ const loadChallengeFromSetApi = async ({
       [set],
       label,
       timeoutMs,
-      { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
+      { pacer, kind: CALL_KINDS.CHALLENGE_SET, stage: STAGE_NAMES.SET_WALK }
     );
     if (!listing.ok) {
       const setId = readEntityId(set);
@@ -3726,7 +4403,7 @@ const loadChallengeFromSetApi = async ({
       [entityId, inProgress],
       `${strategy.id} ${daoVia}`,
       timeoutMs,
-      { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
+      { pacer, kind: CALL_KINDS.CHALLENGE_LOAD, stage: STAGE_NAMES.SET_WALK }
     );
     const attempt = describeLoadAttempt(daoVia, call);
     loadAttempts.push(attempt);
@@ -3746,7 +4423,7 @@ const loadChallengeFromSetApi = async ({
         [chosen],
         `${strategy.id} ${entityVia}`,
         timeoutMs,
-        { pacer, kind: CALL_KINDS.CHALLENGE_LOAD }
+        { pacer, kind: CALL_KINDS.CHALLENGE_LOAD, stage: STAGE_NAMES.SET_WALK }
       );
       const attempt = describeLoadAttempt(entityVia, call);
       loadAttempts.push(attempt);
@@ -3899,11 +4576,25 @@ export async function loadChallengePayload(pageWindow, subjectResult, options = 
       ? subjectResult.payload
       : null;
   // The identity the panel's second argument named, when the subject stage
-  // recorded one. It is an input to the set walk, never a selector of its own:
-  // the walk loads that challenge by id instead of re-ranking the open ones.
+  // recorded one. It is an input to the challenge read, never a selector of its
+  // own: the read loads that challenge by id instead of re-ranking the open ones.
   const selectedChallengeId = Number.isFinite(subjectResult?.selectedChallengeId)
     ? subjectResult.selectedChallengeId
     : null;
+  // The set the panel's first argument named, and that same argument as the set
+  // entity `requestChallengesForSet` expects (#115). Both are present only when
+  // the panel named a challenge, so the two travel together.
+  const selectedSetId = Number.isFinite(subjectResult?.selectedSetId)
+    ? subjectResult.selectedSetId
+    : null;
+  const selectedSet = isRecordObject(subjectResult?.selectedSet)
+    ? subjectResult.selectedSet
+    : null;
+  // Both halves must be present for the set to be addressable, so the gate the
+  // walk is refused behind is the same one the named-set read runs under. An
+  // id without its entity cannot be requested; falling back to the walk is the
+  // safe reading of that, not a dead end.
+  const namedSetAddressable = selectedSetId !== null && selectedSet !== null && selectedChallengeId !== null;
 
   // The panel named the challenge and its requirements resolved, so the answer
   // is already in hand. The blind set-API walk must not override the identity
@@ -3917,7 +4608,7 @@ export async function loadChallengePayload(pageWindow, subjectResult, options = 
       id: PANEL_SET_CHALLENGE_STRATEGY_ID,
       ok: true,
       reason:
-        'the panel argument carried the selected challenge with requirements; no set-API walk' +
+        'the panel argument carried the selected challenge with requirements; no set-challenges request' +
         ' was needed',
     });
     return {
@@ -3932,11 +4623,59 @@ export async function loadChallengePayload(pageWindow, subjectResult, options = 
     };
   }
 
+  // #115: the panel named the set, so exactly one `requestChallengesForSet` call
+  // is made, for that set, and its entries are matched by `challengeId`. This
+  // runs before the strategy table so the walk below is never reached on the
+  // normal path — and when it is reached, the walk records itself as refused.
+  if (namedSetAddressable) {
+    const namedSet = CHALLENGE_SET_ID_STRATEGIES[0];
+    const attempt = { id: namedSet.id, ok: false, reason: null, setId: selectedSetId, sets: 1 };
+    attempts.push(attempt);
+    const outcome = await loadChallengeFromNamedSet({
+      pageWindow,
+      strategy: namedSet,
+      timeoutMs,
+      pacer,
+      set: selectedSet,
+      setId: selectedSetId,
+      challengeId: selectedChallengeId,
+    });
+    attempt.selection = summarizeSelection(outcome.selection, 1);
+    if (outcome.ok && carriesChallengeRequirements(outcome.payload)) {
+      attempt.ok = true;
+      attempt.reason = outcome.requirementsReason ?? null;
+      return {
+        ok: true,
+        payload: outcome.payload,
+        strategy: namedSet.id,
+        attempts,
+        selection: outcome.selection,
+        loadVia: outcome.via,
+        requirementsFrom: outcome.requirementsFrom ?? null,
+        squadBackfilled: false,
+      };
+    }
+    attempt.reason = outcome.reason;
+  }
+
   for (const strategy of CHALLENGE_LOAD_STRATEGIES) {
     const attempt = { id: strategy.id, ok: false, reason: null };
     attempts.push(attempt);
 
     if (strategy.setApi === true) {
+      if (namedSetAddressable) {
+        // The walk is the fallback for a panel that named no set. When the panel
+        // did name one, running it would ask EA for every other set in the hub
+        // to reach a challenge this run already knows the address of — the
+        // fsl-build/14 rate limit, in short. It is refused, and the refusal is
+        // recorded so a report shows zero sets walked.
+        attempt.sets = 0;
+        attempt.reason =
+          `the panel argument named set ${selectedSetId}, so the blind set walk must not run` +
+          ' (it would ask EA for every set in the hub)';
+        continue;
+      }
+      attempt.setWalkFallback = true;
       const outcome = await loadChallengeFromSetApi({
         pageWindow,
         strategy,
@@ -3947,17 +4686,19 @@ export async function loadChallengePayload(pageWindow, subjectResult, options = 
       attempt.sets = outcome.sets ?? 0;
       attempt.selection = summarizeSelection(outcome.selection, outcome.sets);
       if (!outcome.ok) {
-        attempt.reason = outcome.reason;
+        attempt.reason = noteSetWalk(outcome.reason);
         continue;
       }
       if (!carriesChallengeRequirements(outcome.payload)) {
-        attempt.reason = `returned no challenge payload carrying requirements (got ${describeValue(
-          outcome.payload
-        )})`;
+        attempt.reason = noteSetWalk(
+          `returned no challenge payload carrying requirements (got ${describeValue(
+            outcome.payload
+          )})`
+        );
         continue;
       }
       attempt.ok = true;
-      attempt.reason = outcome.requirementsReason ?? null;
+      attempt.reason = noteSetWalk(outcome.requirementsReason ?? null);
       return {
         ok: true,
         payload: outcome.payload,
@@ -4291,17 +5032,63 @@ const resolveLocatedChallengeRequirements = (challenge) => {
   };
 };
 
+/** The location the set id is read from, and the first entry of the locations. */
+const PANEL_SET_ID_LOCATION = 'panel-argument.id';
+
+/**
+ * Reads the set id off the panel's own set argument. The `fsl-build/14`
+ * diagnostics list the first argument's own keys by name and type, and `id` is
+ * one of them with type `number`; the capture of the same session has the panel
+ * naming set 16 while its second argument named that set's challenge 37. This is
+ * therefore the *only* name read: a second candidate would be a guess at a value
+ * that decides which endpoint the run calls.
+ */
+const probePanelSetId = (set) => {
+  const id = PANEL_SET_ID_LOCATION;
+  if (!isRecordObject(set)) {
+    return {
+      id,
+      ok: false,
+      reason: `the panel argument is ${describeSubject(set)}, not a set carrying an id`,
+    };
+  }
+  const read = readDataProperty(set, SBC_SET_API.id);
+  if (!read.ok) {
+    return {
+      id,
+      ok: false,
+      reason:
+        read.reason === null
+          ? 'the panel argument carries no id, so no single set can be requested'
+          : `the panel argument's id is ${read.reason}`,
+    };
+  }
+  if (!Number.isFinite(read.value)) {
+    return { id, ok: false, reason: `the panel argument's id is ${describeValue(read.value)}, not a number` };
+  }
+  // The record itself stays plain `{id, ok, reason}` data, like every other
+  // location, so a pasted report carries no live object; the value rides beside
+  // it for the caller.
+  return { id, ok: true, reason: null, value: read.value };
+};
+
+/** The `{id, ok, reason}` half of a probe record, which is all a report carries. */
+const locationOf = (probe) => ({ id: probe.id, ok: probe.ok, reason: probe.reason });
+
 /**
  * The panel-identity probe: when a second panel argument names a challenge and
- * the first argument carries a `challenges` collection, the named challenge is
- * the one the player opened, so its requirements are read first and the blind
- * open-challenge walk never runs for it. Returns null when no second argument
- * was handed over, so the legacy panel strategies stay the whole answer and
- * their recorded attempts are unchanged.
+ * the first argument is the set the player opened, that set's id is the address
+ * of the one `requestChallengesForSet` call this run needs (#115) — so it is
+ * probed and reported here, next to the challenge identity, and carried on the
+ * result as `selectedSetId`/`selectedSet`. The named challenge's own requirements
+ * are still read first, so a panel that already carries them costs no call at
+ * all. Returns null when no second argument was handed over, so the legacy panel
+ * strategies stay the whole answer and their recorded attempts are unchanged.
  *
- * The recorded attempt carries `locations`: each location the named challenge
- * was looked for in, and why the ones that did not answer did not. Every one is
- * plain data — an id, a flag and a reason — so it rides on a pasted report.
+ * The recorded attempt carries `locations`: the set id, then each location the
+ * named challenge was looked for in, and why the ones that did not answer did
+ * not. Every one is plain data — an id, a flag and a reason — so it rides on a
+ * pasted report.
  */
 const probePanelSetChallenge = (subject, panelContext) => {
   const challengeId = Number.isFinite(panelContext?.challengeId)
@@ -4309,30 +5096,39 @@ const probePanelSetChallenge = (subject, panelContext) => {
     : null;
   if (challengeId === null) return null;
   const attempt = { id: PANEL_SET_CHALLENGE_STRATEGY_ID, ok: false, reason: null };
-  if (!isRecordObject(subject)) {
+  const setId = probePanelSetId(subject);
+  const located = isRecordObject(subject) ? locatePanelChallenge(subject, challengeId) : null;
+  attempt.locations = [
+    locationOf(setId),
+    ...(located === null ? [] : located.locations),
+  ];
+  const identity = {
+    attempt,
+    challengeId,
+    setId: setId.ok === true ? setId.value : null,
+    set: setId.ok === true ? subject : null,
+    seen: located === null ? 0 : located.seen,
+  };
+  if (located === null) {
     attempt.reason =
       `the panel argument is ${describeSubject(subject)}, not a set carrying a` +
       ` ${SBC_SET_API.challenges} collection`;
-    return { attempt, challengeId };
+    return identity;
   }
-  const located = locatePanelChallenge(subject, challengeId);
-  attempt.locations = located.locations;
   if (!located.ok) {
     attempt.reason = `the second panel argument named challenge ${challengeId}; ${located.reason}`;
-    return { attempt, challengeId, seen: located.seen };
+    return identity;
   }
   const resolved = resolveLocatedChallengeRequirements(located.challenge);
   if (!resolved.ok) {
     attempt.reason =
       `the panel argument's challenge ${challengeId} ${resolved.reason}; the run must not fall` +
       ' back to another challenge';
-    return { attempt, challengeId, seen: located.seen };
+    return identity;
   }
   attempt.ok = true;
   return {
-    attempt,
-    challengeId,
-    seen: located.seen,
+    ...identity,
     payload: resolved.payload,
     requirementsFrom: resolved.source,
   };
@@ -4380,15 +5176,23 @@ export function resolveChallengeSubject(subject, pageWindow, panelContext = {}) 
   );
   if (panelProbe === null) return fallback;
   const attempts = [panelProbe.attempt, ...fallback.attempts];
+  // The set id and the set entity travel with the challenge identity on both
+  // outcomes: a failed panel probe still leaves the run the address of one set,
+  // which is exactly what the named-set read needs to avoid the walk.
+  const named = {
+    selectedChallengeId: panelProbe.challengeId,
+    selectedSetId: panelProbe.setId,
+    selectedSet: panelProbe.set,
+  };
   if (panelProbe.attempt.ok !== true) {
-    return { ...fallback, attempts, selectedChallengeId: panelProbe.challengeId };
+    return { ...fallback, attempts, ...named };
   }
   return {
     ok: true,
     payload: panelProbe.payload,
     strategy: PANEL_SET_CHALLENGE_STRATEGY_ID,
     attempts,
-    selectedChallengeId: panelProbe.challengeId,
+    ...named,
     requirementsFrom: panelProbe.requirementsFrom,
     via: PANEL_SET_CHALLENGE_STRATEGY_ID,
     selection: {

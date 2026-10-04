@@ -18,6 +18,11 @@
  * offending index inside it. The structured location rides on the error as
  * `clubRead`, and the message carries no value — only names, indexes and sizes.
  *
+ * `clubRead` also carries the item's layer, the locations the observable-layer
+ * rejection probed and the shape of the sub-objects those probes read (#115), so
+ * a pasted report shows both what EA sent and what this build tried to read it
+ * from. An absent probe list means the wire layer, which reads fixed names.
+ *
  * This module is pure: plain data in, plain data out. No DOM, no chrome APIs,
  * no network.
  */
@@ -25,6 +30,7 @@
 import {
   CLUB_ITEM_ARRAY_ALTERNATIVES,
   CLUB_ITEM_ARRAY_FIELD,
+  CLUB_ITEM_LAYERS,
   normaliseClubItem,
 } from './adapter.js';
 import { normaliseClub } from '../solver/candidates.js';
@@ -98,6 +104,12 @@ const enrichNormalisationError = (error, items, pageItems) => {
     pageItems: location?.pageItems ?? null,
     itemIndexInPage: location?.itemIndexInPage ?? null,
     keys: [...error.rawItemShape.keys],
+    // The observable layer rejects an item by naming every location it probed and
+    // the shape of the sub-objects those probes read (#115). Both ride on the
+    // same record, so one paste shows what EA sent and what this build tried.
+    layer: error.rawItemShape.layer ?? CLUB_ITEM_LAYERS.WIRE,
+    probes: error.rawItemShape.probes ?? [],
+    subLayers: error.rawItemShape.subLayers ?? {},
   };
   enriched.cause = error;
   return enriched;

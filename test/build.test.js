@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CHALLENGE_LOAD_STRATEGIES,
+  CHALLENGE_SET_ID_STRATEGIES,
   CHALLENGE_SQUAD_STRATEGIES,
   CHALLENGE_SUBJECT_STRATEGIES,
   CLUB_ITEM_STRATEGIES,
@@ -32,10 +33,19 @@ describe('the build marker', () => {
     expect(marker.readers.squad).toEqual(CHALLENGE_SQUAD_STRATEGIES.map((entry) => entry.id));
   });
 
-  it('states the fsl-build/14 marker and compiles the challenge-load chain into the marker', () => {
-    expect(BUILD_ID).toBe('fsl-build/14');
+  it('states the fsl-build/15 marker and compiles the challenge-load chain into the marker', () => {
+    expect(BUILD_ID).toBe('fsl-build/15');
     expect(buildMarker().readers.challengeLoad).toEqual(
       CHALLENGE_LOAD_STRATEGIES.map((entry) => entry.id)
+    );
+  });
+
+  it('compiles the named-set read into the marker, so a build-14 adapter is visible', () => {
+    const marker = buildMarker();
+
+    expect(marker.readers.challengeSet).toEqual(CHALLENGE_SET_ID_STRATEGIES.map((entry) => entry.id));
+    expect(marker.readers.challengeSet).toContain(
+      'services.SBC.requestChallengesForSet+namedSet'
     );
   });
 

@@ -23,6 +23,7 @@
 
 import {
   CHALLENGE_LOAD_STRATEGIES,
+  CHALLENGE_SET_ID_STRATEGIES,
   CHALLENGE_SQUAD_STRATEGIES,
   CHALLENGE_SUBJECT_STRATEGIES,
   CLUB_ITEM_STRATEGIES,
@@ -83,8 +84,21 @@ import {
  * read.
  * Incremented by fsl-build/14: the club search criteria always carry the
  * observed `offset` field alongside `count`, advancing it per page.
+ * Incremented by fsl-build/15, three defects from the `fsl-build/14` live run:
+ *   1. the challenge is read from **one** set-challenges request for the set the
+ *      panel named, matched by `challengeId`; the 22-set walk is the last-resort
+ *      fallback and now says so in its own attempt, so a report cannot show a
+ *      rate-limited run as a normal one;
+ *   2. the club item is read from EA's **observable** item layer, whose field
+ *      names differ from the `/club` wire body; every stable value is reported
+ *      with the field it came from, and `assetId` resolves from the one proven
+ *      location or the item is refused — a definition id is never derived into it;
+ *   3. EA pushing back is classified as citizenship: 426 joins 429 as a slow-down,
+ *      512 and 521 back off three times longer, the set-challenges class gets its
+ *      own 2.5 s floor, the observed HTTP statuses are reported, and the bridge
+ *      budget is sized for one call instead of 32.
  */
-export const BUILD_ID = 'fsl-build/14';
+export const BUILD_ID = 'fsl-build/15';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact
@@ -93,7 +107,7 @@ export const BUILD_ID = 'fsl-build/14';
  *
  * @returns {{ id: string, readers: { challenge: Array<string>, club:
  *   Array<string>, squad: Array<string>, challengeLoad: Array<string>,
- *   panel: Array<string> } }}
+ *   challengeSet: Array<string>, panel: Array<string> } }}
  */
 export function buildMarker() {
   return {
@@ -103,6 +117,10 @@ export function buildMarker() {
       club: CLUB_ITEM_STRATEGIES.map((strategy) => strategy.id),
       squad: CHALLENGE_SQUAD_STRATEGIES.map((strategy) => strategy.id),
       challengeLoad: CHALLENGE_LOAD_STRATEGIES.map((strategy) => strategy.id),
+      // The named-set read is its own table so the load table keeps describing
+      // the walk exactly as it always did; it is reported separately so an
+      // adapter that lacks it is as visible as one that lacks the others.
+      challengeSet: CHALLENGE_SET_ID_STRATEGIES.map((strategy) => strategy.id),
       panel: PANEL_CHALLENGE_STRATEGIES.map((strategy) => strategy.id),
     },
   };

@@ -1,0 +1,188 @@
+{
+  "items": [
+    {
+      "_auction": null,
+      "_basePlusPlusRoles": [
+        11,
+        12
+      ],
+      "_basePlusRoles": [
+        21
+      ],
+      "_hyperCosmeticDTOs": [],
+      "_lifetimeStats": null,
+      "_metaData": {
+        "acquired": null,
+        "owner": null,
+        "loaned": false
+      },
+      "_playStyles": [
+        3
+      ],
+      "_preferredFoot": 2,
+      "_rareflag": 0,
+      "_rating": 84,
+      "_skillMoves": 3,
+      "_staticData": {
+        "assetId": 3001,
+        "definitionId": 3001,
+        "quality": "gold"
+      },
+      "_stats": {},
+      "_weakFoot": 4,
+      "amount": 1,
+      "attributes": [
+        80,
+        78,
+        79,
+        84,
+        54,
+        68
+      ],
+      "authenticity": "SHADOW",
+      "ballRestricted": false,
+      "bannerRestricted": false,
+      "basePossiblePositions": [
+        "CAM",
+        "ST"
+      ],
+      "concept": false,
+      "continuationId": null,
+      "cosmeticRarity": 0,
+      "cosmetics": [],
+      "definitionId": 3001,
+      "discardDate": null,
+      "discardable": true,
+      "displayName": "",
+      "duplicateCombinedEndTime": null,
+      "duplicateEndTime": null,
+      "duplicateId": null,
+      "duplicateItemLoans": [],
+      "endTime": null,
+      "gender": 0,
+      "groups": [],
+      "hasLevels": false,
+      "iconId": null,
+      "id": 40042,
+      "injuryGames": 0,
+      "injuryType": "none",
+      "isFavorite": null,
+      "keyAttributes": [
+        0
+      ],
+      "leagueId": 21,
+      "limitedUseType": 0,
+      "loans": [],
+      "loyaltyBonus": 1,
+      "nationId": 14,
+      "onDataUpdated": null,
+      "owners": 1,
+      "playStyle": 250,
+      "preferredPosition": "CAM",
+      "rankId": 0,
+      "sbsScore": 0,
+      "stackCount": 1,
+      "startTime": null,
+      "state": "free",
+      "subtype": 2,
+      "teamId": 33,
+      "tifoRestricted": false,
+      "timestamp": 0,
+      "tradable": true,
+      "tradableBeforeAcademy": true,
+      "type": "player",
+      "untradeableCount": 0,
+      "upgrades": [],
+      "utasPile": 7
+    },
+    {
+      "_auction": null,
+      "_basePlusPlusRoles": [],
+      "_basePlusRoles": [
+        21
+      ],
+      "_hyperCosmeticDTOs": [],
+      "_lifetimeStats": null,
+      "_metaData": {
+        "acquired": null,
+        "owner": null,
+        "loaned": false
+      },
+      "_playStyles": [],
+      "_preferredFoot": 3,
+      "_rareflag": 1,
+      "_rating": 76,
+      "_skillMoves": 4,
+      "_staticData": {
+        "assetId": 3002,
+        "definitionId": 3002,
+        "quality": "gold"
+      },
+      "_stats": {},
+      "_weakFoot": 4,
+      "amount": 1,
+      "attributes": [
+        72,
+        70,
+        66,
+        61,
+        45,
+        40
+      ],
+      "authenticity": "SHADOW",
+      "ballRestricted": false,
+      "bannerRestricted": false,
+      "basePossiblePositions": [
+        "GK"
+      ],
+      "concept": false,
+      "continuationId": null,
+      "cosmeticRarity": 0,
+      "cosmetics": [],
+      "definitionId": 3002,
+      "discardDate": null,
+      "discardable": true,
+      "displayName": "",
+      "duplicateCombinedEndTime": null,
+      "duplicateEndTime": null,
+      "duplicateId": null,
+      "duplicateItemLoans": [],
+      "endTime": null,
+      "gender": 0,
+      "groups": [],
+      "hasLevels": false,
+      "iconId": null,
+      "id": 40043,
+      "injuryGames": 0,
+      "injuryType": "none",
+      "isFavorite": null,
+      "keyAttributes": [
+        0
+      ],
+      "leagueId": 21,
+      "limitedUseType": 0,
+      "loans": [],
+      "loyaltyBonus": 0,
+      "nationId": 14,
+      "onDataUpdated": null,
+      "owners": 1,
+      "playStyle": 250,
+      "preferredPosition": "GK",
+      "rankId": 0,
+      "sbsScore": 0,
+      "stackCount": 1,
+      "startTime": null,
+      "state": "free",
+      "subtype": 2,
+      "teamId": 33,
+      "tifoRestricted": false,
+      "timestamp": 0,
+      "tradable": false,
+      "tradableBeforeAcademy": false,
+      "type": "player",
+      "untradeableCount": 1,
+      "upgrades": [],
+      "utasPile": 7
+    }
+  ]
+}

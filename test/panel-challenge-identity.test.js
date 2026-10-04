@@ -209,6 +209,7 @@ describe('the keyed lookup never selects an unverified challenge entry', () => {
     const located = locatedAttempt(resolveChallengeSubject(set, undefined, { challengeId: 25 }));
 
     expect(located.locations.map((entry) => entry.id)).toEqual([
+      'panel-argument.id',
       'panel-argument.challenges[key]',
       'panel-argument.challenges[identity]',
     ]);
@@ -226,7 +227,7 @@ describe('the keyed lookup never selects an unverified challenge entry', () => {
 
     const located = locatedAttempt(resolveChallengeSubject(set, undefined, { challengeId: 25 }));
 
-    const [keyed, identity] = located.locations;
+    const [, keyed, identity] = located.locations;
     expect(keyed).toMatchObject({ id: 'panel-argument.challenges[key]', ok: false });
     expect(keyed.reason).toContain('26');
     expect(identity).toMatchObject({ id: 'panel-argument.challenges[identity]', ok: true });

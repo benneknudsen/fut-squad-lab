@@ -6,10 +6,13 @@ import {
   selectOpenChallenge,
 } from '../src/ea/adapter.js';
 import { readChallenge } from '../src/ea/challenge-reader.js';
+import { STAGE_CALL_BUDGETS, STAGE_NAMES } from '../src/ea/pacing.js';
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import { createTestPacer } from './helpers/pacing.js';
 
-const testPacer = createTestPacer();
+// One pacer per test: stage counters are per-pacer state, so a file-wide pacer
+// lets an earlier test spend the `setWalk` allowance a later one needs (#115).
+const testPacer = () => createTestPacer();
 
 // Issue #72: the fsl-build/9 live run proved the panel hook carries no
 // requirements, and the reference reads the challenge through EA's SBC set API
@@ -141,7 +144,7 @@ describe('the challenge is read through the SBC set API (#72)', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer() });
 
     expect(result.ok).toBe(true);
     expect(received).toEqual([[25, true]]);
@@ -164,12 +167,48 @@ describe('the challenge is read through the SBC set API (#72)', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer() });
 
     expect(result.ok).toBe(true);
     expect(received).toHaveLength(1);
     expect(received[0][0]).toBe(entity);
     expect(received[0][0]).not.toBe(25);
+  });
+
+  it('charges every call the walk makes to the set-walk stage, never to the bridge', async () => {
+    // The solve service opens the bridge stage before the panel argument is read,
+    // and the walk runs inside it, so a call that names no stage is charged to
+    // the bridge — the stage the fsl-build/14 run spent on the walk. Both load
+    // branches are the walk's own cost, so all four calls name `setWalk`.
+    const localPacer = createTestPacer();
+    localPacer.beginStage(STAGE_NAMES.BRIDGE);
+    const entity = challengeEntity({ id: 25 });
+    const pageWindow = {
+      services: {
+        SBC: {
+          // The DAO load answers with no requirements, so the entity load runs
+          // too: both must be charged to the walk.
+          sbcDAO: { loadChallenge: () => observableOf({ challengeId: 25, squad: { players: [] } }) },
+          requestSets: () => observableOf({ sets: [{ id: 10, getChallenges: () => [entity] }] }),
+          requestChallengesForSet: () => observableOf({}),
+          loadChallenge: () => observableOf(loadedPayload),
+        },
+      },
+    };
+
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: localPacer });
+
+    expect(result.ok).toBe(true);
+    expect(localPacer.snapshot().calls).toBe(4);
+    expect(localPacer.snapshot().stages.setWalk).toEqual({
+      calls: 4,
+      budget: STAGE_CALL_BUDGETS[STAGE_NAMES.SET_WALK],
+    });
+    // The bridge stage was open the whole time and the walk spent none of it.
+    expect(localPacer.snapshot().stages.bridge).toEqual({
+      calls: 0,
+      budget: STAGE_CALL_BUDGETS[STAGE_NAMES.BRIDGE],
+    });
   });
 
   it('labels a failed requestChallengesForSet with the set id and the HTTP status', async () => {
@@ -188,7 +227,7 @@ describe('the challenge is read through the SBC set API (#72)', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer() });
 
     expect(result.ok).toBe(false);
     const reason = result.attempts[0].reason;
@@ -210,7 +249,7 @@ describe('the challenge is read through the SBC set API (#72)', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer() });
 
     expect(result.ok).toBe(true);
     expect(entity.squad).toBe(squad);
@@ -275,7 +314,7 @@ describe('the open-challenge selection rule (#72)', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer() });
 
     expect(result.ok).toBe(false);
     expect(result.attempts[0].reason).toMatch(/saw 1 challenges/);
@@ -295,7 +334,7 @@ describe('the open-challenge selection rule (#72)', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer() });
 
     expect(result.attempts[0].selection).toMatchObject({
       sets: 1,
@@ -369,7 +408,7 @@ describe('the requirements the set payload carries (#77)', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer() });
 
     expect(received).toEqual([[25, false]]);
     expect(result.ok).toBe(true);
@@ -397,7 +436,7 @@ describe('the requirements the set payload carries (#77)', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer() });
 
     expect(received).toEqual([[25, false]]);
     expect(result.ok).toBe(true);
@@ -428,7 +467,7 @@ describe('the requirements the set payload carries (#77)', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer() });
 
     expect(result.ok).toBe(true);
     expect(received).toEqual([[25, false]]);
@@ -453,7 +492,7 @@ describe('the requirements the set payload carries (#77)', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer() });
 
     expect(result.ok).toBe(true);
     expect(result.payload).toBe(loadedPayload);
@@ -480,7 +519,7 @@ describe('the requirements the set payload carries (#77)', () => {
       },
     };
 
-    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer });
+    const result = await loadChallengePayload(pageWindow, emptySubject, { pacer: testPacer() });
 
     expect(result.ok).toBe(false);
     const reason = result.attempts[0].reason;
