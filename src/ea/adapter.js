@@ -2094,7 +2094,13 @@ const applyClubSearchPage = (criteria, { offset, onlyUntradeables, pagingField }
   };
   for (const field of CLUB_SEARCH_WHOLE_CLUB_FIELDS) set(field.name, field.value);
   set('count', CLUB_SEARCH_PAGE_SIZE);
-  set(pagingField, offset);
+  // `offset` is the paging field EA's own live criteria carries (`fsl-build/13`
+  // observed `offset: 0` on the club UI's `searchCriteria`), so it is set on
+  // every page. When the criteria object first answers on the other candidate
+  // field, that field advances too, so a consumer reading either name pages
+  // correctly; the observed field is never dropped.
+  set('offset', offset);
+  if (pagingField !== 'offset') set(pagingField, offset);
   if (onlyUntradeables === true) {
     set('untradeables', CLUB_SEARCH_UNTRADEABLES_VALUES.ONLY);
   } else {
@@ -3237,6 +3243,9 @@ export const SBC_SET_API = Object.freeze({
   elgOperation: 'elgOperation',
   status: 'status',
   data: 'data',
+  challengeData: 'challengeData',
+  challenges: 'challenges',
+  challengesCount: 'challengesCount',
 });
 
 /** The service-locator targets the set API and its DAO live on. */
@@ -3263,6 +3272,82 @@ const readEntityId = (entity) => {
   const read = readDataProperty(entity, SBC_SET_API.id);
   return read.ok && Number.isFinite(read.value) ? read.value : null;
 };
+
+/** The raw identity fields a challenge may carry, in probe order. */
+const CHALLENGE_IDENTITY_FIELDS = Object.freeze([SBC_SET_API.id, CHALLENGE_FIELDS.challengeId]);
+
+/** The first finite identity field on one object level, or null. */
+const readIdentityField = (challenge) => {
+  for (const field of CHALLENGE_IDENTITY_FIELDS) {
+    const read = readDataProperty(challenge, field);
+    if (read.ok && Number.isFinite(read.value)) return read.value;
+  }
+  return null;
+};
+
+/**
+ * The identity of a challenge the panel named, across the shapes the live page
+ * and the set-challenges payload use. A raw set-challenges entry carries
+ * `challengeId`; a `UTSBCChallengeEntity` wrapper carries `id`, and its payload
+ * may live one level down inside a `data` wrapper. Every shape is a property
+ * read; a value that is not a finite number never counts.
+ */
+const readChallengeIdentity = (challenge) => {
+  if (!isRecordObject(challenge)) return null;
+  const direct = readIdentityField(challenge);
+  if (direct !== null) return direct;
+  const data = readDataProperty(challenge, SBC_SET_API.data);
+  return data.ok && isRecordObject(data.value) ? readIdentityField(data.value) : null;
+};
+
+/**
+ * Picks the challenge the player's panel named, by identity, out of every
+ * challenge entity the set API listed. Unlike `selectOpenChallenge`, this rule
+ * never re-ranks: the panel's second argument is the challenge the player
+ * opened, so a matching entity wins even when another is in progress. A named
+ * id that matches nothing fails with the counts and refuses to select another
+ * challenge, so the blind preference can never override the player's choice.
+ *
+ * @param {Array<object>} entities the challenge entities, in payload order
+ * @param {number} challengeId the id the panel's second argument named
+ * @returns {{ ok: boolean, challenge: object|null, index: number, seen: number,
+ *   open: number, inProgress: boolean, chosenId: number|null, reason: string }}
+ */
+export function selectChallengeByIdentity(entities, challengeId) {
+  const list = Array.isArray(entities) ? entities : [];
+  const seen = list.length;
+  let open = 0;
+  for (const entity of list) {
+    if (!entityFlag(entity, SBC_SET_API.isCompleted)) open += 1;
+  }
+  const chosen = list.find((entity) => readChallengeIdentity(entity) === challengeId) ?? null;
+  if (chosen === null) {
+    return {
+      ok: false,
+      challenge: null,
+      index: -1,
+      seen,
+      open,
+      inProgress: false,
+      chosenId: challengeId,
+      reason:
+        `the panel argument named challenge ${challengeId}, but the ${seen} challenges listed carry` +
+        ' no challenge with that id; refusing to select another',
+    };
+  }
+  return {
+    ok: true,
+    challenge: chosen,
+    index: list.indexOf(chosen),
+    seen,
+    open,
+    inProgress: entityFlag(chosen, SBC_SET_API.isInProgress),
+    chosenId: challengeId,
+    reason:
+      `the panel argument named challenge ${challengeId}; selected the matching challenge` +
+      ` (saw ${seen} challenges, ${open} open)`,
+  };
+}
 
 /**
  * Picks one challenge to solve out of every challenge entity the set API
@@ -3394,15 +3479,11 @@ const carriedKeyNames = (payload) =>
   isRecordObject(payload) ? carriedKeys(payload).join(', ') : describeValue(payload);
 
 /**
- * Reads the requirements the set-challenges payload itself carries. The
- * `fsl-build/11` live run demanded them off the entity and found only `squad`
- * because the requirements are the set-challenges entry's own `elgReq` array:
- * the capture in `test/fixtures/sbs-set-10-challenges.json` proves the shape.
- * Only a non-empty top-level `elgReq` array counts as carried; a missing,
- * non-array or empty value keeps its own reason so the caller loads and the
- * report can say which shape was missing.
+ * Reads a non-empty `elgReq` array off one entity level. Only a non-empty
+ * array counts as carried; a missing, non-array or empty value keeps its own
+ * reason so the caller loads and the report can say which shape was missing.
  */
-const readChallengeEntityRequirements = (challenge) => {
+const readEntityElgReq = (challenge) => {
   const read = readDataProperty(challenge, SBC_SET_API.elgReq);
   if (!read.ok) {
     return {
@@ -3425,6 +3506,49 @@ const readChallengeEntityRequirements = (challenge) => {
     return { carried: false, count: 0, reason: `${SBC_SET_API.elgReq} is an empty array` };
   }
   return { carried: true, count: read.value.length, reason: null };
+};
+
+/**
+ * Reads the requirements the set-challenges payload itself carries. The
+ * `fsl-build/11` live run demanded them off the entity and found only `squad`
+ * because the requirements are the set-challenges entry's own `elgReq` array:
+ * the capture in `test/fixtures/sbs-set-10-challenges.json` proves the shape.
+ *
+ * The live `UTSBCChallengeEntity` wraps that payload one level down, so the
+ * entity's own `elgReq` is probed first and then its `data` and `challengeData`
+ * wrappers — the same descent `resolveChallengeRequirements` performs for a
+ * loaded payload. The winner's `{source, via, payload}` name the exact wrapper,
+ * so a report says whether the entity or one of its wrappers answered. A
+ * payload that is not a record makes the direct probe fail with its reason.
+ */
+const readChallengeEntityRequirements = (challenge) => {
+  const direct = readEntityElgReq(challenge);
+  // Both miss paths return the same shape: the direct probe's own reason, the
+  // payload it probed, and no requirements source.
+  const unresolved = { ...direct, payload: challenge, source: null, via: null };
+  if (direct.carried) {
+    return {
+      ...direct,
+      payload: challenge,
+      source: SBC_SET_API.elgReq,
+      via: `set-payload.${SBC_SET_API.elgReq}`,
+    };
+  }
+  if (!isRecordObject(challenge)) return unresolved;
+  for (const wrapper of [SBC_SET_API.data, SBC_SET_API.challengeData]) {
+    const read = readDataProperty(challenge, wrapper);
+    if (!read.ok || !isRecordObject(read.value)) continue;
+    const nested = readEntityElgReq(read.value);
+    if (nested.carried) {
+      return {
+        ...nested,
+        payload: read.value,
+        source: `${wrapper}.${SBC_SET_API.elgReq}`,
+        via: `set-payload.${wrapper}.${SBC_SET_API.elgReq}`,
+      };
+    }
+  }
+  return unresolved;
 };
 
 /**
@@ -3463,7 +3587,13 @@ const describeLoadAttempt = (via, call) => {
  * failure says which shape was missing. Every reason names the call and the
  * argument it used, never a guessed one.
  */
-const loadChallengeFromSetApi = async ({ pageWindow, strategy, timeoutMs, pacer }) => {
+const loadChallengeFromSetApi = async ({
+  pageWindow,
+  strategy,
+  timeoutMs,
+  pacer,
+  selectedChallengeId = null,
+}) => {
   const base = resolveStrategyBase(pageWindow, SBC_SERVICE_TARGET);
   if (!base.ok) return { ok: false, reason: base.reason, selection: null };
 
@@ -3537,7 +3667,10 @@ const loadChallengeFromSetApi = async ({ pageWindow, strategy, timeoutMs, pacer 
     entities.push(...challenges.value);
   }
 
-  const selection = selectOpenChallenge(entities);
+  const selection =
+    selectedChallengeId === null
+      ? selectOpenChallenge(entities)
+      : selectChallengeByIdentity(entities, selectedChallengeId);
   // The reason is pasted into a support report, so a page where every set
   // failed listing must not produce one line per set: the count plus the first
   // few reasons is enough to act on.
@@ -3561,12 +3694,12 @@ const loadChallengeFromSetApi = async ({ pageWindow, strategy, timeoutMs, pacer 
   if (entityRequirements.carried) {
     return {
       ok: true,
-      payload: chosen,
+      payload: entityRequirements.payload,
       challenge: chosen,
-      via: `set-payload.${SBC_SET_API.elgReq}`,
-      requirementsFrom: `payload.${SBC_SET_API.elgReq}`,
+      via: entityRequirements.via,
+      requirementsFrom: `payload.${entityRequirements.source}`,
       requirementsReason:
-        `requirements came from the set-challenges payload (${SBC_SET_API.elgReq}[` +
+        `requirements came from the set-challenges payload (${entityRequirements.source}[` +
         `${entityRequirements.count}]); no challenge load was needed`,
       sets: sets.length,
       selection,
@@ -3736,6 +3869,13 @@ const describeArgumentFailure = (strategy, subjectResult) => {
  * payload is accepted when any documented requirements location carries an
  * array, so the loaded shape is reported by the same lookup as the panel shape.
  *
+ * `selectedChallengeId` gates the whole panel-argument half of this table. When
+ * the subject stage named a challenge it could not verify, every strategy that
+ * answers from the panel argument is refused with that id in its reason: those
+ * strategies carry the argument's payload, or a challenge id read out of it, and
+ * the identity probe already refused them. Only the identity-gated set walk may
+ * answer, so the run either loads the challenge the player opened or fails.
+ *
  * @param {object|undefined} pageWindow the page's `window`
  * @param {{ ok: boolean, payload: object|null }} subjectResult the
  *   `resolveChallengeSubject` result
@@ -3758,13 +3898,52 @@ export async function loadChallengePayload(pageWindow, subjectResult, options = 
     typeof subjectResult.payload === 'object'
       ? subjectResult.payload
       : null;
+  // The identity the panel's second argument named, when the subject stage
+  // recorded one. It is an input to the set walk, never a selector of its own:
+  // the walk loads that challenge by id instead of re-ranking the open ones.
+  const selectedChallengeId = Number.isFinite(subjectResult?.selectedChallengeId)
+    ? subjectResult.selectedChallengeId
+    : null;
+
+  // The panel named the challenge and its requirements resolved, so the answer
+  // is already in hand. The blind set-API walk must not override the identity
+  // the player chose, so it never runs on this path.
+  if (
+    subjectResult?.strategy === PANEL_SET_CHALLENGE_STRATEGY_ID &&
+    subjectPayload !== null &&
+    carriesChallengeRequirements(subjectPayload)
+  ) {
+    attempts.push({
+      id: PANEL_SET_CHALLENGE_STRATEGY_ID,
+      ok: true,
+      reason:
+        'the panel argument carried the selected challenge with requirements; no set-API walk' +
+        ' was needed',
+    });
+    return {
+      ok: true,
+      payload: subjectPayload,
+      strategy: PANEL_SET_CHALLENGE_STRATEGY_ID,
+      attempts,
+      selection: subjectResult.selection ?? null,
+      loadVia: subjectResult.via ?? PANEL_SET_CHALLENGE_STRATEGY_ID,
+      requirementsFrom: subjectResult.requirementsFrom ?? null,
+      squadBackfilled: false,
+    };
+  }
 
   for (const strategy of CHALLENGE_LOAD_STRATEGIES) {
     const attempt = { id: strategy.id, ok: false, reason: null };
     attempts.push(attempt);
 
     if (strategy.setApi === true) {
-      const outcome = await loadChallengeFromSetApi({ pageWindow, strategy, timeoutMs, pacer });
+      const outcome = await loadChallengeFromSetApi({
+        pageWindow,
+        strategy,
+        timeoutMs,
+        pacer,
+        selectedChallengeId,
+      });
       attempt.sets = outcome.sets ?? 0;
       attempt.selection = summarizeSelection(outcome.selection, outcome.sets);
       if (!outcome.ok) {
@@ -3789,6 +3968,21 @@ export async function loadChallengePayload(pageWindow, subjectResult, options = 
         requirementsFrom: outcome.requirementsFrom ?? null,
         squadBackfilled: outcome.squadBackfilled === true,
       };
+    }
+
+    // The panel named a challenge and this build could not verify it. Every strategy
+    // below this gate answers from the panel argument — as the payload itself, as
+    // an argument to a load call, or as an id read out of it — so none of them is
+    // the challenge the player opened: the subject probe refused that identity,
+    // and the probe's own reason promises the run must not fall back to another
+    // challenge. The identity-gated set walk above already ran and had its say, so
+    // the run stops here rather than write a squad into a challenge nobody
+    // picked. Refusing loudly is the correct outcome here, not a fallback.
+    if (selectedChallengeId !== null) {
+      attempt.reason =
+        `the panel named challenge ${selectedChallengeId} but it could not be verified, so ${strategy.id}` +
+        ' may not answer from the unverified panel argument; the run must not fall back to another challenge';
+      continue;
     }
 
     if (strategy.source === 'subject') {
@@ -3909,28 +4103,307 @@ const resolveFirstStrategy = (strategies, subject, pageWindow, accept) => {
 };
 
 /**
+ * The identity the panel's two arguments carry, from the `fsl-build/13` live
+ * report: `args[0]` is the `UTSBCSetEntity` and `args[1]` is the number of the
+ * challenge the player opened. The strategy id names that pair, so a bridge
+ * stage can say which path answered.
+ */
+const PANEL_SET_CHALLENGE_STRATEGY_ID = 'panel-argument.challenges+id';
+
+/**
+ * The panel-identity strategy table, frozen and exported so `buildMarker()`
+ * reads it. The four pre-existing reader tables were unchanged by the identity
+ * work, so a stale `adapter.js` beside a fresh `build.js` would report this build
+ * id with matching tables while lacking the identity path entirely — the
+ * mismatched-module report #50 exists to make diagnosable.
+ */
+export const PANEL_CHALLENGE_STRATEGIES = Object.freeze([
+  Object.freeze({ id: PANEL_SET_CHALLENGE_STRATEGY_ID }),
+]);
+
+/** The two locations the named challenge is looked for in, each recorded. */
+const PANEL_CHALLENGES_KEY_LOCATION = 'panel-argument.challenges[key]';
+const PANEL_CHALLENGES_IDENTITY_LOCATION = 'panel-argument.challenges[identity]';
+
+/**
+ * Reads the own `challenges` entry for `challengeId`, never a prototype key and
+ * never through an accessor. A plain `collection[challengeId]` is neither: it
+ * walks the prototype chain, so an index-keyed map, a colliding numeric key or
+ * an inherited key would all hand back *a* challenge — just not the one the
+ * player opened, which is the silent wrong-solve this read exists to prevent.
+ * The own property is still only a candidate: `probeKeyedChallenge` verifies its
+ * identity before it is used.
+ */
+const readOwnKeyedChallenge = (collection, challengeId) => {
+  let descriptor;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(collection, challengeId);
+  } catch {
+    return { ok: false, reason: 'an unreadable key' };
+  }
+  if (descriptor === undefined) return { ok: false, reason: null };
+  if (typeof descriptor.get === 'function' || typeof descriptor.set === 'function') {
+    return { ok: false, reason: 'an accessor(get/set); refusing to invoke it' };
+  }
+  if (descriptor.value === undefined) return { ok: false, reason: null };
+  return { ok: true, value: descriptor.value };
+};
+
+/**
+ * Probes the keyed location and records it: the entry is only a candidate, so it
+ * counts only when its own identity is the id the panel named. A key EA does not
+ * use for challenge ids, a stale key and a prototype key all land here as a
+ * refusal with the id that was there instead, so a live report says why the
+ * keyed path lost rather than that it lost. The verified entry rides on
+ * `challenge`; the record itself stays plain `{id, ok, reason}` data so no live
+ * EA object can reach a pasted report.
+ */
+const probeKeyedChallenge = (collection, challengeId) => {
+  const id = PANEL_CHALLENGES_KEY_LOCATION;
+  if (!isRecordObject(collection)) {
+    return { id, ok: false, reason: `the ${SBC_SET_API.challenges} collection is not keyed, so there is no keyed location` };
+  }
+  const read = readOwnKeyedChallenge(collection, challengeId);
+  if (!read.ok) {
+    return {
+      id,
+      ok: false,
+      reason:
+        read.reason === null
+          ? `the collection has no own entry for key ${challengeId}`
+          : `the collection's own entry for key ${challengeId} is ${read.reason}`,
+    };
+  }
+  const identity = readChallengeIdentity(read.value);
+  if (identity !== challengeId) {
+    return {
+      id,
+      ok: false,
+      reason:
+        `the entry at own key ${challengeId} carries challenge ${identity ?? 'no id'}, not ${challengeId};` +
+        ' a key EA does not use for challenge ids cannot select a challenge',
+    };
+  }
+  return { id, ok: true, reason: null, challenge: read.value };
+};
+
+/**
+ * Locates the challenge the panel's second argument named inside the set
+ * argument's `challenges` collection. The collection is an array in the
+ * captured payload and an object on the live page, but the build-13 evidence
+ * says only that it is an object: nothing proved it is keyed by challenge id,
+ * so the key is never trusted on its own. Both locations are probed and each
+ * keeps its own `{id, ok, reason}` record — the own key (only when the entry's
+ * own `readChallengeIdentity` is the id the panel named) and the identity match
+ * over every candidate, which answers for a raw `challengeId` entry and an `id`
+ * entity wrapper alike. An entry whose id does not match is refused, never used,
+ * because that is a challenge the player did not open. When neither location
+ * verifies the identity the result is a loud miss: a missing collection, a
+ * non-collection and a named id with no verified entry each keep their own
+ * reason, the refused locations ride on that reason, and the candidate count is
+ * on every outcome.
+ */
+const locatePanelChallenge = (set, challengeId) => {
+  const read = readDataProperty(set, SBC_SET_API.challenges);
+  if (!read.ok) {
+    return {
+      ok: false,
+      seen: 0,
+      locations: [],
+      reason:
+        read.reason === null
+          ? `the panel argument carries no ${SBC_SET_API.challenges} collection`
+          : `the panel argument ${SBC_SET_API.challenges} is ${read.reason}`,
+    };
+  }
+  const collection = read.value;
+  let candidates;
+  if (Array.isArray(collection)) candidates = collection;
+  else if (isRecordObject(collection)) candidates = Object.values(collection);
+  else {
+    return {
+      ok: false,
+      seen: 0,
+      locations: [],
+      reason:
+        `the panel argument ${SBC_SET_API.challenges} is ${describeValue(collection)},` +
+        ' not a collection',
+    };
+  }
+  const seen = candidates.length;
+  const keyed = probeKeyedChallenge(collection, challengeId);
+  const match = candidates.find((entry) => readChallengeIdentity(entry) === challengeId) ?? null;
+  // The record carries no challenge payload; the verified entry rides beside it.
+  const locations = [
+    { id: PANEL_CHALLENGES_KEY_LOCATION, ok: keyed.ok, reason: keyed.reason },
+    {
+      id: PANEL_CHALLENGES_IDENTITY_LOCATION,
+      ok: match !== null,
+      reason: match === null ? `none of the ${seen} entries carries challenge ${challengeId}` : null,
+    },
+  ];
+  // A verified entry is the answer either way; the two locations are recorded
+  // side by side so a report says which one answered and why the other did not.
+  const located = keyed.ok === true ? keyed.challenge : match;
+  if (located === null) {
+    return {
+      ok: false,
+      seen,
+      locations,
+      reason:
+        `the panel argument carries ${seen} challenges but none with id ${challengeId}` +
+        ` (${locations.map((location) => `${location.id}: ${location.reason}`).join('; ')})`,
+    };
+  }
+  return { ok: true, seen, locations, challenge: located };
+};
+
+/**
+ * Resolves the requirements of the challenge the panel named: the located
+ * payload itself first, then its `data` and `challengeData` wrappers, one level
+ * down, for the `UTSBCChallengeEntity` shape the live page uses. The winner's
+ * `source` and the payload that actually carries the array are returned, so the
+ * caller hands a payload `readChallenge` can read. Nothing is guessed: when no
+ * location carries an array, the resolver's own probed locations are named.
+ */
+const resolveLocatedChallengeRequirements = (challenge) => {
+  const direct = resolveChallengeRequirements(challenge);
+  if (direct.ok) {
+    return { ok: true, source: direct.source, payload: challenge };
+  }
+  for (const wrapper of [SBC_SET_API.data, SBC_SET_API.challengeData]) {
+    const read = readDataProperty(challenge, wrapper);
+    if (!read.ok || !isRecordObject(read.value)) continue;
+    const nested = resolveChallengeRequirements(read.value);
+    if (nested.ok) {
+      const source = nested.source.startsWith('payload.')
+        ? nested.source.slice('payload.'.length)
+        : nested.source;
+      return { ok: true, source: `${wrapper}.${source}`, payload: read.value };
+    }
+  }
+  return {
+    ok: false,
+    reason:
+      `no requirements array in any documented location (probed ${direct.attempts
+        .map((attempt) => attempt.id)
+        .join(', ')}, and the ${SBC_SET_API.data}/${SBC_SET_API.challengeData} wrappers)`,
+  };
+};
+
+/**
+ * The panel-identity probe: when a second panel argument names a challenge and
+ * the first argument carries a `challenges` collection, the named challenge is
+ * the one the player opened, so its requirements are read first and the blind
+ * open-challenge walk never runs for it. Returns null when no second argument
+ * was handed over, so the legacy panel strategies stay the whole answer and
+ * their recorded attempts are unchanged.
+ *
+ * The recorded attempt carries `locations`: each location the named challenge
+ * was looked for in, and why the ones that did not answer did not. Every one is
+ * plain data — an id, a flag and a reason — so it rides on a pasted report.
+ */
+const probePanelSetChallenge = (subject, panelContext) => {
+  const challengeId = Number.isFinite(panelContext?.challengeId)
+    ? panelContext.challengeId
+    : null;
+  if (challengeId === null) return null;
+  const attempt = { id: PANEL_SET_CHALLENGE_STRATEGY_ID, ok: false, reason: null };
+  if (!isRecordObject(subject)) {
+    attempt.reason =
+      `the panel argument is ${describeSubject(subject)}, not a set carrying a` +
+      ` ${SBC_SET_API.challenges} collection`;
+    return { attempt, challengeId };
+  }
+  const located = locatePanelChallenge(subject, challengeId);
+  attempt.locations = located.locations;
+  if (!located.ok) {
+    attempt.reason = `the second panel argument named challenge ${challengeId}; ${located.reason}`;
+    return { attempt, challengeId, seen: located.seen };
+  }
+  const resolved = resolveLocatedChallengeRequirements(located.challenge);
+  if (!resolved.ok) {
+    attempt.reason =
+      `the panel argument's challenge ${challengeId} ${resolved.reason}; the run must not fall` +
+      ' back to another challenge';
+    return { attempt, challengeId, seen: located.seen };
+  }
+  attempt.ok = true;
+  return {
+    attempt,
+    challengeId,
+    seen: located.seen,
+    payload: resolved.payload,
+    requirementsFrom: resolved.source,
+  };
+};
+
+/**
  * Reads the challenge payload out of the SBC detail panel argument, then out
  * of the live service containers. A value is accepted when any documented
  * requirements location carries an array (`resolveChallengeRequirements`); the
  * reason for a rejected candidate names that lookup, so a live report says
  * what was missing rather than only that the candidate failed.
  *
- * @param {*} subject the argument passed to `initWithSBCSet`
+ * The panel's second argument is consumed first (#77 follow-up): when it names
+ * a challenge and the first argument is the set the player opened, that
+ * challenge's own requirements are the answer. When the named challenge carries
+ * no readable requirements, the result is still not-ok but carries
+ * `selectedChallengeId`, so the load stage follows that identity instead of
+ * selecting a challenge blindly.
+ *
+ * @param {*} subject the first argument passed to `initWithSBCSet`
  * @param {object|undefined} [pageWindow] the page's `window`, needed for the
  *   `services.<Domain>` strategies
+ * @param {{ challengeId?: number }} [panelContext] the second argument's
+ *   numeric challenge id, when the bridge saw one
  * @returns {{ ok: boolean, payload: object|null, strategy: string|null,
- *   attempts: Array<{id: string, ok: boolean, reason: string|null}> }}
+ *   attempts: Array<{id: string, ok: boolean, reason: string|null}>,
+ *   selectedChallengeId?: number|null, requirementsFrom?: string|null,
+ *   via?: string|null, selection?: object }}
  */
-export function resolveChallengeSubject(subject, pageWindow) {
-  return resolveFirstStrategy(CHALLENGE_SUBJECT_STRATEGIES, subject, pageWindow, (value, label) => {
-    if (typeof value !== 'object' || Array.isArray(value)) {
-      return `${label} is not an object (got ${describeSubject(value)})`;
+export function resolveChallengeSubject(subject, pageWindow, panelContext = {}) {
+  const panelProbe = probePanelSetChallenge(subject, panelContext);
+  const fallback = resolveFirstStrategy(
+    CHALLENGE_SUBJECT_STRATEGIES,
+    subject,
+    pageWindow,
+    (value, label) => {
+      if (typeof value !== 'object' || Array.isArray(value)) {
+        return `${label} is not an object (got ${describeSubject(value)})`;
+      }
+      if (!carriesTopLevelRequirements(value)) {
+        return `${label} carries no requirements array (looked for ${REQUIREMENT_LOOKUP_SUMMARY})`;
+      }
+      return null;
     }
-    if (!carriesTopLevelRequirements(value)) {
-      return `${label} carries no requirements array (looked for ${REQUIREMENT_LOOKUP_SUMMARY})`;
-    }
-    return null;
-  });
+  );
+  if (panelProbe === null) return fallback;
+  const attempts = [panelProbe.attempt, ...fallback.attempts];
+  if (panelProbe.attempt.ok !== true) {
+    return { ...fallback, attempts, selectedChallengeId: panelProbe.challengeId };
+  }
+  return {
+    ok: true,
+    payload: panelProbe.payload,
+    strategy: PANEL_SET_CHALLENGE_STRATEGY_ID,
+    attempts,
+    selectedChallengeId: panelProbe.challengeId,
+    requirementsFrom: panelProbe.requirementsFrom,
+    via: PANEL_SET_CHALLENGE_STRATEGY_ID,
+    selection: {
+      ok: true,
+      seen: panelProbe.seen,
+      open: null,
+      inProgress: false,
+      chosenId: panelProbe.challengeId,
+      sets: 0,
+      source: PANEL_SET_CHALLENGE_STRATEGY_ID,
+      reason:
+        `the panel argument carried the selected challenge ${panelProbe.challengeId} with` +
+        ' requirements',
+    },
+  };
 }
 
 /**

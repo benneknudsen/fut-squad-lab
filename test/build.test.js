@@ -5,6 +5,7 @@ import {
   CHALLENGE_SQUAD_STRATEGIES,
   CHALLENGE_SUBJECT_STRATEGIES,
   CLUB_ITEM_STRATEGIES,
+  PANEL_CHALLENGE_STRATEGIES,
 } from '../src/ea/adapter.js';
 import { BUILD_ID, buildMarker } from '../src/ea/build.js';
 import {
@@ -31,11 +32,18 @@ describe('the build marker', () => {
     expect(marker.readers.squad).toEqual(CHALLENGE_SQUAD_STRATEGIES.map((entry) => entry.id));
   });
 
-  it('states the #77 build id and compiles the challenge-load chain into the marker', () => {
-    expect(BUILD_ID).toBe('fsl-build/13');
+  it('states the fsl-build/14 marker and compiles the challenge-load chain into the marker', () => {
+    expect(BUILD_ID).toBe('fsl-build/14');
     expect(buildMarker().readers.challengeLoad).toEqual(
       CHALLENGE_LOAD_STRATEGIES.map((entry) => entry.id)
     );
+  });
+
+  it('compiles the panel identity strategy into the marker, so a stale adapter cannot report build 14', () => {
+    const marker = buildMarker();
+
+    expect(marker.readers.panel).toEqual(PANEL_CHALLENGE_STRATEGIES.map((entry) => entry.id));
+    expect(marker.readers.panel).toContain('panel-argument.challenges+id');
   });
 
   it('is carried in the diagnostic report and moves with the supplied marker', () => {
