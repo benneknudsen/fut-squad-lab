@@ -367,6 +367,36 @@ describe('resolving the paging field (#76)', () => {
     ]);
     expect(Object.hasOwn(snapshots[0], 'start')).toBe(false);
   });
+
+  it('sends offset alongside count and advances it when the criteria only exposes start', async () => {
+    const criteria = { ownedOnly: true, start: 0 };
+    const { snapshots, search } = pagedSearch([[{ id: 1 }], [{ id: 2 }], []]);
+
+    const result = await resolveClubItems(
+      {
+        UTBucketedItemSearchViewModel: { searchCriteria: criteria },
+        services: { Club: { search } },
+      },
+      { pacer: testPacer }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(snapshots.map((entry) => entry.offset)).toEqual([
+      0,
+      CLUB_SEARCH_PAGE_SIZE,
+      2 * CLUB_SEARCH_PAGE_SIZE,
+    ]);
+    expect(snapshots.map((entry) => entry.start)).toEqual([
+      0,
+      CLUB_SEARCH_PAGE_SIZE,
+      2 * CLUB_SEARCH_PAGE_SIZE,
+    ]);
+    expect(snapshots.every((entry) => entry.count === CLUB_SEARCH_PAGE_SIZE)).toBe(true);
+    const names = result.criteria.setFields.map((field) => field.name);
+    expect(names).toContain('offset');
+    expect(names).toContain('start');
+    expect(names).toContain('count');
+  });
 });
 
 // Issue #76: the field-by-field diff between how EA's own UI called
@@ -720,6 +750,7 @@ describe('the criteria initialisation (#65, #76)', () => {
       { name: 'sort', type: 'string', value: 'desc' },
       { name: 'searchAltPositions', type: 'boolean', value: true },
       { name: 'count', type: 'number', value: CLUB_SEARCH_PAGE_SIZE },
+      { name: 'offset', type: 'number', value: 0 },
       { name: 'start', type: 'number', value: 0 },
     ]);
 

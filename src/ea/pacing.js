@@ -99,6 +99,43 @@ export const CALL_KINDS = Object.freeze({
   SUBMIT: 'submit',
 });
 
+/**
+ * The solve stages that own a pacing allowance (fsl-build/14 follow-up of the
+ * `fsl-build/13` live run). A stage selects the call budget; the solve service
+ * opens a stage before the calls that belong to it, and the diagnostics report
+ * each stage's consumption next to its budget. A stage the table does not name
+ * carries no cap but is still counted.
+ */
+export const STAGE_NAMES = Object.freeze({
+  BRIDGE: 'bridge',
+  CLUB: 'club',
+  SQUAD: 'squad',
+  WRITE: 'write',
+});
+
+/**
+ * Maximum calls one stage may start. The numbers are bounded by what each
+ * stage's own strategy list can do, so no stage can spend another stage's
+ * allowance:
+ *
+ * - `bridge`: one `requestSets` + one `requestChallengesForSet` per set
+ *   (`fsl-build/13` saw 21) + the by-id and by-entity loads, with headroom for
+ *   a retry at each boundary = 32;
+ * - `club`: the page cap (`CLUB_SEARCH_PAGE_CAP`, 50) plus one retry of the
+ *   first page = 52;
+ * - `squad`: the active-squad method chain plus the property fallbacks = 12;
+ * - `write`: the save candidates (`planSquadWrite`/`writeSolution`) with
+ *   retry headroom = 6.
+ *
+ * A budget is a total call count, not a retry count; each retry is one call.
+ */
+export const STAGE_CALL_BUDGETS = Object.freeze({
+  [STAGE_NAMES.BRIDGE]: 32,
+  [STAGE_NAMES.CLUB]: 52,
+  [STAGE_NAMES.SQUAD]: 12,
+  [STAGE_NAMES.WRITE]: 6,
+});
+
 /** Status EA returns when its service is asking the caller to slow down. */
 export const RATE_LIMIT_STATUS = 429;
 
@@ -277,6 +314,23 @@ const cancelledError = (label) => {
   return error;
 };
 
+/**
+ * The failure of a call whose owning stage already spent its whole call
+ * allowance. It is not a cancel: the queue, the other stages and a later solve
+ * are untouched, and the reason names the stage, its budget and the calls it
+ * used, so a live report can say which stage was capped instead of only that a
+ * call did not start.
+ */
+const stageBudgetError = (label, stage, budget, calls) => {
+  const error = new Error(
+    `pacing: stage '${stage}' exhausted its call budget of ${budget} (used ${calls}) before` +
+      ` starting (${label})`
+  );
+  error.name = 'PacingStageBudgetError';
+  error.pacingStage = Object.freeze({ stage, budget, calls });
+  return error;
+};
+
 const taskTimeoutError = (label, timeoutMs) => {
   const error = new Error(
     `pacing: '${label}' did not settle within ${timeoutMs}ms; the entry was abandoned so the` +
@@ -318,14 +372,17 @@ export function defaultPacer() {
  *
  * @param {{ minGapMs?: number, submitGapMs?: number, jitterRatio?: number,
  *   backoffBaseMs?: number, backoffMaxMs?: number, taskTimeoutMs?: number,
- *   random?: () => number, budgets?: object }} [options] `taskTimeoutMs`
- *   bounds one task attempt and defaults to `DEFAULT_TASK_TIMEOUT_MS`
+ *   random?: () => number, budgets?: object, stageBudgets?: object }} [options]
+ *   `taskTimeoutMs` bounds one task attempt and defaults to
+ *   `DEFAULT_TASK_TIMEOUT_MS`; `stageBudgets` overrides `STAGE_CALL_BUDGETS`
  * @returns {{ run: Function, cancel: Function, reset: Function,
- *   snapshot: Function }}
- *   `run(label, task, { kind, budget })` queues one call and resolves with the
- *   task's value; `cancel()` clears the active timer and rejects every queued
- *   call; `reset()` re-arms the pacer after a cancel; `snapshot()` returns a
- *   frozen counter report
+ *   beginStage: Function, snapshot: Function }}
+ *   `run(label, task, { kind, budget, stage })` queues one call and resolves
+ *   with the task's value; `beginStage(name)` tags every following call of this
+ *   solve with that stage; `cancel()` clears the active timer and rejects every
+ *   queued call; `reset()` re-arms the pacer and clears the per-stage counters
+ *   after a cancel; `snapshot()` returns a frozen counter report, including
+ *   each stage's calls next to its budget
  */
 export function createPacer(options = {}) {
   const minGapMs = resolveNumber(options.minGapMs, MIN_CALL_GAP_MS, 0);
@@ -336,13 +393,39 @@ export function createPacer(options = {}) {
   const taskTimeoutMs = resolveNumber(options.taskTimeoutMs, DEFAULT_TASK_TIMEOUT_MS, 1);
   const random = typeof options.random === 'function' ? options.random : Math.random;
   const budgets = isRecord(options.budgets) ? { ...ATTEMPT_BUDGETS, ...options.budgets } : ATTEMPT_BUDGETS;
+  const stageBudgets = isRecord(options.stageBudgets)
+    ? { ...STAGE_CALL_BUDGETS, ...options.stageBudgets }
+    : STAGE_CALL_BUDGETS;
 
   const counters = { calls: 0, waits: 0, retries: 0, waitedMs: 0 };
+  const stageCounters = new Map();
   const queue = [];
   let inFlight = false;
   let activeWait = null;
   let cancelled = false;
   let lastStartedAt = null;
+  let currentStage = null;
+
+  const stageState = (stage) => {
+    let state = stageCounters.get(stage);
+    if (state === undefined) {
+      const budget = stageBudgets[stage];
+      state = {
+        calls: 0,
+        budget: Number.isInteger(budget) && budget >= 1 ? budget : null,
+      };
+      stageCounters.set(stage, state);
+    }
+    return state;
+  };
+
+  const snapshotStages = () =>
+    Object.fromEntries(
+      [...stageCounters.entries()].map(([stage, state]) => [
+        stage,
+        Object.freeze({ calls: state.calls, budget: state.budget }),
+      ])
+    );
 
   const gapForKind = (kind) =>
     kind === CALL_KINDS.SUBMIT ? Math.max(submitGapMs, minGapMs) : minGapMs;
@@ -353,6 +436,7 @@ export function createPacer(options = {}) {
       waits: counters.waits,
       retries: counters.retries,
       waitedMs: counters.waitedMs,
+      stages: snapshotStages(),
     });
 
   const wait = (ms) => {
@@ -399,6 +483,7 @@ export function createPacer(options = {}) {
 
   const execute = async (entry) => {
     const budget = resolveBudget(entry.kind, entry.budget, budgets);
+    const stage = entry.stage === null ? null : stageState(entry.stage);
     if (cancelled) throw cancelledError(entry.label);
 
     if (lastStartedAt !== null) {
@@ -412,8 +497,12 @@ export function createPacer(options = {}) {
     let attempt = 0;
     while (true) {
       if (cancelled) throw cancelledError(entry.label);
+      if (stage !== null && stage.budget !== null && stage.calls >= stage.budget) {
+        throw stageBudgetError(entry.label, entry.stage, stage.budget, stage.calls);
+      }
       attempt += 1;
       counters.calls += 1;
+      if (stage !== null) stage.calls += 1;
       lastStartedAt = Date.now();
       try {
         return await runWithTimeout(entry, attempt);
@@ -460,16 +549,33 @@ export function createPacer(options = {}) {
           reject(cancelledError(name));
           return;
         }
+        const stage =
+          typeof options.stage === 'string' && options.stage.length > 0
+            ? options.stage
+            : currentStage;
+        if (stage !== null) {
+          const state = stageState(stage);
+          if (state.budget !== null && state.calls >= state.budget) {
+            reject(stageBudgetError(name, stage, state.budget, state.calls));
+            return;
+          }
+        }
         queue.push({
           label: name,
           task,
           kind: options.kind ?? CALL_KINDS.READ,
           budget: options.budget,
+          stage,
           resolve,
           reject,
         });
         pump();
       });
+    },
+
+    beginStage(stage) {
+      currentStage = typeof stage === 'string' && stage.length > 0 ? stage : null;
+      if (currentStage !== null) stageState(currentStage);
     },
 
     cancel() {
@@ -487,6 +593,8 @@ export function createPacer(options = {}) {
 
     reset() {
       cancelled = false;
+      currentStage = null;
+      stageCounters.clear();
     },
 
     snapshot,

@@ -59,6 +59,30 @@ const PATCH_FLAG = '__fslPatchedBySquadLab';
 const OBSERVER_GROUP_TITLE = 'FUT Squad Lab — observed EA calls';
 
 /**
+ * Whether a panel hook firing means the player moved to a different challenge,
+ * and the in-flight solve must therefore be cancelled.
+ *
+ * EA re-invokes `initWithSBCSet` on panel re-renders, and the `fsl-build/13`
+ * run proved the set object's identity changes across them: cancelling on
+ * object identity killed the club read of a solve that was still working.
+ * When both firings carry the challenge id from the panel's second argument,
+ * that id — not the object — is the identity, so a re-render of the same
+ * challenge keeps the run alive and only a different challenge cancels it.
+ * Without an id on either side, the argument object stays the identity, which
+ * is all an older EA build gives us.
+ *
+ * @param {{ subject: *, challengeId: number|null }} previous the last firing
+ * @param {{ subject: *, challengeId: number|null }} next the firing now
+ * @returns {boolean} true when the solve should be cancelled
+ */
+export const panelSubjectChanged = (previous, next) => {
+  const bothIdentified =
+    Number.isFinite(previous?.challengeId) && Number.isFinite(next?.challengeId);
+  if (bothIdentified && previous.challengeId === next.challengeId) return false;
+  return previous?.subject !== next?.subject;
+};
+
+/**
  * Writes the diagnostics report to the user's Downloads folder with a `Blob`
  * and a synthetic `<a download>` click (#75). The MAIN world already owns the
  * report, so the evidence file needs no permission, no background round-trip
@@ -136,6 +160,7 @@ export function startPageBridge(pageWindow, options = {}) {
     label: null,
     controller: null,
     subject: null,
+    challengeId: null,
     busy: false,
     eligibilityRead: false,
     eligibility: null,
@@ -290,7 +315,7 @@ export function startPageBridge(pageWindow, options = {}) {
     if (state.busy) return;
     state.busy = true;
     try {
-      const outcome = await service.solve(state.subject);
+      const outcome = await service.solve(state.subject, { challengeId: state.challengeId });
       const observerReport = observer.report();
       // #76: the diff compares EA's own observed club search criteria with the
       // criteria this build actually handed over, taken from the club stage's
@@ -360,13 +385,21 @@ export function startPageBridge(pageWindow, options = {}) {
     }
   };
 
-  const onPanel = (controller, subject) => {
-    if (state.subject !== subject) {
+  const onPanel = (controller, args) => {
+    const subject = args[0];
+    const challengeId = Number.isFinite(args[1]) ? args[1] : null;
+    if (
+      panelSubjectChanged(
+        { subject: state.subject, challengeId: state.challengeId },
+        { subject, challengeId }
+      )
+    ) {
       transport.cancel();
       service.cancel();
     }
     state.controller = controller;
     state.subject = subject;
+    state.challengeId = challengeId;
     resolveEligibilityOnce();
     ensureMounted();
     // A panel hook firing means EA's app is up; wrap anything that appeared
@@ -399,7 +432,7 @@ export function startPageBridge(pageWindow, options = {}) {
     const patched = function (...args) {
       const result = original.apply(this, args);
       try {
-        onPanel(this, args[0]);
+        onPanel(this, args);
       } catch (error) {
         reportError(`panel hook failed: ${error.message}`);
       }

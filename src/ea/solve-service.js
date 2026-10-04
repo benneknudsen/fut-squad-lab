@@ -53,7 +53,7 @@ import {
 } from './adapter.js';
 import { readChallenge } from './challenge-reader.js';
 import { readClubItems } from './club-reader.js';
-import { createPacer } from './pacing.js';
+import { STAGE_NAMES, createPacer } from './pacing.js';
 import { describeServiceShape } from './service-shape.js';
 import { runSolve } from './solve-runner.js';
 import { applySolution, planSquadWrite, writeSolution } from './squad-writer.js';
@@ -173,7 +173,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
   };
 
   return {
-    async solve(subject) {
+    async solve(subject, panelContext = {}) {
       const stages = [];
       // A cancel pauses the queue; a new solve re-arms it so a cancelled run
       // cannot leave the service permanently unresponsive.
@@ -189,10 +189,14 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
 
       let subjectResult;
       try {
-        subjectResult = resolveSubject(subject, pageWindow);
+        subjectResult = resolveSubject(subject, pageWindow, panelContext);
       } catch (error) {
         subjectResult = thrownStageResult(error);
       }
+      // Each stage opens its own pacing allowance before its calls, so a long
+      // bridge walk can exhaust only the bridge budget (fsl-build/14 follow-up of the
+      // fsl-build/13 run, where it cancelled the never-started club read).
+      calls.beginStage(STAGE_NAMES.BRIDGE);
       let loadResult;
       try {
         loadResult = await loadChallengeFn(pageWindow, subjectResult, { pacer: calls });
@@ -214,11 +218,18 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
         attempts: loadResult.attempts,
         // The #72 set-API selection counts: how many sets and challenges were
         // seen and which challenge was chosen, so the next live log can say
-        // whether this build picked the challenge the player meant.
+        // whether this build picked the challenge the player meant. A panel
+        // identity answer names itself in `requirementsFrom`/`loadVia` instead.
         selection: loadResult.selection ?? null,
         loadVia: loadResult.loadVia ?? null,
+        requirementsFrom: loadResult.requirementsFrom ?? null,
         squadBackfilled: loadResult.squadBackfilled === true,
-        subject: { strategy: subjectResult.strategy ?? null, attempts: subjectResult.attempts },
+        subject: {
+          strategy: subjectResult.strategy ?? null,
+          selectedChallengeId: subjectResult.selectedChallengeId ?? null,
+          requirementsFrom: subjectResult.requirementsFrom ?? null,
+          attempts: subjectResult.attempts,
+        },
       });
 
       let challenge = null;
@@ -246,6 +257,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
       }
 
       let clubResult;
+      calls.beginStage(STAGE_NAMES.CLUB);
       try {
         clubResult = await resolveClub(pageWindow, { pacer: calls });
       } catch (error) {
@@ -358,6 +370,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
       }
 
       let squadResult;
+      calls.beginStage(STAGE_NAMES.SQUAD);
       try {
         squadResult = await resolveSquad(subject, pageWindow, loadResult.payload, {
           pacer: calls,
@@ -450,6 +463,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
       record('payload', true, null, summarizeWritePlan(plan));
 
       try {
+        calls.beginStage(STAGE_NAMES.WRITE);
         const write = await writeSolutionFn(pageWindow, payload, { pacer: calls });
         record(
           'write',

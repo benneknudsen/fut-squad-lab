@@ -11,7 +11,11 @@
  * `BUILD_ID` is bumped whenever the diagnostic or any reader chain changes.
  * `buildMarker()` also reports the reader-chain ids actually compiled into the
  * adapter, read from those frozen tables at call time, so a stale adapter shows
- * up immediately even when the build id matches.
+ * up immediately even when the build id matches. `panel` is read from the
+ * panel-identity strategy table for the same reason: a build-14 report must prove
+ * the identity path was compiled in, not merely that the four pre-existing reader
+ * tables were — an `adapter.js` without it would otherwise match on every other
+ * field.
  *
  * This module is pure: plain data in, plain data out. No DOM, no chrome APIs,
  * no network.
@@ -22,6 +26,7 @@ import {
   CHALLENGE_SQUAD_STRATEGIES,
   CHALLENGE_SUBJECT_STRATEGIES,
   CLUB_ITEM_STRATEGIES,
+  PANEL_CHALLENGE_STRATEGIES,
 } from './adapter.js';
 
 /**
@@ -69,8 +74,17 @@ import {
  * `elgReq` (no load at all), and only otherwise loads the challenge — DAO by id
  * with the entity's own `isInProgress()`, then the entity itself — so a report
  * must state which of the two shapes answered.
+ * Incremented by fsl-build/14: the challenge read consumes the panel's second
+ * argument — the set argument's own `challenges` collection is searched for the
+ * selected challenge id, its `data`/`challengeData` wrapper included, and that
+ * identity beats the blind open-challenge walk.
+ * Incremented by fsl-build/14: each solve stage carries its own pacing call
+ * budget, reported per stage, so the 21-set bridge walk cannot starve the club
+ * read.
+ * Incremented by fsl-build/14: the club search criteria always carry the
+ * observed `offset` field alongside `count`, advancing it per page.
  */
-export const BUILD_ID = 'fsl-build/13';
+export const BUILD_ID = 'fsl-build/14';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact
@@ -78,7 +92,8 @@ export const BUILD_ID = 'fsl-build/13';
  * challenge-squad and challenge-load reads.
  *
  * @returns {{ id: string, readers: { challenge: Array<string>, club:
- *   Array<string>, squad: Array<string>, challengeLoad: Array<string> } }}
+ *   Array<string>, squad: Array<string>, challengeLoad: Array<string>,
+ *   panel: Array<string> } }}
  */
 export function buildMarker() {
   return {
@@ -88,6 +103,7 @@ export function buildMarker() {
       club: CLUB_ITEM_STRATEGIES.map((strategy) => strategy.id),
       squad: CHALLENGE_SQUAD_STRATEGIES.map((strategy) => strategy.id),
       challengeLoad: CHALLENGE_LOAD_STRATEGIES.map((strategy) => strategy.id),
+      panel: PANEL_CHALLENGE_STRATEGIES.map((strategy) => strategy.id),
     },
   };
 }
