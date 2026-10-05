@@ -13,6 +13,7 @@ export const createTestPacer = () =>
   createPacer({
     minGapMs: 0,
     submitGapMs: 0,
+    challengeSetGapMs: 0,
     jitterRatio: 0,
     backoffBaseMs: 0,
     backoffMaxMs: 0,

@@ -15,7 +15,7 @@ import { createChannel, startLoader, startRelay } from './helpers/channel.js';
 // The exact text of every stage line, spelled out rather than composed from the
 // production helpers: a test that rebuilt the expected string out of the same
 // function it is testing would pass whatever that function did.
-const BUILDING = '[FUT Squad Lab] build fsl-build/14 booting';
+const BUILDING = '[FUT Squad Lab] build fsl-build/15 booting';
 const RELAY_READY = '[FUT Squad Lab] content relay ready';
 const HANDSHAKE_SENT = '[FUT Squad Lab] bridge module handshake sent';
 const HELLO_ACKED = '[FUT Squad Lab] loader acknowledged bridge-hello';

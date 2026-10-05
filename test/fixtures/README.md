@@ -13,7 +13,8 @@ these, not against hand-written guesses.
 | `sbs-set-10-challenges.json` | `GET /sbs/setId/10/challenges` | The `elgReq[]` requirement model |
 | `sbs-set-16-challenges.json` | `GET /sbs/setId/16/challenges` | A second challenge set, for variety |
 | `sbs-challenge-25-squad.json` | `POST /sbs/challenge/25` | The empty squad template a solution is written into |
-| `club-items.json` | `POST /club` | The club item format (`items` envelope, issue #72) |
+| `club-items.json` | `POST /club` | The club item format, **wire layer** (`items` envelope, issue #72) |
+| `club-items-observable.json` | `POST /club`, via EA's observable | The club item format, **observable layer** (issue #115) |
 | `club-search-request.json` | `POST /club` (request body) | EA's own whole-club search criteria: field names, values and page size (issue #76) |
 | `chemistry-profiles.json` | `GET /chemistry/profiles` | FC27 chemistry rules |
 | `chemistry-teamlinks.json` | `GET /chemistry/teamlinks` | Linked clubs (cross-team club counting) |
@@ -76,6 +77,26 @@ What was done to it, beyond the normal pass:
 EA's chemistry numbers were kept **unmodified** — they are the entire point of the file. A
 scan for the persona ID, the squad name, `personaId`, `squadName` and `managerId` over the
 committed file returns nothing.
+
+### The one other shape: `club-items-observable.json`
+
+EA's `POST /club` reaches this project twice. The body on the wire names its
+items `itemData[]` with `assetId`, `rating`, `nation`, `teamid`, `rareflag` and
+`marketAverage`; that is `club-items.json`. What EA's **observable** hands the
+read layer is its own entity model, with different names for the same facts:
+`definitionId`, `_rating`, `_staticData`, `_metaData`, `teamId`, `nationId`,
+`subtype`, `basePossiblePositions`, `_rareflag`, `_basePlusRoles`, `tradable`,
+`utasPile`. That is `club-items-observable.json`, and the `fsl-build/14` run
+failed every item on it.
+
+It is a **shape** fixture, not a capture. Every key name on it was reported by
+the live page's own diagnostics; every value is invented, small and free of
+personal data, real card definitions and account fields. Its `_staticData` keys
+`assetId` and `definitionId` are the exception that proves the rule: the file
+carries both, the reader reads `assetId` and refuses an item without it, and it
+reports `_staticData`'s own key names either way. Where `assetId` really lives
+inside `_staticData` is the one thing this file cannot prove, so the reader never
+infers it: a fixture may be hypothetical, the reader may not be.
 
 ## Rules for adding fixtures
 

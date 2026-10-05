@@ -347,6 +347,15 @@ describe('a cancel that races an in-flight failure', () => {
     return error;
   };
 
+  /** The counters that describe work the pacer actually did (#115). */
+  const pacedWorkOf = ({ calls, waits, retries, waitedMs, stages }) => ({
+    calls,
+    waits,
+    retries,
+    waitedMs,
+    stages,
+  });
+
   it('arms no further wait when the in-flight call fails retryably after the cancel', async () => {
     startClock();
     const pacer = createPacer({ random: () => 0 });
@@ -369,7 +378,11 @@ describe('a cancel that races an in-flight failure', () => {
 
     // Without the cancel guard a backoff timer is armed here and counted.
     expect(vi.getTimerCount()).toBe(0);
-    expect(pacer.snapshot()).toEqual(before);
+    // The paced-work counters must be identical; `statuses` is the one counter
+    // that is *meant* to move, because recording the 429 EA answered is the
+    // report this project now owes the next run (#115).
+    expect(pacedWorkOf(pacer.snapshot())).toEqual(pacedWorkOf(before));
+    expect(pacer.snapshot().statuses).toEqual({ 429: 1 });
 
     await vi.advanceTimersByTimeAsync(BACKOFF_MAX_MS);
     await rejection;
@@ -403,7 +416,7 @@ describe('a cancel that races an in-flight failure', () => {
     // Without the guard the backoff is armed after the cancel, the reset lands
     // inside it, and the remaining retry fires as extra paced work.
     expect(attempts).toBe(1);
-    expect(pacer.snapshot()).toEqual(before);
+    expect(pacedWorkOf(pacer.snapshot())).toEqual(pacedWorkOf(before));
     expect(vi.getTimerCount()).toBe(0);
     await rejection;
   });
