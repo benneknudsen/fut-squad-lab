@@ -225,3 +225,146 @@ describe('a payload without the named challenge fails loudly (#115)', () => {
     expect(walk.reason).toMatch(/last-resort/i);
   });
 });
+
+// #109: the named-set read matched the panel's id against one flat, top-level
+// `challengeId` read, while the panel path read the identity one wrapper down
+// and the requirements path two. Three reads, three answers, and the
+// fsl-build/15 run stopped at the bridge stage because the set's single
+// entry could not be proven to be the challenge the player opened.
+//
+// These tests pin one shared identity read: the named id is compared against
+// every proven location, a shadowing `id` cannot hide a matching
+// `challengeId`, and a miss names the locations it probed and the candidate's
+// own key names.
+describe('the named set matches the panel id in every proven location (#109)', () => {
+  /**
+   * A synthetic set-challenges entry, invented for the reader to prove itself
+   * against: key names, one id and one requirement. No captured club content,
+   * no player, no price.
+   */
+  const syntheticEntry = (overrides = {}) => ({
+    challengeId: 37,
+    name: 'a synthetic challenge',
+    formation: 'f00000',
+    elgOperation: 'OR',
+    elgReq: [{ type: 'PLAYER_QUALITY', eligibilitySlot: 1, eligibilityKey: 3, eligibilityValue: 3 }],
+    ...overrides,
+  });
+
+  const setHolding = (entry) => ({ payload: { challenges: [entry] } });
+
+  it('matches an entry that carries the id at the top level', async () => {
+    const subject = panelSet(16);
+    const entry = syntheticEntry();
+    const { service } = countedSbc(setHolding(entry));
+
+    const result = await readViaBridge({ services: { SBC: service } }, subject, { challengeId: 37 });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toBe(entry);
+    expect(result.requirementsFrom).toBe('payload.elgReq');
+  });
+
+  it('matches an entry that carries the id one level down in data', async () => {
+    const subject = panelSet(16);
+    const payload = syntheticEntry();
+    const { service } = countedSbc(setHolding({ data: payload }));
+
+    const result = await readViaBridge({ services: { SBC: service } }, subject, { challengeId: 37 });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toBe(payload);
+    expect(result.requirementsFrom).toBe('payload.data.elgReq');
+  });
+
+  it('matches an entry that carries the id one level down in challengeData', async () => {
+    const subject = panelSet(16);
+    const payload = syntheticEntry();
+    const { service } = countedSbc(setHolding({ challengeData: payload }));
+
+    const result = await readViaBridge({ services: { SBC: service } }, subject, { challengeId: 37 });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toBe(payload);
+    expect(result.requirementsFrom).toBe('payload.challengeData.elgReq');
+  });
+
+  it('matches an entry whose finite id shadows the matching challengeId', async () => {
+    const subject = panelSet(16);
+    const entry = syntheticEntry({ id: 99 });
+    const { service } = countedSbc(setHolding(entry));
+
+    const result = await readViaBridge({ services: { SBC: service } }, subject, { challengeId: 37 });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toBe(entry);
+  });
+
+  it('matches an entry whose wrapper carries the id while its own id shadows it', async () => {
+    const subject = panelSet(16);
+    const payload = syntheticEntry();
+    const { service } = countedSbc(setHolding({ id: 99, data: payload }));
+
+    const result = await readViaBridge({ services: { SBC: service } }, subject, { challengeId: 37 });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toBe(payload);
+  });
+
+  it('refuses an entry that carries only a non-matching id, and names what it probed', async () => {
+    const subject = panelSet(16);
+    const { service } = countedSbc(setHolding({ id: 99, formation: 'f00000' }));
+
+    const result = await readViaBridge({ services: { SBC: service } }, subject, { challengeId: 37 });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toBeNull();
+    const attempt = result.attempts[0];
+    expect(attempt.ok).toBe(false);
+    // The count of what was looked at is on the reason.
+    expect(attempt.reason).toMatch(/1 challenges/);
+    expect(attempt.reason).toMatch(/refusing to select another/i);
+    // Every proven location is named, so the next live run can name the field
+    // without another code change.
+    expect(attempt.reason).toContain('challengeId');
+    expect(attempt.reason).toContain('data.challengeId');
+    expect(attempt.reason).toContain('challengeData.challengeId');
+    // The candidate's own key names, with their types and never a value.
+    expect(attempt.reason).toContain('id: number');
+    expect(attempt.reason).toContain('formation: string');
+    expect(attempt.reason).not.toContain('f00000');
+  });
+
+  it('refuses to read requirements off an entry that carries none', async () => {
+    const subject = panelSet(16);
+    const { service } = countedSbc(setHolding({ challengeId: 37, formation: 'f00000' }));
+
+    const result = await readViaBridge({ services: { SBC: service } }, subject, { challengeId: 37 });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toBeNull();
+    const attempt = result.attempts[0];
+    expect(attempt.ok).toBe(false);
+    expect(attempt.reason).toMatch(/elgReq/);
+    // The entry's own key names are on the reason, never a value.
+    expect(attempt.reason).toContain('formation');
+    expect(attempt.reason).not.toContain('f00000');
+  });
+
+  it('refuses an entry that names another challenge, even when its own id matches', async () => {
+    // The entry's wrapper id is 37 and the panel named 37, but the entry itself
+    // names challenge 50 — the wire field is the one that says which challenge
+    // this is, so the entry is a different challenge and is never selected.
+    const subject = panelSet(16);
+    const { service } = countedSbc(setHolding(syntheticEntry({ id: 37, challengeId: 50 })));
+
+    const result = await readViaBridge({ services: { SBC: service } }, subject, { challengeId: 37 });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toBeNull();
+    const attempt = result.attempts[0];
+    expect(attempt.ok).toBe(false);
+    expect(attempt.reason).toMatch(/refusing to select another/i);
+    expect(attempt.reason).toMatch(/another challenge/i);
+  });
+});
