@@ -56,9 +56,23 @@ const EXPECTED_FIRST_RECORD = {
   duplicate: false,
 };
 
-/** Reads a dotted path out of a raw item, so a provenance claim is checked. */
-const readPath = (item, path) =>
-  path.split('.').reduce((value, key) => (value === null || value === undefined ? undefined : value[key]), item);
+/**
+ * Reads a reported source path out of a raw item, so a provenance claim is
+ * checked. A path may name one element of a list (`basePossiblePositions[0]`):
+ * that is how a position read out of a position list is credited.
+ */
+const readPath = (item, path) => {
+  const [location, element] = path.split('[');
+  const value = location
+    .split('.')
+    .reduce(
+      (current, key) => (current === null || current === undefined ? undefined : current[key]),
+      item
+    );
+  if (element === undefined) return value;
+  const index = Number(element.replace(']', ''));
+  return Array.isArray(value) ? value[index] : undefined;
+};
 
 /**
  * Turns one reported source string into the value it claims the raw item holds
@@ -149,7 +163,7 @@ describe('every observable output value is traceable to its source field (#115)'
       rarity: '_rareflag',
       cardSubtype: 'subtype',
       playStyles: 'playStyle',
-      preferredPosition: 'preferredPosition',
+      preferredPosition: 'basePossiblePositions[0]',
       possiblePositions: 'basePossiblePositions',
       rolePlus: '_basePlusRoles',
       rolePlusPlus: '_basePlusPlusRoles',
@@ -171,12 +185,16 @@ describe('every observable output value is traceable to its source field (#115)'
     expect(normaliseClubItem(firstItem).assetId).toBe(3001);
     // Every multi-candidate field is reported, and `assetId` is no longer one:
     // there is nothing to report about a field with a single proven location.
+    // The two position fields are multi-candidate since #111: the live layer
+    // carries a number where the wire layer carries the string vocabulary.
     expect([...new Set(probes.map((probe) => probe.field))].sort()).toEqual([
       'collected',
       'discardValue',
       'marketAverage',
       'marketMax',
       'marketMin',
+      'possiblePositions',
+      'preferredPosition',
     ]);
   });
 
@@ -184,11 +202,28 @@ describe('every observable output value is traceable to its source field (#115)'
     const { subLayers } = clubItemSources(firstItem);
 
     // `assetId` is on the redaction list, so its name stays visible as
-    // `<redacted>` and can never be confused with a field the item lacks.
+    // `<redacted>` and can never be confused with a field the item lacks. The
+    // rest are the key names the live page's own diagnostics reported, with the
+    // types the capture reported: `fsl-build/15` read the names **and** the
+    // types off `club.itemLayer.subLayers._staticData.keys`, so the fixture
+    // carries the captured shape and only the values are synthetic.
     expect(subLayers._staticData.keys).toEqual([
       { name: '<redacted>', type: 'number' },
-      { name: 'definitionId', type: 'number' },
-      { name: 'quality', type: 'string', empty: false },
+      { name: 'assetType', type: 'string', empty: true },
+      { name: 'assetYear', type: 'number' },
+      { name: 'amount', type: 'number' },
+      { name: 'name', type: 'string', empty: false },
+      { name: 'firstName', type: 'string', empty: false },
+      { name: 'lastName', type: 'string', empty: false },
+      { name: 'knownAs', type: 'string', empty: false },
+      { name: 'description', type: 'string', empty: true },
+      { name: 'manufacturer', type: 'string', empty: true },
+      { name: 'trainedAttribute', type: 'number' },
+      { name: 'trainPosFrom', type: 'string', empty: true },
+      { name: 'trainPosTo', type: 'string', empty: true },
+      { name: 'goldBoost', type: 'number' },
+      { name: 'silverBoost', type: 'number' },
+      { name: 'bronzeBoost', type: 'number' },
     ]);
     expect(subLayers._metaData.keys).toEqual([
       { name: 'acquired', type: 'null' },
@@ -357,6 +392,99 @@ describe('assetId is resolved from a proven location or refused, never derived (
     expect(caught.message).toMatch(/page 2/);
   });
 });
+
+// Issue #111: the live observable club item carries `preferredPosition` as a
+// NUMBER. The reader required a string, so the first item of the first page was
+// rejected and the whole club read yielded zero items — the run failed at the
+// club stage with "preferredPosition is number, not the required string".
+//
+// The string vocabulary is still on the item: its own position lists carry it.
+// The number is never decoded into a position, because no capture proves which
+// code names which position and a wrong mapping writes the wrong card into a
+// player's squad. A position that no accepted set names is refused instead.
+describe('a position is resolved from a string source, and the source is named (#111)', () => {
+  const withoutPositionLists = () => {
+    const item = { ...firstItem };
+    delete item.basePossiblePositions;
+    return item;
+  };
+
+  it('resolves a numeric preferredPosition from basePossiblePositions and names that source', () => {
+    const record = normaliseClubItem(firstItem);
+
+    expect(record.preferredPosition).toBe('CAM');
+    expect(record.possiblePositions).toEqual(['CAM', 'ST']);
+    expect(clubItemSources(firstItem).fields.preferredPosition).toBe('basePossiblePositions[0]');
+    expect(clubItemSources(firstItem).fields.possiblePositions).toBe('basePossiblePositions');
+  });
+
+  it('still resolves the wire shape’s own preferredPosition string', () => {
+    const item = { ...firstItem, preferredPosition: 'ST' };
+
+    expect(normaliseClubItem(item).preferredPosition).toBe('ST');
+    expect(clubItemSources(item).fields.preferredPosition).toBe('preferredPosition');
+  });
+
+  it('still resolves the wire shape’s possiblePositions list', () => {
+    const item = { ...firstItem, preferredPosition: 'CM', possiblePositions: ['CM', 'CAM'] };
+    delete item.basePossiblePositions;
+
+    expect(normaliseClubItem(item).possiblePositions).toEqual(['CM', 'CAM']);
+    expect(clubItemSources(item).fields.possiblePositions).toBe('possiblePositions');
+  });
+
+  it('refuses loudly, naming the number and every probed location, when no string source exists', () => {
+    const item = withoutPositionLists();
+
+    let message = null;
+    try {
+      normaliseClubItem(item);
+    } catch (error) {
+      message = error.message;
+    }
+
+    // The number is named, so the next live run can settle the mapping.
+    expect(message).toMatch(/preferredPosition is the number 3/);
+    // Every location that was probed is named.
+    expect(message).toMatch(/preferredPosition:/);
+    expect(message).toMatch(/possiblePositions\[0\]/);
+    expect(message).toMatch(/basePossiblePositions\[0\]/);
+    // The item's own key names with their types, so the report says what EA
+    // sent without carrying a value.
+    expect(message).toMatch(/preferredPosition: number/);
+    expect(message).toMatch(/attributes: array\[6\]/);
+    // Nothing answered, so no source is credited.
+    expect(clubItemSources(item).fields.preferredPosition).toBeNull();
+  });
+
+  it('refuses a position outside the accepted set', () => {
+    const item = { ...firstItem, basePossiblePositions: ['CAM', 'XCF'] };
+
+    expect(() => normaliseClubItem(item)).toThrow(/not one of the accepted positions/);
+    expect(() => normaliseClubItem({ ...firstItem, preferredPosition: 'XCF' })).toThrow(
+      /not one of the accepted positions/
+    );
+  });
+
+  it('never decodes a number into a position', () => {
+    // The numeric code is refused even when it is the only position on the
+    // item: a guessed mapping would place the wrong card in the wrong slot.
+    const item = withoutPositionLists();
+
+    let caught = null;
+    try {
+      normaliseClubItem(item);
+    } catch (error) {
+      caught = error;
+    }
+
+    // No record at all: a decoded number would be a guess about which card the
+    // player is, and a wrong guess writes the wrong card into a squad.
+    expect(caught).not.toBeNull();
+    expect(caught.message).toMatch(/preferredPosition is the number 3/);
+  });
+});
+
 describe('the diagnostics block names every probed location on every path (#115)', () => {
   const challenge = {
     challengeId: 25,
@@ -454,6 +582,8 @@ describe('the diagnostics block names every probed location on every path (#115)
       'marketAverage',
       'marketMax',
       'marketMin',
+      'possiblePositions',
+      'preferredPosition',
     ]);
     // The sub-object report is what settles the open question on the next live
     // run, so it has to survive the failure that carries it.

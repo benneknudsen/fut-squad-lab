@@ -101,6 +101,14 @@ The recon probe resolved all of these as real constructors **on the page's `wind
 - `marketAverage` (1100), `marketDataMinPrice` (600), `marketDataMaxPrice` (10000), `discardValue` (596) — **EA's own price data, already in the payload**
 - `resourceGameYear` (2027) — confirms FC27
 
+**The observable layer spells the same facts differently** (#115), and the
+positions most sharply: the entity model EA hands the read layer carries
+`preferredPosition` as a **number** and its position list as
+`basePossiblePositions` (`["CM", "CAM"]`). The string vocabulary the solver
+needs — `GK CB LB RB CDM CM CAM LM RM LW RW ST` — is therefore read from the
+position *lists*, and the number is never decoded: no capture proves which code
+names which position, and a wrong mapping writes the wrong card into a squad.
+
 ### 1.5 Chemistry rules are small and self-contained
 
 `GET /chemistry/profiles`:

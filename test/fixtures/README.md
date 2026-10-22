@@ -91,12 +91,32 @@ failed every item on it.
 
 It is a **shape** fixture, not a capture. Every key name on it was reported by
 the live page's own diagnostics; every value is invented, small and free of
-personal data, real card definitions and account fields. Its `_staticData` keys
-`assetId` and `definitionId` are the exception that proves the rule: the file
-carries both, the reader reads `assetId` and refuses an item without it, and it
-reports `_staticData`'s own key names either way. Where `assetId` really lives
-inside `_staticData` is the one thing this file cannot prove, so the reader never
-infers it: a fixture may be hypothetical, the reader may not be.
+personal data, real card definitions and account fields. The item's own
+`definitionId` and the `_staticData` key `assetId` are the exception that proves
+the rule: the file carries both, the reader reads `_staticData.assetId` and
+refuses an item without it, and it reports `_staticData`'s own key names either
+way. A `definitionId` is never read as an asset id — the two are different
+concepts that would only agree by coincidence — so a fixture may be
+hypothetical, the reader may not.
+
+The `fsl-build/15` live run then proved the fixture was the wrong shape in one
+more place: the live observable item carries `preferredPosition` as a **number**,
+not a string, so the reader rejected the first item of the first page and the
+club read yielded nothing. The fixture now says so — `preferredPosition` is a
+number, the string vocabulary sits on `basePossiblePositions`, and `_staticData`
+carries the sixteen key names the capture reported (`assetId`, `assetType`,
+`assetYear`, `amount`, `name`, `firstName`, `lastName`, `knownAs`,
+`description`, `manufacturer`, `trainedAttribute`, `trainPosFrom`,
+`trainPosTo`, `goldBoost`, `silverBoost`, `bronzeBoost`).
+
+Two things about that file stay invented on purpose. The **names and the types**
+of those sixteen keys are the capture's own — `fsl-build/15` reported both, off
+`club.itemLayer.subLayers._staticData.keys` — so only the **values** are
+synthetic, and the adapter reads none of them but `assetId`. The **number** in
+`preferredPosition` is opaque: no capture proves which code means which
+position, so the reader refuses it and never decodes it. Only
+`basePossiblePositions` carries a position vocabulary on this fixture, which is
+exactly the one place the reader reads it from.
 
 ## Rules for adding fixtures
 
