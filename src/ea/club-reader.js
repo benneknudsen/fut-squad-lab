@@ -22,6 +22,8 @@
  * rejection probed and the shape of the sub-objects those probes read (#115), so
  * a pasted report shows both what EA sent and what this build tried to read it
  * from. An absent probe list means the wire layer, which reads fixed names.
+ * The item's own key names with their types ride along too (#111), so a report
+ * says which shape the item had without carrying a value.
  *
  * This module is pure: plain data in, plain data out. No DOM, no chrome APIs,
  * no network.
@@ -104,6 +106,9 @@ const enrichNormalisationError = (error, items, pageItems) => {
     pageItems: location?.pageItems ?? null,
     itemIndexInPage: location?.itemIndexInPage ?? null,
     keys: [...error.rawItemShape.keys],
+    // The item's own key names with their types (#111): the same evidence the
+    // failure message carries, in the shape a report can read field by field.
+    keyTypes: [...(error.rawItemShape.keyTypes ?? [])],
     // The observable layer rejects an item by naming every location it probed and
     // the shape of the sub-objects those probes read (#115). Both ride on the
     // same record, so one paste shows what EA sent and what this build tried.

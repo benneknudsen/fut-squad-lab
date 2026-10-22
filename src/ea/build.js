@@ -109,8 +109,20 @@ import {
  *   nothing is still refused loudly with the count, and the refusal now names
  *   every location that was probed and the candidates' own key names, so the next
  *   live run can name the field without another code change.
+ *
+ * Incremented by fsl-build/17, one defect from the `fsl-build/15` live run:
+ *   the observable club item carries `preferredPosition` as a NUMBER, so the
+ *   reader rejected the first item of the first page and the club read yielded
+ *   nothing. A position is now resolved by priority from the locations that
+ *   carry the string vocabulary the solver uses — the wire `preferredPosition`,
+ *   the wire `possiblePositions` and the observable `basePossiblePositions` —
+ *   and every resolved value is checked against the adapter's accepted position
+ *   set. A number is never decoded into a position: no capture proves which code
+ *   names which position. The location that answered is reported with the item's
+ *   other field sources, and an item with no position string is refused with the
+ *   number, the probed locations and the item's own key names and types.
  */
-export const BUILD_ID = 'fsl-build/16';
+export const BUILD_ID = 'fsl-build/17';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact

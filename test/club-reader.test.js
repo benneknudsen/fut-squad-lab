@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import club from './fixtures/club-items.json';
+import observable from './fixtures/club-items-observable.json';
 import { normaliseClubItem } from '../src/ea/adapter.js';
 import { readClubItems } from '../src/ea/club-reader.js';
 import { buildPool } from '../src/solver/candidates.js';
@@ -152,5 +153,39 @@ describe('the club item shape report (#74)', () => {
     expect(caught.message).toMatch(/assetId/);
     expect(caught.message).toMatch(/page 2/);
     expect(caught.message).toContain('array field items');
+  });
+});
+
+// Issue #111: the live observable item carries `preferredPosition` as a number,
+// so the reader rejected the first item of the first page and the club read
+// yielded nothing. An empty club and a failed read are different facts: only
+// the second one names the item, the number and the locations that were
+// probed, so the read must fail loudly rather than return an empty pool.
+describe('the club read yields its failure, never an empty club (#111)', () => {
+  const withoutPositionLists = () => {
+    const item = { ...observable.items[0] };
+    delete item.basePossiblePositions;
+    return item;
+  };
+
+  it('refuses an observable item that carries no position string, naming the number', () => {
+    let caught = null;
+    try {
+      readClubItems({ items: [withoutPositionLists()] });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).not.toBeNull();
+    expect(caught.message).toMatch(/preferredPosition is the number 3/);
+    expect(caught.clubRead).toMatchObject({ field: 'items', index: 0, layer: 'observable' });
+  });
+
+  it('reads the live item shape, so the club is not empty', () => {
+    const records = readClubItems(observable);
+
+    expect(records).toHaveLength(2);
+    expect(records[0].preferredPosition).toBe('CAM');
+    expect(records[0].possiblePositions).toEqual(['CAM', 'ST']);
   });
 });

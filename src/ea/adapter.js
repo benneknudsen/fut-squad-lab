@@ -757,6 +757,26 @@ const carriedKeys = (rawItem) =>
     .map((name) => redactName(name))
     .sort();
 
+/**
+ * The item's own key names with their types, sorted by name: what EA sent,
+ * without a value. The names go through the shared redaction list, so a price
+ * or an asset id stays visible as `<redacted>` and can never be confused with
+ * a field the item lacks. The types come from the shared shape description, so
+ * an accessor is named `accessor(get)` and never invoked — this runs in the
+ * player's authenticated session.
+ *
+ * @param {object} rawItem one club item
+ * @returns {Array<string>} one `name: type` entry per own enumerable key
+ */
+const describeCarriedKeyTypes = (rawItem) => {
+  const names = Object.keys(rawItem);
+  const described = describeOwnPropertyTypes(rawItem);
+  return names
+    .map((name, index) => ({ name, entry: described[index] }))
+    .sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
+    .map(({ entry }) => `${entry.name}: ${entry.type}`);
+};
+
 const rejectedItemError = (rawItem, field, message) => {
   const keys = carriedKeys(rawItem);
   const error = new Error(
@@ -818,6 +838,24 @@ const readRoleList = (rawItem, field) => {
  * through `clubItemSources`. This is the only place that may know either set of
  * raw names — `src/solver/validate.js` reads the stable schema only, and rejects
  * an un-normalised item.
+ *
+ * A **position** is resolved across both layers, because the two spell the same
+ * fact differently: the live observable item carries `preferredPosition` as a
+ * NUMBER, while the wire body carries it as a string. The position is therefore
+ * read by priority from the locations that carry the string vocabulary the
+ * solver uses — the wire `preferredPosition`, the wire `possiblePositions` and
+ * the observable `basePossiblePositions`. On the observable item that list is
+ * the only strict source of a position string, so its first element is *taken
+ * as* the item's preferred position: that EA orders the list by preference is
+ * not proven — a canonical enum order would make the first element something
+ * else than the card's own position — and the next live run settles it. Every
+ * resolved value is checked against the accepted position set the formation
+ * slots are drawn from. A number is never decoded into a position: no capture
+ * proves which code names which position, and a wrong mapping writes the wrong
+ * card into a squad. An item that carries no position string is refused loudly,
+ * naming the number, the locations that were probed and the item's own key
+ * names with their types, so the next live run establishes the mapping instead
+ * of guessing it.
  *
  * The raw payload must carry every non-price field as its declared type
  * (finite number, non-empty string, array of position strings, or boolean).
@@ -957,12 +995,23 @@ const OBSERVABLE_ITEM_SUBLAYERS = Object.freeze(['_staticData', '_metaData']);
  * is `null` — "price unknown", never 0 — which the stable schema already
  * documents.
  *
+ * A **position** is the other exception, and it is resolved by priority rather
+ * than by agreement (`resolvePositionField`): `preferredPosition` and
+ * `possiblePositions` are two spellings of one fact across the two layers, and
+ * only one of them is present on any one item. Its candidates therefore name
+ * what is taken from them — `value` for the value itself, `first` for the first
+ * element of a list, `list` for the whole list — and the label is what the
+ * provenance reports, so `basePossiblePositions[0]` names the element that
+ * answered and not merely the list it sits in.
+ *
  * `invert: true` means the observable field is the *opposite* of the stable
  * field, and the provenance is reported with a leading `!` so the inversion is
  * never invisible.
  *
- * @typedef {{ field: string, kind: 'number'|'string'|'boolean'|'positions'|'roles'|'price',
- *   paths: ReadonlyArray<string>, invert?: boolean, note: string }} ClubItemSource
+ * @typedef {{ field: string,
+ *   kind: 'number'|'string'|'boolean'|'position'|'positions'|'roles'|'price',
+ *   paths: ReadonlyArray<string|{ path: string, label: string, take?: string }>,
+ *   invert?: boolean, note: string }} ClubItemSource
  */
 
 /** @type {ReadonlyArray<ClubItemSource>} */
@@ -1008,15 +1057,35 @@ export const CLUB_ITEM_SOURCES = Object.freeze([
   Object.freeze({ field: 'playStyles', kind: 'number', paths: Object.freeze(['playStyle']), note: 'the same name' }),
   Object.freeze({
     field: 'preferredPosition',
-    kind: 'string',
-    paths: Object.freeze(['preferredPosition']),
-    note: 'the same name',
+    kind: 'position',
+    paths: Object.freeze([
+      Object.freeze({ path: 'preferredPosition', label: 'preferredPosition', take: 'value' }),
+      Object.freeze({ path: 'possiblePositions', label: 'possiblePositions[0]', take: 'first' }),
+      Object.freeze({
+        path: 'basePossiblePositions',
+        label: 'basePossiblePositions[0]',
+        take: 'first',
+      }),
+    ]),
+    note:
+      'the wire `preferredPosition` string first; the observable layer carries a number there, so' +
+      ' the string vocabulary is read from the two position lists instead — the wire' +
+      ' `possiblePositions` and the observable `basePossiblePositions`, whose first element is' +
+      " taken as the item's preferred position: that list is the only strict source the" +
+      ' observable item carries, and that EA orders it by preference is not proven, so the' +
+      ' next live run settles it. A number is never decoded into a position: no capture proves' +
+      ' which code names which position, and a wrong mapping writes the wrong card into a squad',
   }),
   Object.freeze({
     field: 'possiblePositions',
     kind: 'positions',
-    paths: Object.freeze(['basePossiblePositions']),
-    note: "the observable name for the wire `possiblePositions`",
+    paths: Object.freeze([
+      Object.freeze({ path: 'possiblePositions', label: 'possiblePositions', take: 'list' }),
+      Object.freeze({ path: 'basePossiblePositions', label: 'basePossiblePositions', take: 'list' }),
+    ]),
+    note:
+      'the wire `possiblePositions` list; the observable layer names the same list' +
+      ' `basePossiblePositions`',
   }),
   Object.freeze({
     field: 'rolePlus',
@@ -1127,12 +1196,15 @@ const describeSubLayerKeys = (shapes) =>
     .map(([name, shape]) => `${name} carries [${describeKeyTypes(shape.keys)}]`)
     .join('; ');
 
-/** The value kinds a stable field accepts, as predicates over a raw value. */
+/**
+ * The value kinds a stable field accepts, as predicates over a raw value. A
+ * position is not here: it is resolved by priority across the layers' two
+ * spellings (`resolvePositionField`), not by one predicate on one location.
+ */
 const KIND_PREDICATES = Object.freeze({
   number: Number.isFinite,
   string: isNonEmptyString,
   boolean: isBoolean,
-  positions: isStringArray,
   roles: isFiniteNumberArray,
   // A price is nullable by design: `null` and an absent value both mean unknown.
   price: isNullablePrice,
@@ -1140,7 +1212,7 @@ const KIND_PREDICATES = Object.freeze({
 
 /** Copies a probe value into the stable record, validating its shape first. */
 const readKindValue = (source, rawValue) => {
-  if (source.kind === 'positions' || source.kind === 'roles') return [...rawValue];
+  if (source.kind === 'roles') return [...rawValue];
   return rawValue;
 };
 
@@ -1186,6 +1258,117 @@ const probeObservablePath = (rawItem, candidate) => {
 };
 
 /**
+ * The one position vocabulary a club item may carry, as the adapter spells it
+ * out. It is the same closed set the formation slots are drawn from, so a
+ * position that reaches the solver is one the solver can actually place.
+ */
+const ACCEPTED_POSITION_LIST = [...FORMATION_POSITIONS].join(', ');
+
+/**
+ * Checks one position against the accepted set. A value outside it is refused:
+ * the solver matches positions by string equality against its formation slots,
+ * so an unknown name would silently place a card in no slot at all.
+ */
+const acceptedPosition = (label, value) =>
+  FORMATION_POSITIONS.has(value)
+    ? { ok: true, value }
+    : {
+        ok: false,
+        refused: true,
+        reason: `${label} is not one of the accepted positions (${ACCEPTED_POSITION_LIST})`,
+      };
+
+/**
+ * Takes the position out of one probed candidate and validates it.
+ *
+ * `value` takes the probed value itself, `first` the first element of a
+ * position list and `list` the whole list. A candidate that cannot supply the
+ * shape it promises does not answer: the number the observable layer carries in
+ * `preferredPosition` is reported, never decoded, and the next candidate is
+ * tried.
+ *
+ * A candidate that *does* carry a position the accepted set does not name is a
+ * refusal, not a miss: the location spoke, and the item is refused rather than
+ * answered from somewhere else. Replacing it would put the card in a slot EA
+ * did not give it.
+ *
+ * @param {{ path: string, label: string, take?: string }} candidate the probe
+ *   that was tried, as the source table spells it
+ * @param {*} probed the value that location carried
+ * @returns {{ ok: boolean, value?: *, reason?: string, refused?: boolean }} the
+ *   taken position, or why this candidate cannot answer
+ */
+const takePosition = (candidate, probed) => {
+  const take = candidate.take ?? 'value';
+  if (take === 'value') {
+    if (!isNonEmptyString(probed)) {
+      return {
+        ok: false,
+        reason:
+          typeof probed === 'number' && Number.isFinite(probed)
+            ? `${candidate.label} is the number ${probed}, not a position string`
+            : `${candidate.label} is ${describeValue(probed)}, not a position string`,
+      };
+    }
+    return acceptedPosition(candidate.label, probed);
+  }
+  if (!isStringArray(probed) || probed.length === 0) {
+    return {
+      ok: false,
+      reason: `${candidate.label} is ${describeValue(probed)}, not a non-empty array of position strings`,
+    };
+  }
+  if (take === 'first') return acceptedPosition(candidate.label, probed[0]);
+  const outside = probed.filter((position) => !FORMATION_POSITIONS.has(position));
+  if (outside.length > 0) {
+    return {
+      ok: false,
+      refused: true,
+      reason: `${candidate.label} names ${outside.length} position(s) that are not one of the` +
+        ` accepted positions (${ACCEPTED_POSITION_LIST})`,
+    };
+  }
+  return { ok: true, value: [...probed] };
+};
+
+/**
+ * Resolves one position field from an observable item: the candidates are tried
+ * in order and the first one that answers wins, and the answer names the
+ * location it came from.
+ *
+ * Priority, not agreement: `preferredPosition` and `possiblePositions` are two
+ * spellings of the same fact in two layers, and only one of them is present on
+ * any one item. When a candidate cannot supply the shape it promises — the
+ * observable layer's numeric `preferredPosition` — it does not answer, and the
+ * probes record why it did not, so the report names every location that was
+ * tried. A candidate that carries a position the accepted set does not name
+ * refuses the item instead of falling through.
+ *
+ * @param {object} rawItem one item from EA's observable club response
+ * @param {object} source the source-table entry for the field
+ * @returns {{ ok: boolean, value?: *, from?: string|null, probes: Array<object> }}
+ */
+const resolvePositionField = (rawItem, source) => {
+  const probes = [];
+  for (const candidate of source.paths) {
+    const probed = probeObservablePath(rawItem, candidate);
+    if (!probed.ok) {
+      probes.push({ id: probed.id, ok: false, reason: probed.reason });
+      continue;
+    }
+    const taken = takePosition(candidate, probed.value);
+    if (!taken.ok) {
+      probes.push({ id: probed.id, ok: false, reason: taken.reason });
+      if (taken.refused === true) return { ok: false, from: null, probes, refused: true };
+      continue;
+    }
+    probes.push({ id: probed.id, ok: true, reason: null, value: taken.value });
+    return { ok: true, value: taken.value, from: probed.id, probes };
+  }
+  return { ok: false, from: null, probes, unresolved: true };
+};
+
+/**
  * Resolves one stable field from an observable item: probes every candidate in
  * order, requires the answering ones to agree, and reports every probe.
  *
@@ -1196,9 +1379,16 @@ const probeObservablePath = (rawItem, candidate) => {
  * hold a number is how the wrong player ends up in someone's squad — so two
  * probes that disagree are a loud failure, never a preference.
  *
+ * A position is the exception: its candidates are the two layers' spellings of
+ * one fact, so it is resolved by priority (`resolvePositionField`) rather than
+ * by agreement.
+ *
  * @returns {{ ok: boolean, value?: *, from?: string|null, probes: Array<object> }}
  */
 const resolveObservableField = (rawItem, source) => {
+  if (source.kind === 'position' || source.kind === 'positions') {
+    return resolvePositionField(rawItem, source);
+  }
   const isValid = KIND_PREDICATES[source.kind];
   const probes = source.paths.map((candidate) => {
     const probe = probeObservablePath(rawItem, candidate);
@@ -1245,7 +1435,10 @@ const resolveObservableField = (rawItem, source) => {
  * The observable-layer rejection. It carries the probed locations and the
  * sub-object shapes on `rawItemShape`, exactly like the wire layer's rejection,
  * so `readClubItems` can locate the offending item in its page and a pasted
- * report can say what was probed. Only names, types and counts appear.
+ * report can say what was probed. Only names, types and counts appear — except
+ * a position code, which is named on purpose (#111): it is one small number out
+ * of EA's own position enum, and naming it is what lets the next live run
+ * settle which code means which position.
  */
 const rejectedObservableItemError = (rawItem, source, resolved, subLayers) => {
   const probes = resolved.probes
@@ -1257,18 +1450,25 @@ const rejectedObservableItemError = (rawItem, source, resolved, subLayers) => {
       ' write the wrong card'
     : '';
   const detail =
-    resolved.unresolved === true
-      ? `; none of them carried it`
-      : '';
+    resolved.refused === true
+      ? '; one of them named a position this build does not accept'
+      : resolved.unresolved === true
+        ? `; none of them carried it`
+        : '';
   const keys = carriedKeys(rawItem);
+  // The item's own key names with their types, so a report says what EA sent
+  // and what shape it was in — the evidence the next live run needs to settle
+  // where a value lives.
+  const keyTypes = describeCarriedKeyTypes(rawItem);
   const error = new Error(
     `normaliseClubItem: the observable club item must carry a resolvable ${source.field}; probed` +
       ` [${probes}]${detail}${conflict}${shapes === '' ? '' : `; ${shapes}`}; rejected field ${source.field};` +
-      ` it carries keys [${keys.join(', ')}]; the observable club item shape may have changed`
+      ` it carries keys [${keyTypes.join(', ')}]; the observable club item shape may have changed`
   );
   error.rawItemShape = {
     field: source.field,
     keys,
+    keyTypes,
     layer: CLUB_ITEM_LAYERS.OBSERVABLE,
     probes: resolved.probes.map(({ id, ok, reason }) => ({ id, ok, reason })),
     subLayers,
