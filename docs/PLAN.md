@@ -108,6 +108,11 @@ positions most sharply: the entity model EA hands the read layer carries
 needs — `GK CB LB RB CDM CM CAM LM RM LW RW ST` — is therefore read from the
 position *lists*, and the number is never decoded: no capture proves which code
 names which position, and a wrong mapping writes the wrong card into a squad.
+On the observable item the position list is the only strict source of a
+position string, so its first element is **taken as** the item's preferred
+position. That EA orders the list by preference is **not** proven — a
+canonical enum order would make the first element something else than the
+card's own position — and the next live run settles it.
 
 ### 1.5 Chemistry rules are small and self-contained
 

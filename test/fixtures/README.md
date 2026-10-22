@@ -112,7 +112,11 @@ carries the sixteen key names the capture reported (`assetId`, `assetType`,
 Two things about that file stay invented on purpose. The **names and the types**
 of those sixteen keys are the capture's own — `fsl-build/15` reported both, off
 `club.itemLayer.subLayers._staticData.keys` — so only the **values** are
-synthetic, and the adapter reads none of them but `assetId`. The **number** in
+synthetic, and the adapter reads none of them but `assetId`. The `empty` flag
+in that key table is a third attribute, not a type: it is derived from the
+value it describes, so on this fixture it follows the synthetic value
+(`assetType: ""` reads as `empty: true`) and says nothing about EA's own
+emptiness. The **number** in
 `preferredPosition` is opaque: no capture proves which code means which
 position, so the reader refuses it and never decodes it. Only
 `basePossiblePositions` carries a position vocabulary on this fixture, which is

@@ -844,14 +844,18 @@ const readRoleList = (rawItem, field) => {
  * NUMBER, while the wire body carries it as a string. The position is therefore
  * read by priority from the locations that carry the string vocabulary the
  * solver uses — the wire `preferredPosition`, the wire `possiblePositions` and
- * the observable `basePossiblePositions`, whose first element is the item's
- * preferred position — and every resolved value is checked against the accepted
- * position set the formation slots are drawn from. A number is never decoded
- * into a position: no capture proves which code names which position, and a
- * wrong mapping writes the wrong card into a squad. An item that carries no
- * position string is refused loudly, naming the number, the locations that were
- * probed and the item's own key names with their types, so the next live run
- * establishes the mapping instead of guessing it.
+ * the observable `basePossiblePositions`. On the observable item that list is
+ * the only strict source of a position string, so its first element is *taken
+ * as* the item's preferred position: that EA orders the list by preference is
+ * not proven — a canonical enum order would make the first element something
+ * else than the card's own position — and the next live run settles it. Every
+ * resolved value is checked against the accepted position set the formation
+ * slots are drawn from. A number is never decoded into a position: no capture
+ * proves which code names which position, and a wrong mapping writes the wrong
+ * card into a squad. An item that carries no position string is refused loudly,
+ * naming the number, the locations that were probed and the item's own key
+ * names with their types, so the next live run establishes the mapping instead
+ * of guessing it.
  *
  * The raw payload must carry every non-price field as its declared type
  * (finite number, non-empty string, array of position strings, or boolean).
@@ -1066,8 +1070,10 @@ export const CLUB_ITEM_SOURCES = Object.freeze([
     note:
       'the wire `preferredPosition` string first; the observable layer carries a number there, so' +
       ' the string vocabulary is read from the two position lists instead — the wire' +
-      " `possiblePositions` and the observable `basePossiblePositions`, whose first element is the" +
-      " item's preferred position. A number is never decoded into a position: no capture proves" +
+      ' `possiblePositions` and the observable `basePossiblePositions`, whose first element is' +
+      " taken as the item's preferred position: that list is the only strict source the" +
+      ' observable item carries, and that EA orders it by preference is not proven, so the' +
+      ' next live run settles it. A number is never decoded into a position: no capture proves' +
       ' which code names which position, and a wrong mapping writes the wrong card into a squad',
   }),
   Object.freeze({
