@@ -97,6 +97,19 @@ import {
  *      512 and 521 back off three times longer, the set-challenges class gets its
  *      own 2.5 s floor, the observed HTTP statuses are reported, and the bridge
  *      budget is sized for one call instead of 32.
+ * Incremented by fsl-build/16, one defect from the `fsl-build/15` live run: the
+ *   challenge's identity is now read by **one** shared helper, in every proven
+ *   location — the top level (`challengeId`, `id`) and one bounded level down in
+ *   both `data` and `challengeData` — and the id the panel named is compared
+ *   against *every* location instead of the first id found, so a finite but
+ *   different `id` can no longer shadow a matching `challengeId`. The set-payload
+ *   read, the panel read and the keyed read use that one helper, and the
+ *   requirements read shares its wrapper levels, so the two paths can no longer
+ *   disagree about where a challenge's identity lives. A named id that matches
+ *   nothing is still refused loudly with the count, and the refusal now names
+ *   every location that was probed and the candidates' own key names, so the next
+ *   live run can name the field without another code change.
+ *
  * Incremented by fsl-build/17, one defect from the `fsl-build/15` live run:
  *   the observable club item carries `preferredPosition` as a NUMBER, so the
  *   reader rejected the first item of the first page and the club read yielded

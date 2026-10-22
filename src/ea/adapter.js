@@ -1184,13 +1184,16 @@ const describeObservableSubLayers = (rawItem) =>
     })
   );
 
+/**
+ * One object's own key names with their types, never a value: the shape a
+ * report carries, so every stage names a field the same way.
+ */
+const describeKeyTypes = (keys) => keys.map((key) => `${key.name}: ${key.type}`).join(', ');
+
 /** Renders one sub-layer's key names for a reason string. */
 const describeSubLayerKeys = (shapes) =>
   Object.entries(shapes)
-    .map(
-      ([name, shape]) =>
-        `${name} carries [${shape.keys.map((key) => `${key.name}: ${key.type}`).join(', ')}]`
-    )
+    .map(([name, shape]) => `${name} carries [${describeKeyTypes(shape.keys)}]`)
     .join('; ');
 
 /**
@@ -3900,6 +3903,16 @@ const SBC_SERVICE_TARGET = Object.freeze({ container: 'services', target: 'SBC' 
 const SBC_DAO_TARGET = Object.freeze({ container: 'services', target: 'SBC.sbcDAO' });
 
 /**
+ * The one bounded descent the challenge readers share (#109): the wrapper names
+ * a challenge payload may live under, one level down. The identity read and
+ * the requirements read use this same list, so "one level down" can never mean
+ * two different things again — that disagreement is what made the
+ * `fsl-build/15` run report a missing id while the requirements read could
+ * have found the very same payload.
+ */
+const CHALLENGE_WRAPPER_LEVELS = Object.freeze([SBC_SET_API.data, SBC_SET_API.challengeData]);
+
+/**
  * Calls a no-argument predicate method on an entity and answers whether it
  * returned true. A missing method and a throw both mean false: the reference
  * treats a throwing `isCompleted()` as "open", which is the safe direction for
@@ -3920,31 +3933,205 @@ const readEntityId = (entity) => {
   return read.ok && Number.isFinite(read.value) ? read.value : null;
 };
 
-/** The raw identity fields a challenge may carry, in probe order. */
-const CHALLENGE_IDENTITY_FIELDS = Object.freeze([SBC_SET_API.id, CHALLENGE_FIELDS.challengeId]);
+/**
+ * The field the panel's named id lives in, and the field that may only be read
+ * as a fallback. The wire form proves the first: set 6's single entry carries
+ * `challengeId: 18`, and that is a challenge id. The second is the model
+ * wrapper's own `id`, which can live in another id space — so it is only read
+ * when a candidate names no challenge at all, and it can never rescue a
+ * candidate that names another challenge.
+ */
+const CHALLENGE_NAMED_ID_FIELD = CHALLENGE_FIELDS.challengeId;
+const CHALLENGE_WRAPPER_ID_FIELD = SBC_SET_API.id;
 
-/** The first finite identity field on one object level, or null. */
-const readIdentityField = (challenge) => {
-  for (const field of CHALLENGE_IDENTITY_FIELDS) {
-    const read = readDataProperty(challenge, field);
-    if (read.ok && Number.isFinite(read.value)) return read.value;
-  }
-  return null;
+/** The raw identity fields a challenge may carry, in probe order. */
+const CHALLENGE_IDENTITY_FIELDS = Object.freeze([
+  CHALLENGE_NAMED_ID_FIELD,
+  CHALLENGE_WRAPPER_ID_FIELD,
+]);
+
+/**
+ * Every location a challenge's identity may live in, in probe order (#109):
+ * the top level, and one bounded level down in each shared wrapper. The wire
+ * shape proves `challengeId` at the entry's top level; the live entity shape
+ * proves `id`; a payload nested one level down carries its own id in the
+ * wrapper it sits in. The set-payload read, the panel read and the keyed read
+ * all probe this one list, so they can no longer disagree about where a
+ * challenge's identity lives.
+ */
+const CHALLENGE_IDENTITY_LOCATIONS = Object.freeze([
+  ...CHALLENGE_IDENTITY_FIELDS.map((field) => Object.freeze({ via: field, wrapper: null, field })),
+  ...CHALLENGE_WRAPPER_LEVELS.flatMap((wrapper) =>
+    CHALLENGE_IDENTITY_FIELDS.map((field) =>
+      Object.freeze({ via: `${wrapper}.${field}`, wrapper, field })
+    )
+  ),
+]);
+
+/**
+ * Reads the wrapper object one level down, or null when the wrapper is absent
+ * or does not hold an object. The wrapper is read as a data property, so a
+ * live getter is never invoked inside the player's authenticated session.
+ */
+const readChallengeWrapper = (challenge, wrapper) => {
+  const read = readDataProperty(challenge, wrapper);
+  return read.ok && isRecordObject(read.value) ? read.value : null;
 };
 
 /**
- * The identity of a challenge the panel named, across the shapes the live page
- * and the set-challenges payload use. A raw set-challenges entry carries
- * `challengeId`; a `UTSBCChallengeEntity` wrapper carries `id`, and its payload
- * may live one level down inside a `data` wrapper. Every shape is a property
- * read; a value that is not a finite number never counts.
+ * Every identity a candidate carries, read from every proven location: the top
+ * level and one bounded level down in each shared wrapper. A value that is not
+ * a finite number never counts. The whole list is returned, so the caller can
+ * compare the *named* id against all of them and a report can name the
+ * locations that answered.
+ *
+ * @param {*} challenge the candidate to read
+ * @returns {Array<{via: string, field: string, value: number}>} the identities it carries
  */
-const readChallengeIdentity = (challenge) => {
-  if (!isRecordObject(challenge)) return null;
-  const direct = readIdentityField(challenge);
-  if (direct !== null) return direct;
-  const data = readDataProperty(challenge, SBC_SET_API.data);
-  return data.ok && isRecordObject(data.value) ? readIdentityField(data.value) : null;
+const readChallengeIdentities = (challenge) => {
+  if (!isRecordObject(challenge)) return [];
+  const found = [];
+  for (const location of CHALLENGE_IDENTITY_LOCATIONS) {
+    const target =
+      location.wrapper === null ? challenge : readChallengeWrapper(challenge, location.wrapper);
+    if (target === null) continue;
+    const read = readDataProperty(target, location.field);
+    if (read.ok && Number.isFinite(read.value)) {
+      found.push({ via: location.via, field: location.field, value: read.value });
+    }
+  }
+  return found;
+};
+
+/** The identities a candidate claims in the named field: the challenge it is. */
+const namedIdentities = (identities) =>
+  identities.filter((identity) => identity.field === CHALLENGE_NAMED_ID_FIELD);
+
+/** The identities a candidate claims in the wrapper field: the model's own id. */
+const wrapperIdentities = (identities) =>
+  identities.filter((identity) => identity.field === CHALLENGE_WRAPPER_ID_FIELD);
+
+/**
+ * The one identity decision, for one candidate (#109): does this candidate
+ * carry the id the panel named, and in which field?
+ *
+ * Two rules, and they are the only two:
+ *
+ * - A candidate that names a challenge id *other* than the named one is a
+ *   different challenge, whatever its wrapper `id` says. The named field is the
+ *   one the wire form proves, so it decides; a matching wrapper id can never
+ *   rescue a candidate that names another challenge, because the wrapper's `id`
+ *   can live in another id space.
+ * - A candidate that names no challenge at all is judged on its wrapper `id`
+ *   alone, because that is all it carries.
+ *
+ * `named` and `wrapper` are the hit the candidate offers in each field, or
+ * null; a refused candidate offers neither, so it can never be selected.
+ *
+ * @param {*} challenge the candidate to test
+ * @param {number} challengeId the id the panel named
+ * @returns {{ ok: boolean, named: object|null, wrapper: object|null, conflict: boolean,
+ *   identities: Array<{via: string, field: string, value: number}> }}
+ */
+const readIdentityDecision = (challenge, challengeId) => {
+  const identities = readChallengeIdentities(challenge);
+  const named = namedIdentities(identities);
+  const wrapper = wrapperIdentities(identities);
+  // The named field decides: a candidate that names another challenge is
+  // refused outright, whatever its wrapper `id` says.
+  const conflict = named.some((identity) => identity.value !== challengeId);
+  if (conflict) {
+    return { ok: false, named: null, wrapper: null, conflict: true, identities };
+  }
+  const namedHit = named.find((identity) => identity.value === challengeId) ?? null;
+  const wrapperHit = wrapper.find((identity) => identity.value === challengeId) ?? null;
+  const hit = namedHit ?? wrapperHit;
+  return {
+    ok: hit !== null,
+    named: namedHit,
+    wrapper: wrapperHit,
+    conflict: false,
+    identities,
+  };
+};
+
+/**
+ * The one candidate lookup: the entry whose identity carries the id the panel
+ * named.
+ *
+ * The named field outranks the wrapper field across *every* candidate, before
+ * the payload order is consulted: a candidate that names the challenge in the
+ * field the wire form proves is the answer, even when an earlier candidate
+ * carries a matching wrapper id. Candidate order must never decide which
+ * challenge the run writes into. A candidate that names another challenge is
+ * not a candidate at all — it is refused, and never chosen.
+ *
+ * @param {Array<*>} entries the candidates to look through
+ * @param {number} challengeId the id the panel named
+ * @returns {{ entry: *|null, via: string|null }} the matching entry and the
+ *   location its identity was read from, or a null entry when none matched
+ */
+const findChallengeByIdentity = (entries, challengeId) => {
+  const decisions = entries.map((entry) => readIdentityDecision(entry, challengeId));
+  const namedIndex = decisions.findIndex((decision) => decision.named !== null);
+  if (namedIndex !== -1) {
+    return { entry: entries[namedIndex], via: decisions[namedIndex].named.via };
+  }
+  const wrapperIndex = decisions.findIndex((decision) => decision.wrapper !== null);
+  if (wrapperIndex !== -1) {
+    return { entry: entries[wrapperIndex], via: decisions[wrapperIndex].wrapper.via };
+  }
+  return { entry: null, via: null };
+};
+
+/**
+ * Renders the identities a candidate carries, for a reason string: the value
+ * and the location it was read from, or that it carries none. The values are
+ * challenge ids, which the report already names.
+ */
+const describeIdentities = (identities) =>
+  identities.length === 0
+    ? 'no challenge id'
+    : identities.map((identity) => `challenge ${identity.value} (read at ${identity.via})`).join(' and ');
+
+/**
+ * The candidate's own key names with their types, never a value — the shape
+ * the club stage already reports (`itemLayer.fields` / `clubRead.keys`), so a
+ * pasted report reads the same way whichever stage produced it.
+ */
+const describeEntryKeyTypes = (entry) => describeKeyTypes(describeOwnPropertyTypes(entry));
+
+/** How many candidates a miss describes, so a large collection cannot flood a report. */
+const IDENTITY_CANDIDATE_LIMIT = 3;
+
+/**
+ * The diagnosis a named id that matched nothing carries (#109): every location
+ * that was probed, and the candidates' own key names with their types — never a
+ * value. The `fsl-build/15` report said only that no entry carried challenge
+ * 18, which is why it took a full capture to diagnose; the next live run can
+ * name the field from this alone. A candidate that names another challenge
+ * says so, so a report shows why that candidate was refused.
+ *
+ * @param {Array<*>} candidates the entries that were looked at
+ * @param {number} challengeId the id the panel named
+ * @returns {string} the diagnosis
+ */
+const describeIdentityMiss = (candidates, challengeId) => {
+  const probed = CHALLENGE_IDENTITY_LOCATIONS.map((location) => location.via).join(', ');
+  const described = candidates
+    .filter((entry) => isRecordObject(entry))
+    .slice(0, IDENTITY_CANDIDATE_LIMIT)
+    .map((entry) => {
+      const decision = readIdentityDecision(entry, challengeId);
+      const description =
+        `a candidate carries [${describeEntryKeyTypes(entry)}] and its identity reads ` +
+        `[${describeIdentities(decision.identities)}]`;
+      return decision.conflict ? `${description} and it names another challenge` : description;
+    });
+  return (
+    `no proven location holds challenge ${challengeId} (probed ${probed}); ` +
+    (described.length === 0 ? 'no candidate carried a readable id' : described.join('; '))
+  );
 };
 
 /**
@@ -3967,7 +4154,7 @@ export function selectChallengeByIdentity(entities, challengeId) {
   for (const entity of list) {
     if (!entityFlag(entity, SBC_SET_API.isCompleted)) open += 1;
   }
-  const chosen = list.find((entity) => readChallengeIdentity(entity) === challengeId) ?? null;
+  const chosen = findChallengeByIdentity(list, challengeId).entry;
   if (chosen === null) {
     return {
       ok: false,
@@ -4182,14 +4369,14 @@ const readChallengeEntityRequirements = (challenge) => {
     };
   }
   if (!isRecordObject(challenge)) return unresolved;
-  for (const wrapper of [SBC_SET_API.data, SBC_SET_API.challengeData]) {
-    const read = readDataProperty(challenge, wrapper);
-    if (!read.ok || !isRecordObject(read.value)) continue;
-    const nested = readEntityElgReq(read.value);
-    if (nested.carried) {
+  for (const wrapper of CHALLENGE_WRAPPER_LEVELS) {
+    const wrapped = readChallengeWrapper(challenge, wrapper);
+    if (wrapped === null) continue;
+    const carried = readEntityElgReq(wrapped);
+    if (carried.carried) {
       return {
-        ...nested,
-        payload: read.value,
+        ...carried,
+        payload: wrapped,
         source: `${wrapper}.${SBC_SET_API.elgReq}`,
         via: `set-payload.${wrapper}.${SBC_SET_API.elgReq}`,
       };
@@ -4287,11 +4474,18 @@ const readSetChallengeEntries = (payload) => {
 
 /**
  * Picks the entry the panel's second argument named, out of one set's
- * challenges, by the wire `challengeId`. That field is the one the capture
- * proves (`challengeId: 50` on the single entry of set 23), so it is the only
- * name read here: matching on an entity's `id` instead would be a second guess
- * at the same value, and the live `fsl-build/13` run already showed what a
- * wrong identity costs.
+ * challenges, by the one shared identity read (#109).
+ *
+ * The capture proves the wire shape — `challengeId` at the entry's top level,
+ * `challengeId: 50` on the single entry of set 23 — and the live model proves
+ * the other proven locations: `id` on an entity wrapper, and the id of a
+ * payload nested one level down inside `data` or `challengeData`. All of them
+ * are read by the same helper the panel path uses, so the two paths can no
+ * longer disagree about which entry is the challenge the player opened.
+ *
+ * The named id is compared against *every* location, never against the first
+ * id found, so a finite but different `id` cannot shadow a matching
+ * `challengeId`.
  *
  * A named id that matches nothing fails with the count and selects nothing.
  * Re-ranking the entries by `status` would hand back a challenge the player
@@ -4300,19 +4494,16 @@ const readSetChallengeEntries = (payload) => {
  */
 const selectSetChallengeEntry = (entries, challengeId, setId) => {
   const list = Array.isArray(entries) ? entries : [];
-  for (const entry of list) {
-    if (!isRecordObject(entry)) continue;
-    const read = readDataProperty(entry, CHALLENGE_FIELDS.challengeId);
-    if (read.ok && read.value === challengeId) {
-      return {
-        ok: true,
-        entry,
-        seen: list.length,
-        reason:
-          `set ${setId} returned ${list.length} challenges; the panel argument named challenge` +
-          ` ${challengeId} and this entry carries it`,
-      };
-    }
+  const found = findChallengeByIdentity(list, challengeId);
+  if (found.entry !== null) {
+    return {
+      ok: true,
+      entry: found.entry,
+      seen: list.length,
+      reason:
+        `set ${setId} returned ${list.length} challenges; the panel argument named challenge` +
+        ` ${challengeId} and this entry carries it at ${found.via}`,
+    };
   }
   return {
     ok: false,
@@ -4320,8 +4511,8 @@ const selectSetChallengeEntry = (entries, challengeId, setId) => {
     seen: list.length,
     reason:
       `the panel argument named challenge ${challengeId}, but set ${setId} returned ${list.length}` +
-      ` challenges and none carries ${CHALLENGE_FIELDS.challengeId} ${challengeId}; refusing to` +
-      ' select another',
+      ` challenges and none carries ${challengeId} in any proven location; refusing to select another` +
+      `; ${describeIdentityMiss(list, challengeId)}`,
   };
 };
 
@@ -5115,14 +5306,17 @@ const probeKeyedChallenge = (collection, challengeId) => {
           : `the collection's own entry for key ${challengeId} is ${read.reason}`,
     };
   }
-  const identity = readChallengeIdentity(read.value);
-  if (identity !== challengeId) {
+  const decision = readIdentityDecision(read.value, challengeId);
+  if (!decision.ok) {
+    const entry = `the entry at own key ${challengeId}`;
     return {
       id,
       ok: false,
-      reason:
-        `the entry at own key ${challengeId} carries challenge ${identity ?? 'no id'}, not ${challengeId};` +
-        ' a key EA does not use for challenge ids cannot select a challenge',
+      reason: decision.conflict
+        ? `${entry} names ${describeIdentities(namedIdentities(decision.identities))}, not` +
+          ` ${challengeId}: it is another challenge, so it is refused`
+        : `${entry} carries ${describeIdentities(decision.identities)}, not ${challengeId}; a key` +
+          ' EA does not use for challenge ids cannot select a challenge',
     };
   }
   return { id, ok: true, reason: null, challenge: read.value };
@@ -5135,14 +5329,17 @@ const probeKeyedChallenge = (collection, challengeId) => {
  * says only that it is an object: nothing proved it is keyed by challenge id,
  * so the key is never trusted on its own. Both locations are probed and each
  * keeps its own `{id, ok, reason}` record — the own key (only when the entry's
- * own `readChallengeIdentity` is the id the panel named) and the identity match
- * over every candidate, which answers for a raw `challengeId` entry and an `id`
- * entity wrapper alike. An entry whose id does not match is refused, never used,
- * because that is a challenge the player did not open. When neither location
- * verifies the identity the result is a loud miss: a missing collection, a
- * non-collection and a named id with no verified entry each keep their own
- * reason, the refused locations ride on that reason, and the candidate count is
- * on every outcome.
+ * own identity, read by the one shared read, is the id the panel named) and the
+ * identity match over every candidate, which answers for a raw `challengeId`
+ * entry and an `id` entity wrapper alike. An entry whose id does not match is
+ * refused, never used, because that is a challenge the player did not open —
+ * and so is an entry that names another challenge, so neither location can
+ * hand back a challenge the player did not open.
+ * When neither location verifies the identity the result is a loud miss: a
+ * missing collection, a non-collection and a named id with no verified entry
+ * each keep their own reason, the refused locations ride on that reason, the
+ * candidate count is on every outcome, and the miss names every location that
+ * was probed and the candidates' own key names (#109).
  */
 const locatePanelChallenge = (set, challengeId) => {
   const read = readDataProperty(set, SBC_SET_API.challenges);
@@ -5173,14 +5370,14 @@ const locatePanelChallenge = (set, challengeId) => {
   }
   const seen = candidates.length;
   const keyed = probeKeyedChallenge(collection, challengeId);
-  const match = candidates.find((entry) => readChallengeIdentity(entry) === challengeId) ?? null;
+  const match = findChallengeByIdentity(candidates, challengeId).entry;
   // The record carries no challenge payload; the verified entry rides beside it.
   const locations = [
-    { id: PANEL_CHALLENGES_KEY_LOCATION, ok: keyed.ok, reason: keyed.reason },
+    locationOf(keyed),
     {
       id: PANEL_CHALLENGES_IDENTITY_LOCATION,
       ok: match !== null,
-      reason: match === null ? `none of the ${seen} entries carries challenge ${challengeId}` : null,
+      reason: match === null ? describeIdentityMiss(candidates, challengeId) : null,
     },
   ];
   // A verified entry is the answer either way; the two locations are recorded
@@ -5201,26 +5398,28 @@ const locatePanelChallenge = (set, challengeId) => {
 
 /**
  * Resolves the requirements of the challenge the panel named: the located
- * payload itself first, then its `data` and `challengeData` wrappers, one level
- * down, for the `UTSBCChallengeEntity` shape the live page uses. The winner's
- * `source` and the payload that actually carries the array are returned, so the
- * caller hands a payload `readChallenge` can read. Nothing is guessed: when no
- * location carries an array, the resolver's own probed locations are named.
+ * payload itself first, then the shared wrapper levels, one level down, for the
+ * `UTSBCChallengeEntity` shape the live page uses. The wrapper levels are the
+ * very list the identity read uses (#109), so the two reads can never disagree
+ * about what "one level down" means. The winner's `source` and the payload that
+ * actually carries the array are returned, so the caller hands a payload
+ * `readChallenge` can read. Nothing is guessed: when no location carries an
+ * array, the resolver's own probed locations are named.
  */
 const resolveLocatedChallengeRequirements = (challenge) => {
   const direct = resolveChallengeRequirements(challenge);
   if (direct.ok) {
     return { ok: true, source: direct.source, payload: challenge };
   }
-  for (const wrapper of [SBC_SET_API.data, SBC_SET_API.challengeData]) {
-    const read = readDataProperty(challenge, wrapper);
-    if (!read.ok || !isRecordObject(read.value)) continue;
-    const nested = resolveChallengeRequirements(read.value);
+  for (const wrapper of CHALLENGE_WRAPPER_LEVELS) {
+    const wrapped = readChallengeWrapper(challenge, wrapper);
+    if (wrapped === null) continue;
+    const nested = resolveChallengeRequirements(wrapped);
     if (nested.ok) {
-      const source = nested.source.startsWith('payload.')
-        ? nested.source.slice('payload.'.length)
-        : nested.source;
-      return { ok: true, source: `${wrapper}.${source}`, payload: read.value };
+      // The nested lookup names its own source `payload.<field>`; the wrapper it
+      // was read from is the name this result carries.
+      const source = nested.source.replace(/^payload\./, '');
+      return { ok: true, source: `${wrapper}.${source}`, payload: wrapped };
     }
   }
   return {
@@ -5228,7 +5427,7 @@ const resolveLocatedChallengeRequirements = (challenge) => {
     reason:
       `no requirements array in any documented location (probed ${direct.attempts
         .map((attempt) => attempt.id)
-        .join(', ')}, and the ${SBC_SET_API.data}/${SBC_SET_API.challengeData} wrappers)`,
+        .join(', ')}, and the ${CHALLENGE_WRAPPER_LEVELS.join('/')} wrappers)`,
   };
 };
 
