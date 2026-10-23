@@ -139,8 +139,17 @@ import {
  *   code no source can name is refused loudly, the accessor is still never
  *   invoked, and the club stage reports the resolver's source, size and unnamed
  *   codes.
+ *
+ * Incremented by fsl-build/20, one defect from the `fsl-build/17` live run: the
+ *   set entity's `challenges` collection is nested one level deeper — its one
+ *   candidate is a map keyed on challenge ids — so the panel read descends
+ *   exactly one level into that map and verifies the identity with the same
+ *   shared read. The set entity also exposes `getChallenges()`; it is probed
+ *   after every data-property location misses, guarded, and recorded as its own
+ *   location. Both locations appear in `attempts[].locations`, and a miss names
+ *   the collection's own key names and types.
  */
-export const BUILD_ID = 'fsl-build/19';
+export const BUILD_ID = 'fsl-build/20';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact

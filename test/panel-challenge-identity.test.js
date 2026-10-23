@@ -713,3 +713,131 @@ describe('the named field outranks the wrapper field (#109)', () => {
     expect(keyed.reason).toMatch(/another challenge/i);
   });
 });
+
+// The fsl-build/17 live run proved the set entity's `challenges` collection is
+// not keyed by challenge id: it holds one own candidate whose own keys are the
+// challenge ids — the value is itself a map keyed on id. The set entity also
+// exposes `getChallenges()`, which the reference reads instead of the data
+// property. Both are data-property locations that must verify identity by the
+// same shared read, one level only, and never select another challenge.
+describe('a nested id-keyed map and set.getChallenges() are identity locations', () => {
+  const nestedLocation = (result) =>
+    result.attempts[0].locations.find(
+      (location) => location.id === 'panel-argument.challenges[nested]'
+    );
+  const methodLocation = (result) =>
+    result.attempts[0].locations.find(
+      (location) => location.id === 'panel-argument.getChallenges'
+    );
+
+  it('descends exactly one level into a candidate that is a map keyed on challenge ids', () => {
+    const entry = syntheticEntry();
+    const set = {
+      id: 6,
+      challengesCount: 1,
+      challenges: { anOuterKey: { 18: entry } },
+    };
+
+    const result = resolveChallengeSubject(set, undefined, { challengeId: 18 });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toBe(entry);
+    expect(result.selectedChallengeId).toBe(18);
+    const nested = nestedLocation(result);
+    expect(nested).toEqual({ id: 'panel-argument.challenges[nested]', ok: true, reason: null });
+  });
+
+  it('refuses a nested entry that names another challenge', () => {
+    const set = {
+      id: 6,
+      challengesCount: 1,
+      challenges: { anOuterKey: { 18: syntheticEntry({ challengeId: 50 }) } },
+    };
+
+    const result = resolveChallengeSubject(set, undefined, { challengeId: 18 });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toBeNull();
+    expect(result.selectedChallengeId).toBe(18);
+    const nested = nestedLocation(result);
+    expect(nested.ok).toBe(false);
+    expect(nested.reason).toContain('anOuterKey');
+    expect(nested.reason).toMatch(/another challenge/i);
+  });
+
+  it('verifies the named challenge through set.getChallenges() when the collection does not match', () => {
+    const entry = syntheticEntry();
+    const set = {
+      id: 6,
+      challengesCount: 1,
+      challenges: { stale: syntheticEntry({ challengeId: 50 }) },
+      getChallenges: () => [entry],
+    };
+
+    const result = resolveChallengeSubject(set, undefined, { challengeId: 18 });
+
+    expect(result.ok).toBe(true);
+    expect(result.payload).toBe(entry);
+    expect(result.selectedChallengeId).toBe(18);
+    expect(methodLocation(result)).toEqual({
+      id: 'panel-argument.getChallenges',
+      ok: true,
+      reason: null,
+    });
+  });
+
+  it('records a throwing getChallenges() as a reason and still reports the other locations', () => {
+    const set = {
+      id: 6,
+      challengesCount: 1,
+      challenges: { stale: syntheticEntry({ challengeId: 50 }) },
+      getChallenges: () => {
+        throw new Error('EA refused the call');
+      },
+    };
+
+    const result = resolveChallengeSubject(set, undefined, { challengeId: 18 });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toBeNull();
+    const locations = result.attempts[0].locations;
+    expect(locations.map((location) => location.id)).toEqual([
+      'panel-argument.id',
+      'panel-argument.challenges[key]',
+      'panel-argument.challenges[identity]',
+      'panel-argument.challenges[nested]',
+      'panel-argument.getChallenges',
+    ]);
+    expect(locations.find((location) => location.id === 'panel-argument.getChallenges').reason)
+      .toMatch(/threw/i);
+  });
+
+  it('records a non-array getChallenges() answer as a reason', () => {
+    const set = {
+      id: 6,
+      challengesCount: 1,
+      challenges: { stale: syntheticEntry({ challengeId: 50 }) },
+      getChallenges: () => ({ not: 'an array' }),
+    };
+
+    const result = resolveChallengeSubject(set, undefined, { challengeId: 18 });
+
+    expect(result.ok).toBe(false);
+    expect(result.payload).toBeNull();
+    expect(methodLocation(result).ok).toBe(false);
+    expect(methodLocation(result).reason).toMatch(/not an array/i);
+  });
+
+  it('names the collection own key names and types in a miss', () => {
+    const set = {
+      id: 6,
+      challengesCount: 1,
+      challenges: { anOuterKey: { 99: syntheticEntry({ challengeId: 99 }) } },
+    };
+
+    const result = resolveChallengeSubject(set, undefined, { challengeId: 18 });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts[0].reason).toContain('anOuterKey: object');
+  });
+});
