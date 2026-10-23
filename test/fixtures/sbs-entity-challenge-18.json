@@ -1,0 +1,19 @@
+{
+  "id": 18,
+  "setId": 6,
+  "name": "Synthetic entity challenge 18",
+  "status": "OPEN",
+  "formation": "f343",
+  "squad": {
+    "players": []
+  },
+  "eligibilityRequirements": [
+    {
+      "type": "LEAGUE_COUNT",
+      "eligibilitySlot": 1,
+      "eligibilityKey": 8,
+      "eligibilityValue": 3
+    }
+  ],
+  "eligibilityOperation": "AND"
+}

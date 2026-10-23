@@ -121,8 +121,17 @@ import {
  *   names which position. The location that answered is reported with the item's
  *   other field sources, and an item with no position string is refused with the
  *   number, the probed locations and the item's own key names and types.
+ *
+ * Incremented by fsl-build/18, one defect from the `fsl-build/17` live run: the
+ *   live set-challenges entity spells the challenge identity `id` (not
+ *   `challengeId`), the requirements `eligibilityRequirements` (not `elgReq`)
+ *   and the operation `eligibilityOperation` (not `elgOperation`). The entity
+ *   probe now tries every documented requirements spelling on the entity and
+ *   one level down in `data`/`challengeData`, the bridge and the reader accept
+ *   both identity and operation spellings, and an undecodable requirement entry
+ *   reports its own key names and types so the next live run can name its shape.
  */
-export const BUILD_ID = 'fsl-build/17';
+export const BUILD_ID = 'fsl-build/18';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact

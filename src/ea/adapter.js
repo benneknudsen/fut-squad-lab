@@ -1920,6 +1920,24 @@ export const CHALLENGE_FIELDS = Object.freeze({
 });
 
 /**
+ * The raw names a challenge's identity may live under, in probe order (#113).
+ * The set-challenges wire entry spells it `challengeId`; the live
+ * `UTSBCChallengeEntity` spells the same value `id` and carries no
+ * `challengeId` at all.
+ */
+export const CHALLENGE_IDENTITY_PROPERTIES = Object.freeze(['challengeId', 'id']);
+
+/**
+ * The raw names the requirement operation may live under, in probe order
+ * (#113). The wire entry spells it `elgOperation`; the live entity spells it
+ * `eligibilityOperation`.
+ */
+export const CHALLENGE_OPERATION_PROPERTIES = Object.freeze([
+  'elgOperation',
+  'eligibilityOperation',
+]);
+
+/**
  * The property names a requirements array may live under, in the documented
  * order. Our own observed field is appended after the issue's three, so the
  * documented order is preserved and the legacy shape still decodes.
@@ -4313,31 +4331,30 @@ const carriedKeyNames = (payload) =>
   isRecordObject(payload) ? carriedKeys(payload).join(', ') : describeValue(payload);
 
 /**
- * Reads a non-empty `elgReq` array off one entity level. Only a non-empty
- * array counts as carried; a missing, non-array or empty value keeps its own
- * reason so the caller loads and the report can say which shape was missing.
+ * Reads one non-empty requirements array off one entity level under one
+ * spelling. Only a non-empty array counts as carried; a missing, non-array or
+ * empty value keeps its own reason, naming the spelling that was probed, so a
+ * miss lists every shape that was tried instead of only the wire name.
  */
-const readEntityElgReq = (challenge) => {
-  const read = readDataProperty(challenge, SBC_SET_API.elgReq);
+const readEntityElgReq = (challenge, property) => {
+  const read = readDataProperty(challenge, property);
   if (!read.ok) {
     return {
       carried: false,
       count: 0,
       reason:
-        read.reason === null
-          ? `the selected challenge carries no ${SBC_SET_API.elgReq}`
-          : `${SBC_SET_API.elgReq} is ${read.reason}`,
+        read.reason === null ? `carries no ${property}` : `${property} is ${read.reason}`,
     };
   }
   if (!Array.isArray(read.value)) {
     return {
       carried: false,
       count: 0,
-      reason: `${SBC_SET_API.elgReq} is ${describeValue(read.value)}, not an array`,
+      reason: `${property} is ${describeValue(read.value)}, not an array`,
     };
   }
   if (read.value.length === 0) {
-    return { carried: false, count: 0, reason: `${SBC_SET_API.elgReq} is an empty array` };
+    return { carried: false, count: 0, reason: `${property} is an empty array` };
   }
   return { carried: true, count: read.value.length, reason: null };
 };
@@ -4348,41 +4365,54 @@ const readEntityElgReq = (challenge) => {
  * because the requirements are the set-challenges entry's own `elgReq` array:
  * the capture in `test/fixtures/sbs-set-10-challenges.json` proves the shape.
  *
- * The live `UTSBCChallengeEntity` wraps that payload one level down, so the
- * entity's own `elgReq` is probed first and then its `data` and `challengeData`
- * wrappers — the same descent `resolveChallengeRequirements` performs for a
- * loaded payload. The winner's `{source, via, payload}` name the exact wrapper,
- * so a report says whether the entity or one of its wrappers answered. A
- * payload that is not a record makes the direct probe fail with its reason.
+ * The live `UTSBCChallengeEntity` spells the same array
+ * `eligibilityRequirements` and carries no `elgReq` at all (#113), so every
+ * spelling in `CHALLENGE_REQUIREMENT_PROPERTIES` is probed on the entity's top
+ * level and again one level down in each shared wrapper (`data`,
+ * `challengeData`). The winner's `{source, via, payload}` name the exact
+ * spelling and wrapper, so a report says which location answered. Every miss is
+ * kept in `attempts`, each with its own spelling and reason, and the joined
+ * reason names them all.
  */
 const readChallengeEntityRequirements = (challenge) => {
-  const direct = readEntityElgReq(challenge);
-  // Both miss paths return the same shape: the direct probe's own reason, the
-  // payload it probed, and no requirements source.
-  const unresolved = { ...direct, payload: challenge, source: null, via: null };
-  if (direct.carried) {
-    return {
-      ...direct,
-      payload: challenge,
-      source: SBC_SET_API.elgReq,
-      via: `set-payload.${SBC_SET_API.elgReq}`,
-    };
-  }
-  if (!isRecordObject(challenge)) return unresolved;
-  for (const wrapper of CHALLENGE_WRAPPER_LEVELS) {
-    const wrapped = readChallengeWrapper(challenge, wrapper);
-    if (wrapped === null) continue;
-    const carried = readEntityElgReq(wrapped);
-    if (carried.carried) {
-      return {
-        ...carried,
-        payload: wrapped,
-        source: `${wrapper}.${SBC_SET_API.elgReq}`,
-        via: `set-payload.${wrapper}.${SBC_SET_API.elgReq}`,
-      };
+  const attempts = [];
+  const scopes = [{ prefix: 'entity', sourcePrefix: '', container: challenge }];
+  if (isRecordObject(challenge)) {
+    for (const wrapper of CHALLENGE_WRAPPER_LEVELS) {
+      const wrapped = readChallengeWrapper(challenge, wrapper);
+      if (wrapped === null) continue;
+      scopes.push({ prefix: `entity.${wrapper}`, sourcePrefix: `${wrapper}.`, container: wrapped });
     }
   }
-  return unresolved;
+
+  for (const scope of scopes) {
+    for (const property of CHALLENGE_REQUIREMENT_PROPERTIES) {
+      const read = readEntityElgReq(scope.container, property);
+      attempts.push({ id: `${scope.prefix}.${property}`, ok: read.carried, reason: read.reason });
+      if (read.carried) {
+        const source = `${scope.sourcePrefix}${property}`;
+        return {
+          carried: true,
+          count: read.count,
+          reason: null,
+          payload: scope.container,
+          source,
+          via: `set-payload.${source}`,
+          attempts,
+        };
+      }
+    }
+  }
+
+  return {
+    carried: false,
+    count: 0,
+    reason: attempts.map((attempt) => `${attempt.id}: ${attempt.reason}`).join('; '),
+    payload: challenge,
+    source: null,
+    via: null,
+    attempts,
+  };
 };
 
 /**
@@ -4577,11 +4607,8 @@ const loadChallengeFromNamedSet = async ({
   });
   if (!call.ok) {
     const statusPart = call.status === null ? '' : ` [HTTP ${call.status}]`;
-    return {
-      ok: false,
-      reason: `${label}${statusPart}: ${call.reason}`,
-      selection: selection({ ok: false, reason: `${label}${statusPart}: ${call.reason}` }),
-    };
+    const reason = `${label}${statusPart}: ${call.reason}`;
+    return { ok: false, reason, selection: selection({ ok: false, reason }) };
   }
 
   const payload = call.event.payload;
@@ -4605,9 +4632,11 @@ const loadChallengeFromNamedSet = async ({
     return {
       ok: false,
       reason:
-        `${label}: challenge ${challengeId} carries no ${SBC_SET_API.elgReq} (${entryRequirements.reason});` +
-        ` the entry carries keys [${carriedKeyNames(picked.entry)}]; no challenge load was attempted, because a` +
-        ' payload entry carries no entity and no isInProgress argument to load it with',
+        `${label}: challenge ${challengeId} carries no requirements array in any probed spelling;` +
+        ` probed ${CHALLENGE_REQUIREMENT_PROPERTIES.join(', ')} on the entity and one level down in` +
+        ` ${CHALLENGE_WRAPPER_LEVELS.join('/')} (${entryRequirements.reason}); the entry carries keys` +
+        ` [${carriedKeyNames(picked.entry)}]; no challenge load was attempted, because a payload entry` +
+        ' carries no entity and no isInProgress argument to load it with',
       selection: selection({ ok: true, seen: picked.seen, reason: picked.reason }),
     };
   }
