@@ -12,6 +12,7 @@ these, not against hand-written guesses.
 | `sbs-sets.json` | `GET /sbs/sets` | Set and category structure, repeatability, rewards |
 | `sbs-set-10-challenges.json` | `GET /sbs/setId/10/challenges` | The `elgReq[]` requirement model |
 | `sbs-set-16-challenges.json` | `GET /sbs/setId/16/challenges` | A second challenge set, for variety |
+| `sbs-entity-challenge-18.json` | `GET /sbs/setId/6/challenges`, live entity layer | The `UTSBCChallengeEntity` names for identity, requirements and operation (`id`, `eligibilityRequirements`, `eligibilityOperation`) |
 | `sbs-challenge-25-squad.json` | `POST /sbs/challenge/25` | The empty squad template a solution is written into |
 | `club-items.json` | `POST /club` | The club item format, **wire layer** (`items` envelope, issue #72) |
 | `club-items-observable.json` | `POST /club`, via EA's observable | The club item format, **observable layer** (issue #115) |
@@ -121,6 +122,16 @@ emptiness. The **number** in
 position, so the reader refuses it and never decodes it. Only
 `basePossiblePositions` carries a position vocabulary on this fixture, which is
 exactly the one place the reader reads it from.
+
+### The entity shape: `sbs-entity-challenge-18.json`
+
+The live `services.SBC.requestChallengesForSet` entities spell the same facts
+differently from the wire entries: `id` instead of `challengeId`,
+`eligibilityRequirements` instead of `elgReq`, and `eligibilityOperation` instead
+of `elgOperation`. This fixture is an **entity-shaped** payload for that live
+shape. It is not a capture: only the key names and types come from the capture;
+every value is synthetic, and no real item, challenge name or account data is
+present.
 
 ## Rules for adding fixtures
 

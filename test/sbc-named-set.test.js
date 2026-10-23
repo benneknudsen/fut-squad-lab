@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { loadChallengePayload, resolveChallengeSubject } from '../src/ea/adapter.js';
+import {
+  CHALLENGE_REQUIREMENT_PROPERTIES,
+  loadChallengePayload,
+  resolveChallengeSubject,
+} from '../src/ea/adapter.js';
 import { readChallenge } from '../src/ea/challenge-reader.js';
 import set16 from './fixtures/sbs-set-16-challenges.json';
 import { createTestPacer } from './helpers/pacing.js';
@@ -366,5 +370,86 @@ describe('the named set matches the panel id in every proven location (#109)', (
     expect(attempt.ok).toBe(false);
     expect(attempt.reason).toMatch(/refusing to select another/i);
     expect(attempt.reason).toMatch(/another challenge/i);
+  });
+});
+
+// #113: the live `services.SBC.requestChallengesForSet` entity carries `id`,
+// `eligibilityRequirements` and `eligibilityOperation`, not the wire names
+// `challengeId`, `elgReq` and `elgOperation`. These tests pin the entity probe
+// against every documented requirements spelling, the entity wrapper descent,
+// and a failure that names the entry's own key names.
+describe('the named-set read accepts the live entity names (#113)', () => {
+  const requirements = [
+    { type: 'LEAGUE_COUNT', eligibilitySlot: 1, eligibilityKey: 8, eligibilityValue: 3 },
+  ];
+
+  const entity = (overrides = {}) => ({
+    id: 18,
+    setId: 6,
+    name: 'a synthetic entity challenge',
+    status: 'OPEN',
+    formation: 'f343',
+    squad: { players: [] },
+    eligibilityRequirements: requirements,
+    eligibilityOperation: 'AND',
+    ...overrides,
+  });
+
+  for (const property of CHALLENGE_REQUIREMENT_PROPERTIES) {
+    it(`finds entity requirements named ${property} and reports that spelling`, async () => {
+      const subject = panelSet(6);
+      const entry = entity();
+      delete entry.eligibilityRequirements;
+      entry[property] = requirements;
+      const { service } = countedSbc({ payload: { challenges: [entry] } });
+
+      const result = await readViaBridge({ services: { SBC: service } }, subject, {
+        challengeId: 18,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.payload).toBe(entry);
+      expect(result.requirementsFrom).toBe(`payload.${property}`);
+      const challenge = readChallenge(result.payload);
+      expect(challenge.challengeId).toBe(18);
+      expect(challenge.identityFrom).toBe('payload.id');
+      expect(challenge.operationFrom).toBe('payload.eligibilityOperation');
+    });
+  }
+
+  for (const wrapper of ['data', 'challengeData']) {
+    it(`finds entity requirements one level down in ${wrapper}`, async () => {
+      const subject = panelSet(6);
+      const entry = entity({ [wrapper]: { eligibilityRequirements: requirements } });
+      delete entry.eligibilityRequirements;
+      const { service } = countedSbc({ payload: { challenges: [entry] } });
+
+      const result = await readViaBridge({ services: { SBC: service } }, subject, {
+        challengeId: 18,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.payload).toBe(entry[wrapper]);
+      expect(result.requirementsFrom).toBe(`payload.${wrapper}.eligibilityRequirements`);
+    });
+  }
+
+  it('lists every probed spelling when the entity carries no requirements', async () => {
+    const subject = panelSet(6);
+    const entry = entity();
+    delete entry.eligibilityRequirements;
+    const { service } = countedSbc({ payload: { challenges: [entry] } });
+
+    const result = await readViaBridge({ services: { SBC: service } }, subject, {
+      challengeId: 18,
+    });
+
+    expect(result.ok).toBe(false);
+    const attempt = result.attempts[0];
+    for (const property of CHALLENGE_REQUIREMENT_PROPERTIES) {
+      expect(attempt.reason).toContain(property);
+    }
+    expect(attempt.reason).toContain('eligibilityOperation');
+    expect(attempt.reason).toContain('squad');
   });
 });

@@ -1303,7 +1303,7 @@ describe('the page bridge writes the evidence file only for a failed Solve', () 
     expect(report.stoppedAt).toBe('club');
     expect(report.download).toEqual({
       ok: true,
-      file: expect.stringMatching(/^fsl-diagnostics-fsl-build-17-\d{4}-\d{2}-\d{2}\.json$/),
+      file: expect.stringMatching(/^fsl-diagnostics-fsl-build-18-\d{4}-\d{2}-\d{2}\.json$/),
     });
     expect(report.download.file).not.toContain('T');
 
@@ -1381,7 +1381,7 @@ describe('the page bridge writes the evidence file only for a failed Solve', () 
     const club = report.stages.find((stage) => stage.id === 'club');
     const challenge = report.stages.find((stage) => stage.id === 'challenge');
 
-    expect(report.build.id).toBe('fsl-build/17');
+    expect(report.build.id).toBe('fsl-build/18');
     expect(challenge.detail.challengeId).toBe(25);
     expect(club.detail).toMatchObject({
       field: 'items',

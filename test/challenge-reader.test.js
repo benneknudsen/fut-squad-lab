@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import entityChallenge18 from './fixtures/sbs-entity-challenge-18.json';
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import { PINNED_ELIGIBILITY_KEYS, SCOPE_VALUES } from './helpers/eligibility.js';
 import { readChallenge } from '../src/ea/challenge-reader.js';
@@ -13,6 +14,8 @@ const EXPECTED_CHALLENGE_25 = {
   name: '3 Leagues & 2 Nations',
   formation: 'f343',
   elgOperation: 'AND',
+  identityFrom: 'payload.challengeId',
+  operationFrom: 'payload.elgOperation',
   requirementsFrom: 'payload.elgReq',
   elgReq: [
     { type: 'LEAGUE_COUNT', eligibilitySlot: 1, eligibilityKey: 8, eligibilityValue: 3 },
@@ -43,7 +46,9 @@ describe('readChallenge', () => {
       'elgOperation',
       'elgReq',
       'formation',
+      'identityFrom',
       'name',
+      'operationFrom',
       'requirementsFrom',
     ]);
   });
@@ -133,5 +138,35 @@ describe('readChallenge', () => {
     expect(read).toThrow(/eligibilityRequirements/);
     expect(read).toThrow(/getRequirements/);
     expect(read).toThrow(/data\.sbcChallenge/);
+  });
+
+  it('reads the live entity names and reports where identity and operation were found', () => {
+    const challenge = readChallenge(entityChallenge18);
+
+    expect(challenge.challengeId).toBe(18);
+    expect(challenge.identityFrom).toBe('payload.id');
+    expect(challenge.elgOperation).toBe('AND');
+    expect(challenge.operationFrom).toBe('payload.eligibilityOperation');
+    expect(challenge.requirementsFrom).toBe('payload.eligibilityRequirements');
+    expect(challenge.elgReq).toEqual(entityChallenge18.eligibilityRequirements);
+  });
+
+  it('names an undecodable entry by its own key names and types, never its values', () => {
+    const payload = {
+      ...entityChallenge18,
+      id: 101,
+      eligibilityRequirements: [{ type: 'LEAGUE_COUNT', eligibilityKey: 8675309 }],
+    };
+
+    let message = '';
+    try {
+      readChallenge(payload);
+    } catch (error) {
+      message = error.message;
+    }
+
+    expect(message).toMatch(/eligibilitySlot/);
+    expect(message).toContain('eligibilityKey: number');
+    expect(message).not.toContain('8675309');
   });
 });
