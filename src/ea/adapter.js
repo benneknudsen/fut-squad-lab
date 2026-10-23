@@ -4332,10 +4332,15 @@ const IDENTITY_CANDIDATE_LIMIT = 3;
  *
  * @param {Array<*>} candidates the entries that were looked at
  * @param {number} challengeId the id the panel named
+ * @param {object|null} [collection] the collection the candidates came from, so
+ *   a miss can name its own key names and types
  * @returns {string} the diagnosis
  */
-const describeIdentityMiss = (candidates, challengeId) => {
+const describeIdentityMiss = (candidates, challengeId, collection = null) => {
   const probed = CHALLENGE_IDENTITY_LOCATIONS.map((location) => location.via).join(', ');
+  const collectionShape = isRecordObject(collection)
+    ? `the collection carries [${describeKeyTypes(describeOwnPropertyTypes(collection))}]; `
+    : '';
   const described = candidates
     .filter((entry) => isRecordObject(entry))
     .slice(0, IDENTITY_CANDIDATE_LIMIT)
@@ -4347,7 +4352,7 @@ const describeIdentityMiss = (candidates, challengeId) => {
       return decision.conflict ? `${description} and it names another challenge` : description;
     });
   return (
-    `no proven location holds challenge ${challengeId} (probed ${probed}); ` +
+    `${collectionShape}no proven location holds challenge ${challengeId} (probed ${probed}); ` +
     (described.length === 0 ? 'no candidate carried a readable id' : described.join('; '))
   );
 };
@@ -5487,6 +5492,141 @@ const PANEL_CHALLENGES_KEY_LOCATION = 'panel-argument.challenges[key]';
 const PANEL_CHALLENGES_IDENTITY_LOCATION = 'panel-argument.challenges[identity]';
 
 /**
+ * The two locations the fsl-build/17 live run proved exist below the data
+ * property (#117): the set entity's `challenges` collection holds a candidate
+ * that is itself a map keyed on challenge ids, and the set entity exposes
+ * `getChallenges()`. Both are probed only after the data-property locations
+ * above have missed, and both verify identity with the same shared read.
+ */
+const PANEL_CHALLENGES_NESTED_LOCATION = 'panel-argument.challenges[nested]';
+const PANEL_GET_CHALLENGES_LOCATION = 'panel-argument.getChallenges';
+
+/**
+ * Whether a candidate is itself a map keyed on challenge ids: every own
+ * enumerable key reads as a challenge id and every value is an object. This is
+ * the shape the live set entity carries one level below its own `challenges`
+ * collection (#117), and it is the only shape the nested descent accepts.
+ */
+const isChallengeIdMap = (value) => {
+  if (!isRecordObject(value)) return false;
+  let keys;
+  try {
+    keys = Object.keys(value);
+  } catch {
+    return false;
+  }
+  return (
+    keys.length > 0 &&
+    keys.every((key) => {
+      if (!/^\d+$/.test(key)) return false;
+      try {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        return descriptor !== undefined && isRecordObject(descriptor.value);
+      } catch {
+        return false;
+      }
+    })
+  );
+};
+
+/**
+ * Descends exactly one level into a candidate that is a map keyed on challenge
+ * ids, never more: the live collection's candidate is the map, so a second
+ * descent would be a deep search that no capture proves. The nested entry is
+ * still only a candidate, verified by the same identity read as every other
+ * location, and the record names the outer property so a pasted report says
+ * which map was read.
+ */
+const probeNestedChallenge = (collection, candidates, challengeId) => {
+  const id = PANEL_CHALLENGES_NESTED_LOCATION;
+  if (!isRecordObject(collection)) {
+    return {
+      id,
+      ok: false,
+      reason: 'the collection is not an object, so there is no nested id-keyed map to descend into',
+    };
+  }
+  let outerNames;
+  try {
+    outerNames = Object.keys(collection);
+  } catch {
+    return { id, ok: false, reason: 'the collection own keys are unreadable' };
+  }
+  const refusals = [];
+  const limit = Math.min(candidates.length, outerNames.length);
+  for (let index = 0; index < limit; index += 1) {
+    const outer = outerNames[index];
+    const candidate = candidates[index];
+    if (!isChallengeIdMap(candidate)) continue;
+    const read = readOwnKeyedChallenge(candidate, challengeId);
+    if (!read.ok) {
+      refusals.push(
+        `the map at own key ${outer} ${
+          read.reason === null
+            ? `has no own entry for key ${challengeId}`
+            : `refused key ${challengeId} as ${read.reason}`
+        }`
+      );
+      continue;
+    }
+    const decision = readIdentityDecision(read.value, challengeId);
+    if (!decision.ok) {
+      refusals.push(
+        `the entry at own key ${outer}.${challengeId} ${
+          decision.conflict
+            ? `names ${describeIdentities(namedIdentities(decision.identities))}, not` +
+              ` ${challengeId}: it is another challenge, so it is refused`
+            : `carries ${describeIdentities(decision.identities)}, not ${challengeId}`
+        }`
+      );
+      continue;
+    }
+    return { id, ok: true, reason: null, challenge: read.value };
+  }
+  if (refusals.length > 0) return { id, ok: false, reason: refusals.join('; ') };
+  return {
+    id,
+    ok: false,
+    reason: `no candidate is a map keyed on challenge ids (collection keys [${describeKeyTypes(
+      describeOwnPropertyTypes(collection)
+    )}])`,
+  };
+};
+
+/**
+ * Probes the set entity's own `getChallenges()` (#117). This is deliberately
+ * the one method call this read makes: the reference reads the challenge
+ * entities through this method, and the live set entity exposes it beside the
+ * data property. The call is guarded like every other EA method read — a
+ * missing method, a throw and a non-array answer each keep their own reason —
+ * and every returned entry's identity is verified by the same shared read, so
+ * the method can never hand back a challenge the panel did not name.
+ */
+const probeSetGetChallenges = (set, challengeId) => {
+  const id = PANEL_GET_CHALLENGES_LOCATION;
+  if (!isRecordObject(set)) {
+    return {
+      id,
+      ok: false,
+      reason: `the panel argument is ${describeSubject(set)}, not a set carrying ${SBC_SET_API.getChallenges}()`,
+    };
+  }
+  const read = readSetChallenges(set);
+  if (!read.ok) return { id, ok: false, reason: read.reason };
+  const match = findChallengeByIdentity(read.value, challengeId);
+  if (match.entry === null) {
+    return {
+      id,
+      ok: false,
+      reason:
+        `${SBC_SET_API.getChallenges}() returned ${read.value.length} challenges; ` +
+        describeIdentityMiss(read.value, challengeId),
+    };
+  }
+  return { id, ok: true, reason: null, challenge: match.entry };
+};
+
+/**
  * Reads the own `challenges` entry for `challengeId`, never a prototype key and
  * never through an accessor. A plain `collection[challengeId]` is neither: it
  * walks the prototype chain, so an index-keyed map, a colliding numeric key or
@@ -5573,21 +5713,24 @@ const probeKeyedChallenge = (collection, challengeId) => {
 const locatePanelChallenge = (set, challengeId) => {
   const read = readDataProperty(set, SBC_SET_API.challenges);
   if (!read.ok) {
+    const method = isRecordObject(set) ? probeSetGetChallenges(set, challengeId) : null;
+    const locations = method === null ? [] : [locationOf(method)];
+    if (method !== null && method.ok === true) {
+      return { ok: true, seen: 0, locations, challenge: method.challenge };
+    }
     return {
       ok: false,
       seen: 0,
-      locations: [],
+      locations,
       reason:
-        read.reason === null
+        (read.reason === null
           ? `the panel argument carries no ${SBC_SET_API.challenges} collection`
-          : `the panel argument ${SBC_SET_API.challenges} is ${read.reason}`,
+          : `the panel argument ${SBC_SET_API.challenges} is ${read.reason}`) +
+        (method === null ? '' : ` (${PANEL_GET_CHALLENGES_LOCATION}: ${method.reason})`),
     };
   }
   const collection = read.value;
-  let candidates;
-  if (Array.isArray(collection)) candidates = collection;
-  else if (isRecordObject(collection)) candidates = Object.values(collection);
-  else {
+  if (!Array.isArray(collection) && !isRecordObject(collection)) {
     return {
       ok: false,
       seen: 0,
@@ -5597,6 +5740,7 @@ const locatePanelChallenge = (set, challengeId) => {
         ' not a collection',
     };
   }
+  const candidates = Array.isArray(collection) ? collection : Object.values(collection);
   const seen = candidates.length;
   const keyed = probeKeyedChallenge(collection, challengeId);
   const match = findChallengeByIdentity(candidates, challengeId).entry;
@@ -5606,12 +5750,24 @@ const locatePanelChallenge = (set, challengeId) => {
     {
       id: PANEL_CHALLENGES_IDENTITY_LOCATION,
       ok: match !== null,
-      reason: match === null ? describeIdentityMiss(candidates, challengeId) : null,
+      reason: match === null ? describeIdentityMiss(candidates, challengeId, collection) : null,
     },
   ];
-  // A verified entry is the answer either way; the two locations are recorded
-  // side by side so a report says which one answered and why the other did not.
-  const located = keyed.ok === true ? keyed.challenge : match;
+  // A verified entry is the answer either way; the locations are recorded side
+  // by side so a report says which one answered and why the others did not.
+  let located = keyed.ok === true ? keyed.challenge : match;
+  if (located === null) {
+    const nested = probeNestedChallenge(collection, candidates, challengeId);
+    locations.push(locationOf(nested));
+    located = nested.ok === true ? nested.challenge : null;
+  }
+  // The set method is probed last, only after every data-property location has
+  // missed, so a data property that already answered costs no EA call.
+  if (located === null) {
+    const method = probeSetGetChallenges(set, challengeId);
+    locations.push(locationOf(method));
+    located = method.ok === true ? method.challenge : null;
+  }
   if (located === null) {
     return {
       ok: false,
