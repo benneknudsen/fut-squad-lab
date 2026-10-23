@@ -424,17 +424,58 @@ describe('the observed-criteria diff (#76)', () => {
       },
     ],
   });
+  const storageSearchCall = () => ({
+    method: 'services.Item.searchStorageItems',
+    argumentCount: 1,
+    origin: 'ea',
+    nested: false,
+    thisType: 'object',
+    thisMatchesTarget: true,
+    threw: false,
+    args: [
+      {
+        type: 'object',
+        keys: [
+          { name: 'type', type: 'string', empty: false },
+          { name: 'count', type: 'number' },
+          { name: 'offset', type: 'number' },
+          { name: 'ovrMin', type: 'number' },
+          { name: 'ovrMax', type: 'number' },
+          { name: 'sortBy', type: 'string', empty: false },
+          { name: '_position', type: 'string', empty: false },
+        ],
+        values: {
+          type: 'player',
+          count: 91,
+          offset: 0,
+          ovrMin: 45,
+          ovrMax: 99,
+          sortBy: 'ovr',
+          _position: 'ST',
+        },
+      },
+    ],
+  });
   const ours = [
     { name: 'type', value: 'player' },
     { name: 'count', value: 91 },
     { name: 'start', value: 0 },
+  ];
+  const storageOurs = [
+    { name: 'type', value: 'player' },
+    { name: 'count', value: 91 },
+    { name: 'offset', value: 0 },
+    { name: 'ovrMin', value: 45 },
+    { name: 'ovrMax', value: 99 },
+    { name: 'sortBy', value: 'ovr' },
+    { name: 'searchAltPositions', value: true },
   ];
 
   it('reports EA\u2019s own criteria field by field next to ours, values included', () => {
     const diff = diffClubSearchCriteria({ calls: [observerCall()], dropped: 0 }, ours);
     const byName = Object.fromEntries(diff.fields.map((entry) => [entry.name, entry]));
 
-    expect(diff.observed).toEqual({ callIndex: 0 });
+    expect(diff.observed).toEqual({ callIndex: 0, method: 'services.Club.search' });
     expect(byName.type.status).toBe('same');
     expect(byName.count.status).toBe('same');
     expect(byName.start.status).toBe('same');
@@ -495,6 +536,68 @@ describe('the observed-criteria diff (#76)', () => {
     expect(report).not.toContain('distinctive-persona-987');
     expect(report).not.toContain('<redacted>');
     expect(diff.fields.map((entry) => entry.name)).toEqual(['type', 'count', 'start']);
+  });
+
+  it('compares EA\u2019s own item-list search field by field when it is the only one observed', () => {
+    const diff = diffClubSearchCriteria(
+      { calls: [storageSearchCall()], dropped: 0 },
+      storageOurs
+    );
+    const byName = Object.fromEntries(diff.fields.map((entry) => [entry.name, entry]));
+
+    expect(diff.observed).toEqual({ callIndex: 0, method: 'services.Item.searchStorageItems' });
+    expect(diff.note).toContain('services.Item.searchStorageItems');
+    for (const name of ['offset', 'count', 'ovrMin', 'ovrMax', 'sortBy']) {
+      expect(byName[name].status, `field ${name}`).toBe('same');
+    }
+  });
+
+  it('prefers services.Club.search when both of EA\u2019s own searches were observed', () => {
+    const diff = diffClubSearchCriteria(
+      { calls: [storageSearchCall(), observerCall()], dropped: 0 },
+      ours
+    );
+
+    expect(diff.observed).toEqual({ callIndex: 1, method: 'services.Club.search' });
+  });
+
+  it('ignores a search this extension made and names both EA methods in the note', () => {
+    const call = { ...storageSearchCall(), origin: 'extension' };
+
+    const diff = diffClubSearchCriteria({ calls: [call], dropped: 0 }, ours);
+
+    expect(diff.observed).toBeNull();
+    expect(diff.note).toContain('services.Club.search');
+    expect(diff.note).toContain('services.Item.searchStorageItems');
+    expect(diff.note).not.toMatch(/open the Club screen and let its player list load once/);
+  });
+
+  it('keeps ours-only and observed-only statuses against the item-list search', () => {
+    const diff = diffClubSearchCriteria(
+      { calls: [storageSearchCall()], dropped: 0 },
+      storageOurs
+    );
+    const byName = Object.fromEntries(diff.fields.map((entry) => [entry.name, entry]));
+
+    expect(byName.searchAltPositions).toMatchObject({
+      observed: { present: false },
+      ours: { value: true },
+      status: 'ours-only',
+    });
+    expect(byName.position).toMatchObject({
+      observed: { present: true, value: 'ST' },
+      ours: null,
+      status: 'observed-only',
+    });
+  });
+
+  it('reports the paging verdict as same when both sides page through offset', () => {
+    const diff = diffClubSearchCriteria(
+      { calls: [storageSearchCall()], dropped: 0 },
+      storageOurs
+    );
+
+    expect(diff.paging).toEqual({ observedField: 'offset', ourField: 'offset', same: true });
   });
 });
 

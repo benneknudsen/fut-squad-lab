@@ -3735,8 +3735,17 @@ export async function resolveClubItems(pageWindow, options = {}) {
   };
 }
 
-/** The observer method id whose criteria the #76 diff compares. */
-const OBSERVED_CLUB_SEARCH_METHOD_ID = 'services.Club.search';
+/**
+ * The observer method ids, in preference order, whose criteria the #76 diff
+ * compares. EA's own Club screen searches through
+ * `services.Item.searchStorageItems`, while `services.Club.search` is the
+ * method this build and some EA surfaces call; either is EA's own request and
+ * both carry the same criteria shape.
+ */
+const OBSERVED_CLUB_SEARCH_METHOD_IDS = Object.freeze([
+  'services.Club.search',
+  'services.Item.searchStorageItems',
+]);
 
 /** The paging names the #76 diff recognises on an observed call. */
 const DIFF_PAGING_FIELDS = Object.freeze(['offset', 'start']);
@@ -3762,21 +3771,28 @@ const normalizeCriteriaFieldName = (name) => {
 
 /**
  * Finds the most recent observed call of EA's own club search: a
- * `services.Club.search` call the observer attributed to EA (#64) whose first
- * argument is a criteria object. Later calls win because a later page of EA's
- * own walk carries the most recent state.
+ * `services.Club.search` or `services.Item.searchStorageItems` call the
+ * observer attributed to EA (#64) whose first argument is a criteria object.
+ * Later calls win within a method because a later page of EA's own walk
+ * carries the most recent state; when both methods were observed,
+ * `services.Club.search` is preferred because it is the method this build
+ * uses and the one #76 measured first.
  */
 const findObservedClubSearchCall = (report) => {
   const calls = Array.isArray(report?.calls) ? report.calls : [];
-  let found = null;
+  const foundByMethod = new Map();
   for (let index = 0; index < calls.length; index++) {
     const call = calls[index];
-    if (call?.method !== OBSERVED_CLUB_SEARCH_METHOD_ID) continue;
+    if (!OBSERVED_CLUB_SEARCH_METHOD_IDS.includes(call?.method)) continue;
     if (call.origin !== 'ea') continue;
     if (call.args?.[0]?.type !== 'object') continue;
-    found = { callIndex: index, call };
+    foundByMethod.set(call.method, { callIndex: index, call, method: call.method });
   }
-  return found;
+  for (const method of OBSERVED_CLUB_SEARCH_METHOD_IDS) {
+    const found = foundByMethod.get(method);
+    if (found !== undefined) return found;
+  }
+  return null;
 };
 
 /**
@@ -3831,8 +3847,9 @@ const criteriaFieldStatus = (observed, our, hasObservedValue) => {
 };
 
 /**
- * The field-by-field diff between how EA's own UI called
- * `services.Club.search` in this session and the criteria fields this project
+ * The field-by-field diff between how EA's own UI searched the club in this
+ * session — through `services.Club.search` or
+ * `services.Item.searchStorageItems` — and the criteria fields this project
  * handed over (#76). It reports, per public field name, EA's observed type and
  * allowlisted primitive value next to ours, a `status` (`same`, `different`,
  * `uncompared`, `ours-only`, `observed-only`), and a dedicated `paging` verdict
@@ -3843,15 +3860,15 @@ const criteriaFieldStatus = (observed, our, hasObservedValue) => {
  * The observer's captures are content-controlled by construction (see
  * `OBSERVED_CRITERIA_VALUE_FIELDS`), and this function re-applies that same
  * allowlist, so a report built from anything else still cannot carry a value
- * outside it. A session in which EA's own club search never ran has no
- * observed side: `observed` is null and `note` names the screen to open so the
- * next Solve has the measurement.
+ * outside it. A session in which neither of EA's own searches ran has no
+ * observed side: `observed` is null and `note` names both methods and the
+ * screen to open so the next Solve has the measurement.
  *
  * @param {{ calls: Array<object> }|null} observerReport the `#64` observer
  *   report carried by the diagnostics
  * @param {Array<{ name: string, value: * }>} [ourFields] the criteria fields
  *   this build handed over, from the club stage's `setFields`
- * @returns {{ observed: { callIndex: number }|null,
+ * @returns {{ observed: { callIndex: number, method: string }|null,
  *   ours: Array<{ name: string, value: * }>,
  *   fields: Array<{ name: string,
  *     observed: { present: boolean, type?: string, value?: * },
@@ -3897,25 +3914,31 @@ export function diffClubSearchCriteria(observerReport, ourFields = []) {
   const ourField = ourPaging.length === 1 ? ourPaging[0] : null;
   const paging = { observedField, ourField, same: observedField !== null && observedField === ourField };
 
+  const method = found === null ? null : found.method;
   let note = null;
   if (found === null) {
     note =
-      "EA's own services.Club.search was not observed in this session, so there is no observed" +
-      ' criteria to compare against; open the Club screen and let its player list load once' +
-      ' before pressing Solve, so the next diagnostic carries EA\u2019s own criteria.';
+      "neither EA's own services.Club.search nor services.Item.searchStorageItems was observed" +
+      ' in this session, so there is no observed criteria to compare against; open a screen that' +
+      ' loads the club or the item list once before pressing Solve, so the next diagnostic' +
+      ' carries EA\u2019s own criteria.';
   } else if (observedPaging.length === 0) {
     note =
-      'the observed criteria carried no own paging field, so the paging field stays unresolved;' +
-      ` this build handed over ${ourPaging.join('/') || 'no paging field'}, decided by the` +
-      " criteria object's own shape or the capture.";
+      `the observed criteria from ${method} carried no own paging field, so the paging field` +
+      ` stays unresolved; this build handed over ${ourPaging.join('/') || 'no paging field'},` +
+      " decided by the criteria object's own shape or the capture.";
   } else if (!paging.same) {
     note =
-      `the observed criteria carried ${observedPaging.join('/')} while this build handed over` +
-      ` ${ourPaging.join('/') || 'no paging field'}; the paging field is not resolved from the` +
-      ' observation and the next build must follow it.';
+      `the observed criteria from ${method} carried ${observedPaging.join('/')} while this` +
+      ` build handed over ${ourPaging.join('/') || 'no paging field'}; the paging field is not` +
+      ' resolved from the observation and the next build must follow it.';
+  } else if (method === 'services.Item.searchStorageItems') {
+    note =
+      "EA's own search was observed through services.Item.searchStorageItems, which is the" +
+      " search the item list uses; the criteria below are EA's own.";
   }
   return {
-    observed: found === null ? null : { callIndex: found.callIndex },
+    observed: found === null ? null : { callIndex: found.callIndex, method },
     ours,
     fields,
     paging,
