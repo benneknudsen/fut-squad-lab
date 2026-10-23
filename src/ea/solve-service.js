@@ -87,6 +87,22 @@ const describeAttempts = (attempts) =>
     ? 'no candidate was tried'
     : attempts.map((attempt) => `${attempt.id}: ${attempt.reason}`).join('; ');
 
+/**
+ * The position-name resolver's paste-safe provenance (#115): the source name,
+ * the number of codes the data provider named, and the numeric codes the
+ * resolver could not name. No item value is carried.
+ */
+const summarizePositionNames = (resolver) => {
+  if (resolver === null || typeof resolver !== 'object') return null;
+  return {
+    source: typeof resolver.source === 'string' ? resolver.source : null,
+    size: Number.isFinite(resolver.size) ? resolver.size : 0,
+    unnamed: Array.isArray(resolver.unnamed)
+      ? [...new Set(resolver.unnamed.filter(Number.isFinite))].sort((left, right) => left - right)
+      : [],
+  };
+};
+
 const summarizeCostCoverage = (coverage) => ({
   known: Number.isFinite(coverage?.known) ? coverage.known : 0,
   unknown: Number.isFinite(coverage?.unknown) ? coverage.unknown : 0,
@@ -270,6 +286,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
         try {
           clubRecords = readClubItemsFn(clubResult.items, {
             pageItems: clubResult.pageItems ?? null,
+            positionNames: clubResult.positionNames,
           });
         } catch (error) {
           // A payload that arrived but an item that cannot be translated (#74):
@@ -308,12 +325,18 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
         // array field, page, page item count and offending index. Null unless
         // an item was rejected.
         clubRead: clubReadError?.clubRead ?? null,
+        // Which EA source named the observable position codes (#115), how many
+        // codes it knew and which it could not name. Null when the injected
+        // read did not build a resolver.
+        positionNames: summarizePositionNames(clubResult.positionNames),
         // Which layer the items were in and where every value of the first one
         // was read from (#115). Reported on success too: a normal run is exactly
         // when this build wants proof it read the right field names.
         itemLayer:
           clubResult.ok === true && Array.isArray(clubResult.items) && clubResult.items.length > 0
-            ? clubItemSources(clubResult.items[0])
+            ? clubItemSources(clubResult.items[0], {
+                positionNames: clubResult.positionNames,
+              })
             : null,
         // The shape report runs on failure only: a read that answered
         // carries none (#44). A shape failure is a recorded reason, never a

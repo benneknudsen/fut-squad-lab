@@ -725,6 +725,130 @@ const isNonEmptyString = (value) => typeof value === 'string' && value.length > 
 const isBoolean = (value) => typeof value === 'boolean';
 
 /**
+ * The EA globals and methods that name a position code (#115). Both names are
+ * EA's own and live only here: the rest of this project asks the resolver this
+ * factory returns. `UTLocalizationUtil.positionIdToName` is EA's localiser and
+ * is tried first; `factories.DataProvider.getPlayerPositionDP()` is its player
+ * position data provider, an array of entries carrying `id` plus `label`/`name`.
+ * The table below is never a decoding table of our own — an unavailable or
+ * unhelpful source yields no name, never a guessed letter.
+ */
+const POSITION_NAME_SOURCES = Object.freeze({
+  localization: 'UTLocalizationUtil',
+  localizationMethod: 'positionIdToName',
+  factories: 'factories',
+  dataProvider: 'DataProvider',
+  dataProviderMethod: 'getPlayerPositionDP',
+});
+
+const POSITION_NAME_SOURCE_IDS = Object.freeze({
+  localization: `${POSITION_NAME_SOURCES.localization}.${POSITION_NAME_SOURCES.localizationMethod}`,
+  dataProvider: `${POSITION_NAME_SOURCES.dataProvider}.${POSITION_NAME_SOURCES.dataProviderMethod}`,
+});
+
+const isSourceContainer = (value) =>
+  value !== null && (typeof value === 'object' || typeof value === 'function');
+
+const readSourceMethod = (owner, name) => {
+  const read = readDataProperty(owner, name);
+  return read.ok && typeof read.value === 'function' ? read.value : null;
+};
+
+/**
+ * Builds the read-only position-name resolver from EA's own page objects
+ * (#115). It tries `UTLocalizationUtil.positionIdToName(id, ctx)` first, and
+ * falls back to the id -> `label`/`name` map built once from
+ * `factories.DataProvider.getPlayerPositionDP()`.
+ *
+ * The resolver only reads: it never writes to an EA object and never invokes an
+ * accessor. Missing sources, a throwing localiser or an unnameable entry leave
+ * the code unnamed, which the normaliser reports loudly instead of guessing.
+ * `size` is the number of codes the data provider named (0 when it does not
+ * exist); `unnamed` is every code the resolver was asked about and could not
+ * name.
+ *
+ * @param {object|undefined} pageWindow the page's `window`
+ * @returns {{ resolve: (code: number) => string|null, source: string|null,
+ *   size: number, unnamed: Array<number> }}
+ */
+export function createPositionNameResolver(pageWindow) {
+  const localizationOwner = readDataProperty(pageWindow, POSITION_NAME_SOURCES.localization);
+  const localizationMethod =
+    localizationOwner.ok && isSourceContainer(localizationOwner.value)
+      ? readSourceMethod(localizationOwner.value, POSITION_NAME_SOURCES.localizationMethod)
+      : null;
+
+  const lookup = new Map();
+  const factories = readDataProperty(pageWindow, POSITION_NAME_SOURCES.factories);
+  const dataProvider =
+    factories.ok && isSourceContainer(factories.value)
+      ? readDataProperty(factories.value, POSITION_NAME_SOURCES.dataProvider)
+      : { ok: false, reason: null };
+  const dataProviderMethod =
+    dataProvider.ok && isSourceContainer(dataProvider.value)
+      ? readSourceMethod(dataProvider.value, POSITION_NAME_SOURCES.dataProviderMethod)
+      : null;
+  if (dataProviderMethod !== null) {
+    let entries = null;
+    try {
+      entries = dataProviderMethod.call(dataProvider.value);
+    } catch {
+      entries = null;
+    }
+    if (Array.isArray(entries)) {
+      for (const entry of entries) {
+        if (!isRecordObject(entry)) continue;
+        const id = readDataProperty(entry, 'id');
+        if (!id.ok || !Number.isFinite(id.value)) continue;
+        const label = readDataProperty(entry, 'label');
+        const name = readDataProperty(entry, 'name');
+        const value =
+          label.ok && isNonEmptyString(label.value)
+            ? label.value
+            : name.ok && isNonEmptyString(name.value)
+              ? name.value
+              : null;
+        if (value !== null) lookup.set(id.value, value);
+      }
+    }
+  }
+
+  const source =
+    localizationMethod !== null
+      ? POSITION_NAME_SOURCE_IDS.localization
+      : lookup.size > 0
+        ? POSITION_NAME_SOURCE_IDS.dataProvider
+        : null;
+  const unnamed = new Set();
+
+  const resolve = (code) => {
+    if (!Number.isFinite(code)) return null;
+    if (localizationMethod !== null) {
+      try {
+        const name = localizationMethod.call(localizationOwner.value, code, undefined);
+        if (isNonEmptyString(name)) return name;
+      } catch {
+        // The localiser may not know the code or may be unavailable mid-run;
+        // the data provider map is the fallback, and a miss is named below.
+      }
+    }
+    const name = lookup.get(code);
+    if (isNonEmptyString(name)) return name;
+    unnamed.add(code);
+    return null;
+  };
+
+  return Object.freeze({
+    resolve,
+    source,
+    size: lookup.size,
+    get unnamed() {
+      return [...unnamed].sort((left, right) => left - right);
+    },
+  });
+}
+
+/**
  * `Array.prototype.every` skips holes, so a sparse list like
  * `['ST', , 'CAM']` would pass an element check vacuously and spread an
  * `undefined` into the stable record. Reject holes before checking elements.
@@ -892,13 +1016,15 @@ const readRoleList = (rawItem, field) => {
  * @throws {Error} when the raw item lacks a required field or carries one of
  *   the wrong type
  */
-export function normaliseClubItem(rawItem) {
+export function normaliseClubItem(rawItem, options = {}) {
   if (rawItem === null || typeof rawItem !== 'object' || Array.isArray(rawItem)) {
     throw new Error(
       'normaliseClubItem: raw item must be an object; the /club payload shape may have changed'
     );
   }
-  if (isObservableClubItem(rawItem)) return normaliseObservableClubItem(rawItem);
+  if (isObservableClubItem(rawItem)) {
+    return normaliseObservableClubItem(rawItem, options?.positionNames);
+  }
   for (const field of RAW_ITEM_NUMBER_FIELDS) {
     requireRawField(rawItem, field, Number.isFinite, `a finite ${field}`);
   }
@@ -1279,6 +1405,50 @@ const acceptedPosition = (label, value) =>
       };
 
 /**
+ * The injected resolver when it really can name a code (#115). A resolver
+ * without a live source does not answer: the numeric position then falls
+ * through to the string locations exactly as before. That keeps a page where
+ * EA exposes neither source on the #111 path, while a resolver that *does*
+ * answer and misses a code is a loud refusal.
+ */
+const usablePositionNames = (positionNames) =>
+  positionNames !== null &&
+  typeof positionNames === 'object' &&
+  typeof positionNames.resolve === 'function' &&
+  isNonEmptyString(positionNames.source)
+    ? positionNames
+    : null;
+
+/** Names one numeric code through the resolver, or says why it cannot. */
+const resolvePositionCode = (candidate, code, positionNames) => {
+  const name = positionNames.resolve(code);
+  if (!isNonEmptyString(name)) {
+    return {
+      ok: false,
+      refused: true,
+      reason:
+        `${candidate.label} is the number ${code} and ${positionNames.source} answered no position` +
+        ' name; refusing to guess one',
+    };
+  }
+  if (!FORMATION_POSITIONS.has(name)) {
+    return {
+      ok: false,
+      refused: true,
+      reason:
+        `${candidate.label} is the number ${code} and ${positionNames.source} answered` +
+        ` ${JSON.stringify(name)}, which is not one of the accepted positions` +
+        ` (${ACCEPTED_POSITION_LIST})`,
+    };
+  }
+  return {
+    ok: true,
+    value: name,
+    from: `${candidate.label}(resolved:${positionNames.source})`,
+  };
+};
+
+/**
  * Takes the position out of one probed candidate and validates it.
  *
  * `value` takes the probed value itself, `first` the first element of a
@@ -1295,24 +1465,43 @@ const acceptedPosition = (label, value) =>
  * @param {{ path: string, label: string, take?: string }} candidate the probe
  *   that was tried, as the source table spells it
  * @param {*} probed the value that location carried
- * @returns {{ ok: boolean, value?: *, reason?: string, refused?: boolean }} the
- *   taken position, or why this candidate cannot answer
+ * @param {object|null} names the injected position-name resolver when it has a
+ *   live EA source, else null
+ * @returns {{ ok: boolean, value?: *, from?: string, reason?: string,
+ *   refused?: boolean }} the taken position and the provenance it is credited
+ *   with, or why this candidate cannot answer
  */
-const takePosition = (candidate, probed) => {
+const takePosition = (candidate, probed, names) => {
   const take = candidate.take ?? 'value';
   if (take === 'value') {
+    if (Number.isFinite(probed) && names !== null) {
+      return resolvePositionCode(candidate, probed, names);
+    }
     if (!isNonEmptyString(probed)) {
       return {
         ok: false,
-        reason:
-          typeof probed === 'number' && Number.isFinite(probed)
-            ? `${candidate.label} is the number ${probed}, not a position string`
-            : `${candidate.label} is ${describeValue(probed)}, not a position string`,
+        reason: Number.isFinite(probed)
+          ? `${candidate.label} is the number ${probed}, not a position string`
+          : `${candidate.label} is ${describeValue(probed)}, not a position string`,
       };
     }
     return acceptedPosition(candidate.label, probed);
   }
   if (!isStringArray(probed) || probed.length === 0) {
+    if (names !== null && isFiniteNumberArray(probed) && probed.length > 0) {
+      if (take === 'first') return resolvePositionCode(candidate, probed[0], names);
+      const resolved = [];
+      for (const code of probed) {
+        const named = resolvePositionCode(candidate, code, names);
+        if (!named.ok) return named;
+        resolved.push(named.value);
+      }
+      return {
+        ok: true,
+        value: resolved,
+        from: `${candidate.label}(resolved:${names.source})`,
+      };
+    }
     return {
       ok: false,
       reason: `${candidate.label} is ${describeValue(probed)}, not a non-empty array of position strings`,
@@ -1346,24 +1535,27 @@ const takePosition = (candidate, probed) => {
  *
  * @param {object} rawItem one item from EA's observable club response
  * @param {object} source the source-table entry for the field
+ * @param {object|undefined} positionNames the injected position-name resolver
  * @returns {{ ok: boolean, value?: *, from?: string|null, probes: Array<object> }}
  */
-const resolvePositionField = (rawItem, source) => {
+const resolvePositionField = (rawItem, source, positionNames) => {
   const probes = [];
+  const names = usablePositionNames(positionNames);
   for (const candidate of source.paths) {
     const probed = probeObservablePath(rawItem, candidate);
     if (!probed.ok) {
       probes.push({ id: probed.id, ok: false, reason: probed.reason });
       continue;
     }
-    const taken = takePosition(candidate, probed.value);
+    const taken = takePosition(candidate, probed.value, names);
     if (!taken.ok) {
       probes.push({ id: probed.id, ok: false, reason: taken.reason });
       if (taken.refused === true) return { ok: false, from: null, probes, refused: true };
       continue;
     }
-    probes.push({ id: probed.id, ok: true, reason: null, value: taken.value });
-    return { ok: true, value: taken.value, from: probed.id, probes };
+    const from = taken.from ?? probed.id;
+    probes.push({ id: from, ok: true, reason: null, value: taken.value });
+    return { ok: true, value: taken.value, from, probes };
   }
   return { ok: false, from: null, probes, unresolved: true };
 };
@@ -1385,9 +1577,9 @@ const resolvePositionField = (rawItem, source) => {
  *
  * @returns {{ ok: boolean, value?: *, from?: string|null, probes: Array<object> }}
  */
-const resolveObservableField = (rawItem, source) => {
+const resolveObservableField = (rawItem, source, positionNames) => {
   if (source.kind === 'position' || source.kind === 'positions') {
-    return resolvePositionField(rawItem, source);
+    return resolvePositionField(rawItem, source, positionNames);
   }
   const isValid = KIND_PREDICATES[source.kind];
   const probes = source.paths.map((candidate) => {
@@ -1486,11 +1678,11 @@ const rejectedObservableItemError = (rawItem, source, resolved, subLayers) => {
  * @throws {Error} when a required field resolves from no probe, or from probes
  *   that disagree
  */
-const normaliseObservableClubItem = (rawItem) => {
+const normaliseObservableClubItem = (rawItem, positionNames) => {
   const subLayers = describeObservableSubLayers(rawItem);
   const record = {};
   for (const source of CLUB_ITEM_SOURCES) {
-    const resolved = resolveObservableField(rawItem, source);
+    const resolved = resolveObservableField(rawItem, source, positionNames);
     if (!resolved.ok) {
       throw rejectedObservableItemError(rawItem, source, resolved, subLayers);
     }
@@ -1514,14 +1706,15 @@ const normaliseObservableClubItem = (rawItem) => {
  *   probes: Array<{field: string, id: string, ok: boolean, reason: string|null}>,
  *   subLayers: Record<string, {keys: Array<{name: string, type: string}>}> }}
  */
-export function clubItemSources(rawItem) {
+export function clubItemSources(rawItem, options = {}) {
+  const positionNames = options?.positionNames;
   if (!isObservableClubItem(rawItem)) {
     return { layer: CLUB_ITEM_LAYERS.WIRE, fields: {}, probes: [], subLayers: {} };
   }
   const fields = {};
   const probes = [];
   for (const source of CLUB_ITEM_SOURCES) {
-    const resolved = resolveObservableField(rawItem, source);
+    const resolved = resolveObservableField(rawItem, source, positionNames);
     fields[source.field] = resolved.from ?? null;
     if (source.paths.length > 1) {
       probes.push(
@@ -3422,6 +3615,10 @@ export async function resolveClubItems(pageWindow, options = {}) {
   const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
   const pacer = resolvePacer(options);
   const onlyUntradeables = options.onlyUntradeables === true;
+  // One resolver per run, built from the page window the read already has.
+  // It is reported on every outcome so the club stage can show whether EA's own
+  // position-name source was present.
+  const positionNames = createPositionNameResolver(pageWindow);
   const attempts = [];
   let criteriaResolution = null;
   const resolveCriteriaOnce = () => {
@@ -3467,6 +3664,7 @@ export async function resolveClubItems(pageWindow, options = {}) {
         return {
           ok: true,
           items: search.items,
+          positionNames,
           strategy: strategy.id,
           attempts,
           pages: search.pages,
@@ -3509,6 +3707,7 @@ export async function resolveClubItems(pageWindow, options = {}) {
     return {
       ok: true,
       items,
+      positionNames,
       strategy: strategy.id,
       attempts,
       pages: 1,
@@ -3523,6 +3722,7 @@ export async function resolveClubItems(pageWindow, options = {}) {
   return {
     ok: false,
     items: [],
+    positionNames,
     strategy: null,
     attempts,
     pages: 0,
