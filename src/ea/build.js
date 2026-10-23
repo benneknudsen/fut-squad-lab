@@ -148,8 +148,16 @@ import {
  *   after every data-property location misses, guarded, and recorded as its own
  *   location. Both locations appear in `attempts[].locations`, and a miss names
  *   the collection's own key names and types.
+ *
+ * Incremented by fsl-build/21, one defect from the `fsl-build/17` live run: the
+ *   observed-criteria diff only looked for `services.Club.search`, so EA's own
+ *   Club screen searches through `services.Item.searchStorageItems` were
+ *   ignored and the diff always lacked an observed side. The diff now measures
+ *   either EA search, prefers `services.Club.search` when both were observed,
+ *   and reports which method answered, so a live report says what EA itself
+ *   sent even when the extension never called that method.
  */
-export const BUILD_ID = 'fsl-build/20';
+export const BUILD_ID = 'fsl-build/21';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact

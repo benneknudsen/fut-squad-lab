@@ -1253,7 +1253,55 @@ describe('the page bridge exposes one documented diagnostic global', () => {
     // search was never observed in this session.
     expect(report.criteriaDiff).not.toBeUndefined();
     expect(report.criteriaDiff.observed).toBeNull();
-    expect(report.criteriaDiff.note).toMatch(/Club/);
+    expect(report.criteriaDiff.note).toMatch(/services\.Club\.search/);
+    expect(report.criteriaDiff.note).toMatch(/services\.Item\.searchStorageItems/);
+  });
+
+  // #119: EA's own Club screen search is `services.Item.searchStorageItems`,
+  // not `services.Club.search`; the diff must measure whichever one EA ran.
+  it('measures EA\u2019s own item-list search when services.Club.search was never observed', async () => {
+    const { pageWindow, view, dispatchMessage } = createDiagnosticsWindow();
+    pageWindow.services.Item = {
+      searchStorageItems: vi.fn(() => ({ observe: () => ({ unobserve() {} }) })),
+    };
+    startPageBridge(pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, pacer: createTestPacer() });
+    dispatchMessage(COPY_MESSAGE);
+
+    // The observer classifies a caller by its innermost stack frame; a frame
+    // carrying EA's origin makes this call read as EA's own, which is the
+    // situation this test measures.
+    const callAsEa = new Function(
+      'method',
+      'argument',
+      'method(argument);\n//# sourceURL=https://www.ea.com/fc27/club.js'
+    );
+    callAsEa(pageWindow.services.Item.searchStorageItems, {
+      type: 'player',
+      count: 91,
+      offset: 0,
+      ovrMin: 45,
+      ovrMax: 99,
+      sortBy: 'ovr',
+    });
+
+    const controller = new pageWindow.UTSBCSquadDetailPanelViewController();
+    controller.initWithSBCSet({ ...challengeFixture, squad: challengeSquadFixture.squad });
+    mountedButton(view).click();
+
+    await vi.waitFor(() => {
+      expect(pageWindow.__FSL_DIAGNOSE__()).not.toBeNull();
+    });
+
+    const diff = pageWindow.__FSL_DIAGNOSE__().criteriaDiff;
+    const names = diff.fields.map((entry) => entry.name);
+    expect(diff.observed).toEqual({
+      callIndex: expect.any(Number),
+      method: 'services.Item.searchStorageItems',
+    });
+    expect(names).toEqual(
+      expect.arrayContaining(['offset', 'count', 'ovrMin', 'ovrMax', 'sortBy'])
+    );
+    expect(diff.note).toContain('services.Item.searchStorageItems');
   });
 });
 
@@ -1303,7 +1351,7 @@ describe('the page bridge writes the evidence file only for a failed Solve', () 
     expect(report.stoppedAt).toBe('club');
     expect(report.download).toEqual({
       ok: true,
-      file: expect.stringMatching(/^fsl-diagnostics-fsl-build-20-\d{4}-\d{2}-\d{2}\.json$/),
+      file: expect.stringMatching(/^fsl-diagnostics-fsl-build-21-\d{4}-\d{2}-\d{2}\.json$/),
     });
     expect(report.download.file).not.toContain('T');
 
@@ -1381,7 +1429,7 @@ describe('the page bridge writes the evidence file only for a failed Solve', () 
     const club = report.stages.find((stage) => stage.id === 'club');
     const challenge = report.stages.find((stage) => stage.id === 'challenge');
 
-    expect(report.build.id).toBe('fsl-build/20');
+    expect(report.build.id).toBe('fsl-build/21');
     expect(challenge.detail.challengeId).toBe(25);
     expect(club.detail).toMatchObject({
       field: 'items',
