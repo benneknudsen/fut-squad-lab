@@ -52,10 +52,10 @@ const describeCarriedAlternatives = (response) => {
  * trustworthy: the item that threw during `normaliseClub` is the item this scan
  * finds, because both call the same function.
  */
-const findOffendingIndex = (items) => {
+const findOffendingIndex = (items, options) => {
   for (let index = 0; index < items.length; index++) {
     try {
-      normaliseClubItem(items[index]);
+      normaliseClubItem(items[index], options);
     } catch {
       return index;
     }
@@ -87,9 +87,9 @@ const locateInPages = (pageItems, index) => {
  * rejection is located: an array-level failure (a sparse list) has no offending
  * item and is rethrown unchanged. The original error stays as `cause`.
  */
-const enrichNormalisationError = (error, items, pageItems) => {
+const enrichNormalisationError = (error, items, pageItems, positionNames) => {
   if (error?.rawItemShape === undefined) return error;
-  const index = findOffendingIndex(items);
+  const index = findOffendingIndex(items, { positionNames });
   if (index === -1) return error;
   const location = locateInPages(pageItems, index);
   const where =
@@ -116,6 +116,14 @@ const enrichNormalisationError = (error, items, pageItems) => {
     probes: error.rawItemShape.probes ?? [],
     subLayers: error.rawItemShape.subLayers ?? {},
   };
+  if (positionNames !== undefined) {
+    const unnamed = [...new Set((positionNames?.unnamed ?? []).filter(Number.isFinite))];
+    enriched.clubRead.positionNames = {
+      source: positionNames?.source ?? null,
+      size: Number.isFinite(positionNames?.size) ? positionNames.size : 0,
+      unnamed: unnamed.sort((left, right) => left - right),
+    };
+  }
   enriched.cause = error;
   return enriched;
 };
@@ -141,8 +149,13 @@ export function readClubItems(response, options = {}) {
     );
   }
   try {
-    return normaliseClub(items);
+    return normaliseClub(items, options);
   } catch (error) {
-    throw enrichNormalisationError(error, items, options?.pageItems ?? null);
+    throw enrichNormalisationError(
+      error,
+      items,
+      options?.pageItems ?? null,
+      options?.positionNames
+    );
   }
 }

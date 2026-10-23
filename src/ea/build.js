@@ -130,8 +130,17 @@ import {
  *   one level down in `data`/`challengeData`, the bridge and the reader accept
  *   both identity and operation spellings, and an undecodable requirement entry
  *   reports its own key names and types so the next live run can name its shape.
+ *
+ * Incremented by fsl-build/19, one defect from the `fsl-build/17` live run: the
+ *   observable club item carries its position as a numeric code and its
+ *   `possiblePositions` as an accessor. The position is now named through EA's
+ *   own sources — `UTLocalizationUtil.positionIdToName`, then
+ *   `DataProvider.getPlayerPositionDP` — and never through a table of ours. A
+ *   code no source can name is refused loudly, the accessor is still never
+ *   invoked, and the club stage reports the resolver's source, size and unnamed
+ *   codes.
  */
-export const BUILD_ID = 'fsl-build/18';
+export const BUILD_ID = 'fsl-build/19';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact

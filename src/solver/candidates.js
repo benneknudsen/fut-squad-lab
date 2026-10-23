@@ -181,13 +181,16 @@ const requireDenseArray = (values, label) => {
  * are the duplicates; see the header.
  *
  * @param {Array<object>} rawItems items from the `/club` response
+ * @param {{ positionNames?: object }} [options] forwarded unchanged to the
+ *   adapter's `normaliseClubItem`; the resolver stays an argument so this module
+ *   remains pure
  * @returns {Array<object>} stable records, plus `duplicate`
  */
-export function normaliseClub(rawItems) {
+export function normaliseClub(rawItems, options = {}) {
   requireDenseArray(rawItems, 'normaliseClub: raw club items');
   const seenAssetIds = new Set();
   return rawItems.map((rawItem) => {
-    const record = normaliseClubItem(rawItem);
+    const record = normaliseClubItem(rawItem, options);
     const duplicate = seenAssetIds.has(record.assetId);
     seenAssetIds.add(record.assetId);
     return { ...record, duplicate };
