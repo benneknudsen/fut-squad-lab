@@ -156,8 +156,23 @@ import {
  *   either EA search, prefers `services.Club.search` when both were observed,
  *   and reports which method answered, so a live report says what EA itself
  *   sent even when the extension never called that method.
+ *
+ * Incremented by fsl-build/22, two defects from the `fsl-build/21` live run:
+ *   1. the live requirement entry is `{ scope, count, kvPairs }` — not a wire
+ *      row. The reader now expands each entry through EA's own key table into
+ *      one row per kv pair plus a `SCOPE` row, reading the pairs as arrays,
+ *      `{key, value}` objects or a collection object's own `_collection`
+ *      without invoking a getter. A key the table cannot name and a `kvPairs`
+ *      value in no documented shape fail naming the entry's keys, the pair
+ *      names and value types, `scope` and `count`;
+ *   2. the observable item's `_basePlusPlusRoles` can hold an object instead of
+ *      a role id, which rejected the whole club read for a list nothing
+ *      measures. A present-but-unreadable role list now normalises to `[]` and
+ *      is reported with its field, location, element types and object keys on
+ *      `clubRead` / `itemLayer`, so the club read proceeds and the next
+ *      diagnostic names the shape.
  */
-export const BUILD_ID = 'fsl-build/21';
+export const BUILD_ID = 'fsl-build/22';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact

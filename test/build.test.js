@@ -33,8 +33,8 @@ describe('the build marker', () => {
     expect(marker.readers.squad).toEqual(CHALLENGE_SQUAD_STRATEGIES.map((entry) => entry.id));
   });
 
-  it('states the fsl-build/21 marker and compiles the challenge-load chain into the marker', () => {
-    expect(BUILD_ID).toBe('fsl-build/21');
+  it('states the fsl-build/22 marker and compiles the challenge-load chain into the marker', () => {
+    expect(BUILD_ID).toBe('fsl-build/22');
     expect(buildMarker().readers.challengeLoad).toEqual(
       CHALLENGE_LOAD_STRATEGIES.map((entry) => entry.id)
     );

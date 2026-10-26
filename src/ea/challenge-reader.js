@@ -32,6 +32,9 @@ import {
   CHALLENGE_FIELDS,
   CHALLENGE_IDENTITY_PROPERTIES,
   CHALLENGE_OPERATION_PROPERTIES,
+  carriesLiveRequirementEntry,
+  expandLiveRequirementEntry,
+  readEligibilityKeys,
   resolveChallengeRequirements,
 } from './adapter.js';
 import { describeOwnPropertyTypes } from '../shape.js';
@@ -89,12 +92,50 @@ const readRequirement = (entry, index) => {
       fail(`${CHALLENGE_FIELDS.requirements}[${index}] must carry an integer ${field}; ${carried}`);
     }
   }
-  return {
+  if (entry.count !== undefined && (!Number.isInteger(entry.count) || entry.count < -1)) {
+    fail(`${CHALLENGE_FIELDS.requirements}[${index}] must carry an integer count of -1 or more; ${carried}`);
+  }
+  const row = {
     type: entry.type,
     eligibilitySlot: entry.eligibilitySlot,
     eligibilityKey: entry.eligibilityKey,
     eligibilityValue: entry.eligibilityValue,
   };
+  if (entry.count !== undefined) row.count = entry.count;
+  return row;
+};
+
+/**
+ * Turns the requirements array into the wire rows the decoder consumes. A live
+ * entity entry (`{ scope, count, kvPairs }`) is expanded through the adapter,
+ * which names every key through EA's own key table; wire rows pass through
+ * unchanged. The live key table is read at most once, and only when a live
+ * entry is present, so the wire path never touches the page (#121).
+ */
+const readRequirementRows = (entries, options) => {
+  let eligibilityKeys = options?.eligibilityKeys ?? null;
+  return entries.flatMap((entry, index) => {
+    if (!carriesLiveRequirementEntry(entry)) return [entry];
+    if (eligibilityKeys === null) {
+      try {
+        eligibilityKeys = readEligibilityKeys(options?.pageWindow);
+      } catch (error) {
+        fail(error.message);
+      }
+    }
+    const keyTable = eligibilityKeys?.keys;
+    if (keyTable === null || typeof keyTable !== 'object' || Array.isArray(keyTable)) {
+      fail(
+        'the live requirement entry needs the eligibility key table from' +
+          ' readEligibilityKeys()/SBCEligibilityKey; refusing to decode without it'
+      );
+    }
+    try {
+      return expandLiveRequirementEntry(entry, index, keyTable);
+    } catch (error) {
+      fail(error.message);
+    }
+  });
 };
 
 /**
@@ -105,7 +146,7 @@ const readRequirement = (entry, index) => {
  * @throws {Error} when the payload is not an object, lacks a required field,
  *   or carries no requirements array in any documented location
  */
-export function readChallenge(payload) {
+export function readChallenge(payload, options = {}) {
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
     fail('challenge payload must be an object; the live panel argument may have changed shape');
   }
@@ -133,7 +174,7 @@ export function readChallenge(payload) {
     name: requireNonEmptyString(payload, CHALLENGE_FIELDS.name),
     formation: requireNonEmptyString(payload, CHALLENGE_FIELDS.formation),
     elgOperation: operation.value,
-    elgReq: resolved.requirements.map(readRequirement),
+    elgReq: readRequirementRows(resolved.requirements, options).map(readRequirement),
     identityFrom: identity.from,
     operationFrom: operation.from,
     requirementsFrom: resolved.source,

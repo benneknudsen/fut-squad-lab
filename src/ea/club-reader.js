@@ -33,6 +33,7 @@ import {
   CLUB_ITEM_ARRAY_ALTERNATIVES,
   CLUB_ITEM_ARRAY_FIELD,
   CLUB_ITEM_LAYERS,
+  clubItemSources,
   normaliseClubItem,
 } from './adapter.js';
 import { normaliseClub } from '../solver/candidates.js';
@@ -116,6 +117,8 @@ const enrichNormalisationError = (error, items, pageItems, positionNames) => {
     probes: error.rawItemShape.probes ?? [],
     subLayers: error.rawItemShape.subLayers ?? {},
   };
+  const unreadableRoles = clubItemSources(items[index], { positionNames }).unreadable ?? [];
+  if (unreadableRoles.length > 0) enriched.clubRead.unreadableRoles = unreadableRoles;
   if (positionNames !== undefined) {
     const unnamed = [...new Set((positionNames?.unnamed ?? []).filter(Number.isFinite))];
     enriched.clubRead.positionNames = {

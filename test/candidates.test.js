@@ -307,22 +307,17 @@ describe('special-card role lists', () => {
   );
 
   it.each([
-    ['a non-list plusRoles', { plusRoles: 31 }, /normaliseClubItem.*plusRoles/],
-    ['a non-list plusPlusRoles', { plusPlusRoles: 31 }, /normaliseClubItem.*plusPlusRoles/],
-    ['a non-numeric plusRoles entry', { plusRoles: [31, '32'] }, /normaliseClubItem.*plusRoles/],
-    [
-      'a non-numeric plusPlusRoles entry',
-      { plusPlusRoles: [31, '32'] },
-      /normaliseClubItem.*plusPlusRoles/,
-    ],
-    ['a sparse plusRoles list', { plusRoles: [31, , 43] }, /normaliseClubItem.*plusRoles/],
-    [
-      'a sparse plusPlusRoles list',
-      { plusPlusRoles: [31, , 43] },
-      /normaliseClubItem.*plusPlusRoles/,
-    ],
-  ])('rejects %s with a message naming the field', (_label, overrides, message) => {
-    expect(() => normaliseClub([raw(overrides)])).toThrow(message);
+    ['a non-list plusRoles', { plusRoles: 31 }],
+    ['a non-list plusPlusRoles', { plusPlusRoles: 31 }],
+    ['a non-numeric plusRoles entry', { plusRoles: [31, '32'] }],
+    ['a non-numeric plusPlusRoles entry', { plusPlusRoles: [31, '32'] }],
+    ['a sparse plusRoles list', { plusRoles: [31, , 43] }],
+    ['a sparse plusPlusRoles list', { plusPlusRoles: [31, , 43] }],
+  ])('normalises %s to an empty list without rejecting the item (#121)', (_label, overrides) => {
+    const [record] = normaliseClub([raw(overrides)]);
+
+    expect(record.rolePlus).toEqual([]);
+    expect(record.rolePlusPlus).toEqual([]);
   });
 
   it('gives every captured fixture item a rolePlus list and honours its plusPlusRoles', () => {
