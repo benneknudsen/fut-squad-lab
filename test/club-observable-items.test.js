@@ -556,6 +556,27 @@ describe('the diagnostics block names every probed location on every path (#115)
     expect(club.detail.itemLayer.subLayers._staticData.keys.length).toBeGreaterThan(0);
   });
 
+  it('reports an unreadable role list on the successful club stage without failing it (#121)', async () => {
+    const item = { ...firstItem, _basePlusPlusRoles: [{ id: 7 }] };
+    const service = serviceOver({ items: [item] });
+
+    const outcome = await service.solve({ subject: 'panel' });
+
+    expect(outcome.ok).toBe(true);
+    const club = outcome.stages.find((stage) => stage.id === 'club');
+    expect(club.ok).toBe(true);
+    const expected = [
+      {
+        field: 'rolePlusPlus',
+        path: '_basePlusPlusRoles',
+        elementTypes: ['object'],
+        keys: ['id'],
+      },
+    ];
+    expect(club.detail.itemLayer.unreadable).toEqual(expected);
+    expect(club.detail.unreadableRoles).toEqual(expected);
+  });
+
   it('reports the same probe report on the failing path, from the error record', async () => {
     const broken = { ...firstItem, _staticData: { quality: 'gold' } };
     delete broken.definitionId;
@@ -589,6 +610,73 @@ describe('the diagnostics block names every probed location on every path (#115)
     // run, so it has to survive the failure that carries it.
     expect(club.detail.clubRead.subLayers._staticData.keys).toEqual([
       { name: 'quality', type: 'string', empty: false },
+    ]);
+  });
+});
+
+describe('a role list that is present but unreadable (#121)', () => {
+  const withUnreadablePlusPlus = () => ({
+    ...firstItem,
+    _basePlusPlusRoles: [{ id: 7 }],
+  });
+
+  it('normalises the list to [] and keeps the rest of the record', () => {
+    const record = normaliseClubItem(withUnreadablePlusPlus());
+
+    expect(record.rolePlusPlus).toEqual([]);
+    expect(record.rolePlus).toEqual([21]);
+    expect(record.assetId).toBe(3001);
+  });
+
+  it('reports the field, the location, the element types and the element keys', () => {
+    const { unreadable } = clubItemSources(withUnreadablePlusPlus());
+
+    expect(unreadable).toEqual([
+      {
+        field: 'rolePlusPlus',
+        path: '_basePlusPlusRoles',
+        elementTypes: ['object'],
+        keys: ['id'],
+      },
+    ]);
+  });
+
+  it('leaves a readable numeric list unchanged and reports nothing unreadable', () => {
+    expect(normaliseClubItem(firstItem).rolePlusPlus).toEqual([11, 12]);
+    expect(clubItemSources(firstItem).unreadable).toEqual([]);
+  });
+
+  it('does not reject the whole item for this field', () => {
+    expect(() => normaliseClubItem(withUnreadablePlusPlus())).not.toThrow();
+  });
+
+  it('carries the same evidence on clubRead when another field rejects the item', () => {
+    const { _staticData, ...rest } = withUnreadablePlusPlus();
+    const { assetId, ...staticDataWithoutAssetId } = _staticData;
+    let error = null;
+    try {
+      readClubItems([{ ...rest, _staticData: staticDataWithoutAssetId }]);
+    } catch (thrown) {
+      error = thrown;
+    }
+
+    expect(error).not.toBeNull();
+    expect(error.clubRead.unreadableRoles).toEqual([
+      {
+        field: 'rolePlusPlus',
+        path: '_basePlusPlusRoles',
+        elementTypes: ['object'],
+        keys: ['id'],
+      },
+    ]);
+  });
+
+  it('normalises an unreadable wire role list to [] as well', () => {
+    const raw = { ...wire.items[0], plusRoles: [{ role: 31 }] };
+
+    expect(normaliseClubItem(raw).rolePlus).toEqual([]);
+    expect(clubItemSources(raw).unreadable).toEqual([
+      { field: 'rolePlus', path: 'plusRoles', elementTypes: ['object'], keys: ['role'] },
     ]);
   });
 });

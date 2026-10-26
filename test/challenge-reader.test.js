@@ -4,6 +4,7 @@ import entityChallenge18 from './fixtures/sbs-entity-challenge-18.json';
 import set10 from './fixtures/sbs-set-10-challenges.json';
 import { PINNED_ELIGIBILITY_KEYS, SCOPE_VALUES } from './helpers/eligibility.js';
 import { readChallenge } from '../src/ea/challenge-reader.js';
+import { readEligibilityKeys } from '../src/ea/adapter.js';
 import { normaliseRequirements } from '../src/solver/requirements.js';
 
 // The expected `elgReq` is written out from the requirement model documented in
@@ -168,5 +169,132 @@ describe('readChallenge', () => {
     expect(message).toMatch(/eligibilitySlot/);
     expect(message).toContain('eligibilityKey: number');
     expect(message).not.toContain('8675309');
+  });
+});
+
+/**
+ * The live entity groups one slot's facts as `{ scope, count, kvPairs }` instead
+ * of flattening them into wire rows. The key table is EA's live enum, as it is
+ * in production; this fake carries only the members these tests use.
+ */
+const LIVE_ELIGIBILITY_ENUM = Object.freeze({
+  PLAYER_COUNT: 2,
+  2: 'PLAYER_COUNT',
+  PLAYER_QUALITY: 3,
+  3: 'PLAYER_QUALITY',
+  NATION_ID: 10,
+  10: 'NATION_ID',
+  CLUB_ID: 12,
+  12: 'CLUB_ID',
+  SCOPE: 13,
+  13: 'SCOPE',
+});
+
+const liveKeys = () => readEligibilityKeys({ SBCEligibilityKey: LIVE_ELIGIBILITY_ENUM });
+
+const livePayload = (requirements) => ({
+  ...entityChallenge18,
+  eligibilityRequirements: requirements,
+});
+
+const readLive = (requirements) =>
+  readChallenge(livePayload(requirements), { eligibilityKeys: liveKeys() });
+
+describe('live requirement entries written as { scope, count, kvPairs } (#121)', () => {
+  it('expands one live entry into the wire rows the existing decoder consumes', () => {
+    const challenge = readLive([{ scope: 0, count: -1, kvPairs: { 3: 3 } }]);
+
+    expect(challenge.requirementsFrom).toBe('payload.eligibilityRequirements');
+    expect(challenge.elgReq).toEqual([
+      {
+        type: 'PLAYER_QUALITY',
+        eligibilitySlot: 1,
+        eligibilityKey: 3,
+        eligibilityValue: 3,
+        count: -1,
+      },
+      { type: 'SCOPE', eligibilitySlot: 1, eligibilityKey: 13, eligibilityValue: 0 },
+    ]);
+  });
+
+  it('reads a match-shaped entry whose kvPairs is a collection object with `_collection`', () => {
+    const challenge = readLive([
+      {
+        scope: 0,
+        count: 2,
+        kvPairs: {
+          _collection: [
+            [10, 42],
+            { key: 12, value: 4 },
+          ],
+        },
+      },
+    ]);
+
+    expect(challenge.elgReq).toEqual([
+      {
+        type: 'NATION_ID',
+        eligibilitySlot: 1,
+        eligibilityKey: 10,
+        eligibilityValue: 42,
+        count: 2,
+      },
+      {
+        type: 'CLUB_ID',
+        eligibilitySlot: 1,
+        eligibilityKey: 12,
+        eligibilityValue: 4,
+        count: 2,
+      },
+      { type: 'SCOPE', eligibilitySlot: 1, eligibilityKey: 13, eligibilityValue: 0 },
+    ]);
+  });
+
+  it('names a kvPairs key the live key table cannot name', () => {
+    let message = '';
+    try {
+      readLive([{ scope: 0, count: -1, kvPairs: { 99: 1 } }]);
+    } catch (error) {
+      message = error.message;
+    }
+
+    expect(message).toMatch(/99/);
+    expect(message).toMatch(/cannot name/);
+    expect(message).toMatch(/kvPairs/);
+    // The shape report names the entry's own keys, both integers, and the
+    // count-role key the pairs do not carry, so the next run needs no guess.
+    expect(message).toMatch(/scope: number/);
+    expect(message).toMatch(/count: number/);
+    expect(message).toMatch(/no count-role key \(PLAYER_COUNT\)/);
+  });
+
+  it('names the row type through EA’s own key table, not a local map', () => {
+    const renamed = readEligibilityKeys({
+      SBCEligibilityKey: {
+        SAME_LEAGUE_COUNT: 3,
+        3: 'SAME_LEAGUE_COUNT',
+        SCOPE: 13,
+        13: 'SCOPE',
+      },
+    });
+    const challenge = readChallenge(
+      livePayload([{ scope: 0, count: -1, kvPairs: { 3: 6 } }]),
+      { eligibilityKeys: renamed }
+    );
+
+    expect(challenge.elgReq[0].type).toBe('SAME_LEAGUE_COUNT');
+  });
+
+  it('names the shape of a kvPairs value it cannot decode', () => {
+    let message = '';
+    try {
+      readLive([{ scope: 0, count: -1, kvPairs: 'not a collection' }]);
+    } catch (error) {
+      message = error.message;
+    }
+
+    expect(message).toMatch(/kvPairs/);
+    expect(message).toMatch(/string/);
+    expect(message).toMatch(/kvPairs: string/);
   });
 });

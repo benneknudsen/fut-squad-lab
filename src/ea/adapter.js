@@ -27,8 +27,10 @@
  * rules (#6 and beyond). `plusRoles` is present on every captured fixture item
  * and `plusPlusRoles` on only a few, but neither list feeds any measurement
  * yet, so a missing list is not evidence that the payload shape changed and
- * normalises to `[]` rather than throwing. A list that is present must still be
- * dense and numeric; see `normaliseClubItem`.
+ * normalises to `[]` rather than throwing. A list that is present but not a
+ * dense array of finite numbers normalises to `[]` too (#121): a shape nothing
+ * measures must not block the club read. `clubItemSources` reports that shape
+ * with its field, location, element types and object keys.
  *
  * ## Stable solver vocabulary
  *
@@ -927,15 +929,94 @@ const requireRawField = (rawItem, field, isValid, expected) => {
 const readRoleList = (rawItem, field) => {
   const value = rawItem[field];
   if (value === undefined || value === null) return [];
-  if (!isFiniteNumberArray(value)) {
-    throw rejectedItemError(
-      rawItem,
-      field,
-      `normaliseClubItem: raw item must carry ${field} as a dense array of finite numbers when` +
-        ' present'
-    );
-  }
+  if (!isFiniteNumberArray(value)) return [];
   return [...value];
+};
+
+/**
+ * The evidence that a role list was present but unreadable (#121): the stable
+ * field, the raw location, one type per element and the redacted key names of
+ * object elements — never a value. No measurement consumes the role lists yet,
+ * so an unreadable one must not block the club read; it must still be reported
+ * so the next diagnostic names the shape EA actually sends.
+ */
+const roleListIssue = (field, path, value) => ({
+  field,
+  path,
+  elementTypes: Array.isArray(value)
+    ? [...new Set(value.map(describeElementType))]
+    : [describeElementType(value)],
+  keys: Array.isArray(value) ? elementKeyNames(value) : [],
+});
+
+/** Every unreadable role list a wire item carries, in stable field order. */
+const wireRoleListIssues = (rawItem) =>
+  [
+    { field: 'rolePlus', path: RAW_ITEM_ROLE_PLUS_FIELD },
+    { field: 'rolePlusPlus', path: RAW_ITEM_ROLE_PLUS_PLUS_FIELD },
+  ].flatMap(({ field, path }) => {
+    const read = readDataProperty(rawItem, path);
+    if (!read.ok || read.value === undefined || read.value === null) return [];
+    return isFiniteNumberArray(read.value) ? [] : [roleListIssue(field, path, read.value)];
+  });
+
+/** Every unreadable role list an observable item carries, in stable field order. */
+const observableRoleListIssues = (rawItem) =>
+  CLUB_ITEM_SOURCES.filter((source) => source.kind === 'roles').flatMap((source) => {
+    const resolved = resolveRoleField(rawItem, source);
+    return resolved.unreadable === undefined ? [] : [resolved.unreadable];
+  });
+
+/**
+ * Every role list a club item carries that is present but unreadable (#121),
+ * in either layer, each naming its stable field, raw location, element types
+ * and object element keys — never a value. The club read proceeds; this is the
+ * report of what EA actually sent.
+ *
+ * @param {object} rawItem one club item, in either layer
+ * @returns {Array<{field: string, path: string, elementTypes: Array<string>,
+ *   keys: Array<string>}>}
+ */
+export function clubItemUnreadableRoleLists(rawItem) {
+  if (!isRecordObject(rawItem)) return [];
+  return isObservableClubItem(rawItem)
+    ? observableRoleListIssues(rawItem)
+    : wireRoleListIssues(rawItem);
+}
+
+/** Resolves an optional role list that may be absent, readable or unreadable. */
+const resolveRoleField = (rawItem, source) => {
+  const candidate = source.paths[0];
+  const probed = probeObservablePath(rawItem, candidate);
+  if (!probed.ok) {
+    return {
+      ok: true,
+      value: [],
+      from: null,
+      probes: [{ id: probed.id, ok: false, reason: probed.reason }],
+    };
+  }
+  if (isFiniteNumberArray(probed.value)) {
+    return {
+      ok: true,
+      value: [...probed.value],
+      from: probed.id,
+      probes: [{ id: probed.id, ok: true, reason: null, value: probed.value }],
+    };
+  }
+  return {
+    ok: true,
+    value: [],
+    from: probed.id,
+    unreadable: roleListIssue(source.field, probed.id, probed.value),
+    probes: [
+      {
+        id: probed.id,
+        ok: false,
+        reason: `${probed.id} is present but not a dense array of finite numbers`,
+      },
+    ],
+  };
 };
 
 /**
@@ -998,8 +1079,10 @@ const readRoleList = (rawItem, field) => {
  * `plusRoles` and `plusPlusRoles` are a second deliberate exception, both
  * optional lists of role-id numbers for later rarity rules that no measurement
  * reads yet: absence (or `null`) normalises to `[]` because it carries no
- * signal about the payload shape. A list that is present is still validated as
- * dense and numeric.
+ * signal about the payload shape. A list that is present but unreadable — not
+ * a dense array of finite numbers — also normalises to `[]` (#121) and is
+ * reported by `clubItemSources`, because a shape nothing consumes must not
+ * reject the item the solver needs.
  *
  * @param {object} rawItem one item from the `/club` response, in either of the
  *   two layers `CLUB_ITEM_LAYERS` names: the raw wire body, or the observable
@@ -1331,16 +1414,12 @@ const KIND_PREDICATES = Object.freeze({
   number: Number.isFinite,
   string: isNonEmptyString,
   boolean: isBoolean,
-  roles: isFiniteNumberArray,
   // A price is nullable by design: `null` and an absent value both mean unknown.
   price: isNullablePrice,
 });
 
 /** Copies a probe value into the stable record, validating its shape first. */
-const readKindValue = (source, rawValue) => {
-  if (source.kind === 'roles') return [...rawValue];
-  return rawValue;
-};
+const readKindValue = (source, rawValue) => rawValue;
 
 /**
  * Reads one raw candidate path without ever invoking an accessor, returning
@@ -1578,6 +1657,7 @@ const resolvePositionField = (rawItem, source, positionNames) => {
  * @returns {{ ok: boolean, value?: *, from?: string|null, probes: Array<object> }}
  */
 const resolveObservableField = (rawItem, source, positionNames) => {
+  if (source.kind === 'roles') return resolveRoleField(rawItem, source);
   if (source.kind === 'position' || source.kind === 'positions') {
     return resolvePositionField(rawItem, source, positionNames);
   }
@@ -1709,7 +1789,13 @@ const normaliseObservableClubItem = (rawItem, positionNames) => {
 export function clubItemSources(rawItem, options = {}) {
   const positionNames = options?.positionNames;
   if (!isObservableClubItem(rawItem)) {
-    return { layer: CLUB_ITEM_LAYERS.WIRE, fields: {}, probes: [], subLayers: {} };
+    return {
+      layer: CLUB_ITEM_LAYERS.WIRE,
+      fields: {},
+      probes: [],
+      subLayers: {},
+      unreadable: wireRoleListIssues(rawItem),
+    };
   }
   const fields = {};
   const probes = [];
@@ -1729,6 +1815,9 @@ export function clubItemSources(rawItem, options = {}) {
     // tagged with the field it was read for, so a report can be read per field.
     probes,
     subLayers: describeObservableSubLayers(rawItem),
+    // Role lists present but unreadable (#121). They feed no measurement yet, so
+    // they normalise to [] and are reported here instead of rejecting the item.
+    unreadable: observableRoleListIssues(rawItem),
   };
 }
 
@@ -4068,6 +4157,298 @@ export function resolveChallengeRequirements(payload) {
 
   return { ok: false, requirements: null, source: null, attempts };
 }
+
+/**
+ * The live challenge entity's own requirement-entry spelling (#121): one entry
+ * per slot, carrying the comparison operator as `scope`, the quantity as
+ * `count` and the remaining `eligibilityKey -> eligibilityValue` pairs inside
+ * `kvPairs`. The wire form flattens the same facts into rows; this table is the
+ * only place the live spelling is named.
+ */
+export const LIVE_REQUIREMENT_FIELDS = Object.freeze({
+  scope: 'scope',
+  count: 'count',
+  kvPairs: 'kvPairs',
+});
+
+/**
+ * The one collection key a `kvPairs` collection object may carry its pairs
+ * under, proven by the panel challenge collection (#121). Read as an own data
+ * property only, never through an accessor.
+ */
+const LIVE_REQUIREMENT_COLLECTION = '_collection';
+
+/** True when an entry is the live `{ scope, count, kvPairs }` shape. */
+export const carriesLiveRequirementEntry = (entry) =>
+  isRecordObject(entry) && Object.hasOwn(entry, LIVE_REQUIREMENT_FIELDS.kvPairs);
+
+/** Reads one own data property, never a prototype key and never an accessor. */
+const readOwnDataProperty = (target, name) => {
+  let descriptor;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(target, name);
+  } catch {
+    return { ok: false, reason: 'unreadable' };
+  }
+  if (descriptor === undefined) return { ok: false, reason: null };
+  if (typeof descriptor.get === 'function') {
+    return { ok: false, reason: 'an accessor(get); refusing to invoke it' };
+  }
+  return descriptor.value === undefined
+    ? { ok: false, reason: null }
+    : { ok: true, value: descriptor.value };
+};
+
+/** The element type a report names for one kv pair or role list element. */
+const describeElementType = (value) => {
+  if (Array.isArray(value)) return `array[${value.length}]`;
+  if (value === null) return 'null';
+  return typeof value;
+};
+
+/** The redacted key names of every object element, sorted so two runs diff. */
+const elementKeyNames = (values) => {
+  const names = new Set();
+  for (const value of values) {
+    if (!isRecordObject(value)) continue;
+    for (const { name } of describeOwnPropertyTypes(value)) names.add(name);
+  }
+  return [...names].sort();
+};
+
+/** One `[key, value]` pair, in either of the three shapes a kv list may use. */
+const readKvPair = (rawPair) => {
+  if (Array.isArray(rawPair)) {
+    if (!isDenseArray(rawPair) || rawPair.length !== 2) return null;
+    return { key: rawPair[0], value: rawPair[1] };
+  }
+  if (isRecordObject(rawPair)) {
+    const key = readOwnDataProperty(rawPair, 'key');
+    const value = readOwnDataProperty(rawPair, 'value');
+    if (key.ok && value.ok) return { key: key.value, value: value.value };
+  }
+  return null;
+};
+
+/**
+ * Reads a plain `key -> value` map through own data properties only, so a
+ * value accessor is never invoked. A key whose value is an accessor is named
+ * as such instead of being called.
+ */
+const readKvPairMap = (map) => {
+  const pairs = [];
+  for (const key of Object.keys(map)) {
+    const value = readOwnDataProperty(map, key);
+    if (!value.ok) {
+      return { ok: false, reason: `the value of key ${key} is ${value.reason ?? 'absent'}` };
+    }
+    pairs.push({ key, value: value.value });
+  }
+  return { ok: true, pairs };
+};
+
+const readKvPairList = (list) => {
+  const hole = findHoleIndex(list);
+  if (hole !== -1) {
+    return { ok: false, reason: `the pair list has a hole at index ${hole}` };
+  }
+  const pairs = [];
+  for (const [index, rawPair] of list.entries()) {
+    const pair = readKvPair(rawPair);
+    if (pair === null) {
+      return {
+        ok: false,
+        reason:
+          `element ${index} is ${describeValue(rawPair)}, not a [key, value] pair or a` +
+          ' {key, value} object',
+      };
+    }
+    pairs.push(pair);
+  }
+  return { ok: true, pairs };
+};
+
+/**
+ * Reads a `kvPairs` value in every shape the live page may hand over, without
+ * invoking an accessor: an array of `[key, value]` pairs, an array of
+ * `{key, value}` objects, a collection object whose own `_collection` holds the
+ * pairs, or the plain `key -> value` map the `fsl-build/21` diagnostic showed
+ * as `kvPairs: object`. Anything else is a loud shape failure.
+ */
+const readKvPairs = (kvPairs) => {
+  if (Array.isArray(kvPairs)) return readKvPairList(kvPairs);
+  if (!isRecordObject(kvPairs)) {
+    return { ok: false, reason: 'not one of the documented kv-pair shapes' };
+  }
+  const collection = readOwnDataProperty(kvPairs, LIVE_REQUIREMENT_COLLECTION);
+  if (collection.ok) {
+    if (Array.isArray(collection.value)) {
+      const read = readKvPairList(collection.value);
+      return read.ok ? read : { ok: false, reason: `${LIVE_REQUIREMENT_COLLECTION} ${read.reason}` };
+    }
+    if (isRecordObject(collection.value)) return readKvPairMap(collection.value);
+    return {
+      ok: false,
+      reason: `${LIVE_REQUIREMENT_COLLECTION} is ${describeValue(collection.value)}`,
+    };
+  }
+  if (collection.reason !== null) {
+    return { ok: false, reason: `${LIVE_REQUIREMENT_COLLECTION} is ${collection.reason}` };
+  }
+  return readKvPairMap(kvPairs);
+};
+
+/** The key names and value types a `kvPairs` value carries, never a value. */
+const describeKvPairsShape = (kvPairs) => {
+  if (!isRecordObject(kvPairs)) return `kvPairs is ${describeValue(kvPairs)}`;
+  const own = `kvPairs carries [${describeKeyTypes(describeOwnPropertyTypes(kvPairs))}]`;
+  const collection = readOwnDataProperty(kvPairs, LIVE_REQUIREMENT_COLLECTION);
+  if (!collection.ok || !isRecordObject(collection.value)) return own;
+  return (
+    `${own}; ${LIVE_REQUIREMENT_COLLECTION} carries` +
+    ` [${describeKeyTypes(describeOwnPropertyTypes(collection.value))}]`
+  );
+};
+
+/** The live entry's own key names and types, so a report never guesses its shape. */
+const describeLiveEntry = (entry, scope, count) =>
+  `the entry carries [${describeKeyTypes(describeOwnPropertyTypes(entry))}];` +
+  ` scope ${scope === undefined ? 'is absent' : `is ${scope}`};` +
+  ` count ${count === undefined ? 'is absent' : `is ${count}`}`;
+
+const liveEntryError = (index, detail, entry, scope, count, note = '') =>
+  new Error(
+    `expandLiveRequirementEntry: requirement entry ${index} could not be decoded: ${detail};` +
+      ` ${describeLiveEntry(entry, scope, count)}${note}`
+  );
+
+const countRoleNames = (keys) =>
+  Object.values(keys)
+    .filter((descriptor) => descriptor?.role === 'count')
+    .map((descriptor) => descriptor.type);
+
+const pairKeyNumber = (key) => {
+  if (typeof key === 'number') return Number.isInteger(key) ? key : null;
+  return typeof key === 'string' && /^(0|[1-9]\d*)$/.test(key) ? Number(key) : null;
+};
+
+/**
+ * Names the count-role key the entry's `kvPairs` does not carry, or returns an
+ * empty string when it does. The decoder never guesses which key carries the
+ * quantity: when the count key is not among the pairs, the note says so and the
+ * entry-level `count` is reported as the quantity.
+ */
+const absentCountRoleNote = (pairs, keys) => {
+  const carriedTypes = new Set(
+    pairs
+      .map((pair) => pairKeyNumber(pair.key))
+      .filter((key) => key !== null && Object.hasOwn(keys, key))
+      .map((key) => keys[key].type)
+  );
+  const absent = countRoleNames(keys).filter((name) => !carriedTypes.has(name));
+  return absent.length === 0
+    ? ''
+    : `; kvPairs carries no count-role key (${absent.join(', ')}), so the entry-level count is the` +
+        ' quantity';
+};
+
+/**
+ * Expands one live `{ scope, count, kvPairs }` entry into the wire rows
+ * `src/solver/requirements.js` already decodes (#121): one row per kv pair,
+ * plus one `SCOPE` row carrying the entry's `scope`.
+ *
+ * Every row's `type` is EA's own name for the numeric key, resolved through the
+ * caller's live-built table; this function never holds a name table of its own.
+ * `count` rides on the pair rows when the entry states a finite integer, `-1`
+ * included, because that is the sentinel the decoder already documents. A key
+ * the table cannot name, a non-integer key or value, and a `kvPairs` value in
+ * none of the documented shapes each fail with the entry's own key names, the
+ * kv pair names and value types, `scope` and `count`, so one pasted report
+ * names what EA sent without carrying a value.
+ *
+ * @param {object} entry one live requirement entry
+ * @param {number} index the entry's zero-based position, reported 1-based as
+ *   its `eligibilitySlot`
+ * @param {object} keys number -> descriptor built from the live EA enum
+ * @returns {Array<object>} wire-shaped rows
+ * @throws {Error} when the entry or its `kvPairs` cannot be decoded
+ */
+export function expandLiveRequirementEntry(entry, index, keys) {
+  const slot = index + 1;
+  const scopeRead = readDataProperty(entry, LIVE_REQUIREMENT_FIELDS.scope);
+  const scope = scopeRead.ok ? scopeRead.value : undefined;
+  const countRead = readDataProperty(entry, LIVE_REQUIREMENT_FIELDS.count);
+  const count = countRead.ok ? countRead.value : undefined;
+  if (!scopeRead.ok || !Number.isInteger(scope)) {
+    throw liveEntryError(index, `${LIVE_REQUIREMENT_FIELDS.scope} must be an integer`, entry, scope, count);
+  }
+  if (countRead.ok && !Number.isInteger(count)) {
+    throw liveEntryError(index, `${LIVE_REQUIREMENT_FIELDS.count} must be an integer`, entry, scope, count);
+  }
+  const kvRead = readDataProperty(entry, LIVE_REQUIREMENT_FIELDS.kvPairs);
+  if (!kvRead.ok) {
+    throw liveEntryError(
+      index,
+      kvRead.reason === null
+        ? `${LIVE_REQUIREMENT_FIELDS.kvPairs} is absent`
+        : `${LIVE_REQUIREMENT_FIELDS.kvPairs} is ${kvRead.reason}`,
+      entry,
+      scope,
+      count
+    );
+  }
+  const pairs = readKvPairs(kvRead.value);
+  if (!pairs.ok) {
+    throw liveEntryError(index, `${describeKvPairsShape(kvRead.value)}: ${pairs.reason}`, entry, scope, count);
+  }
+  const scopeKey = Object.entries(keys).find(([, descriptor]) => descriptor?.role === 'scope');
+  if (scopeKey === undefined) {
+    throw liveEntryError(index, 'the live key table names no scope key', entry, scope, count);
+  }
+  const rows = [];
+  const countNote = absentCountRoleNote(pairs.pairs, keys);
+  for (const pair of pairs.pairs) {
+    const eligibilityKey = pairKeyNumber(pair.key);
+    if (eligibilityKey === null || !Object.hasOwn(keys, eligibilityKey)) {
+      throw liveEntryError(
+        index,
+        `refused row eligibilityKey ${JSON.stringify(pair.key)} because` +
+          ` ${EA_GLOBALS.eligibilityKeys} cannot name it (${describeKvPairsShape(kvRead.value)})`,
+        entry,
+        scope,
+        count,
+        countNote
+      );
+    }
+    if (!Number.isInteger(pair.value)) {
+      throw liveEntryError(
+        index,
+        `refused row eligibilityKey ${eligibilityKey} because its value is` +
+          ` ${describeElementType(pair.value)}, not an integer`,
+        entry,
+        scope,
+        count,
+        countNote
+      );
+    }
+    const row = {
+      type: keys[eligibilityKey].type,
+      eligibilitySlot: slot,
+      eligibilityKey,
+      eligibilityValue: pair.value,
+    };
+    if (count !== undefined) row.count = count;
+    rows.push(row);
+  }
+  const [scopeNumber, scopeDescriptor] = scopeKey;
+  rows.push({
+    type: scopeDescriptor.type,
+    eligibilitySlot: slot,
+    eligibilityKey: Number(scopeNumber),
+    eligibilityValue: scope,
+  });
+  return rows;
+};
 
 const REQUIREMENT_LOOKUP_SUMMARY =
   'eligibilityRequirements, requirements, requirementsList, elgReq, getRequirements(), and one level' +

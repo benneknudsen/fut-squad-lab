@@ -45,6 +45,7 @@ import {
   EA_GLOBALS,
   SCOPE_VALUES,
   clubItemSources,
+  clubItemUnreadableRoleLists,
   crossCheckEligibilityModel,
   loadChallengePayload,
   readEligibilityKeys,
@@ -253,7 +254,7 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
       let challengeError = null;
       if (loadResult.ok) {
         try {
-          challenge = readChallengeFn(loadResult.payload);
+          challenge = readChallengeFn(loadResult.payload, { pageWindow });
         } catch (error) {
           challengeError = toError(error);
         }
@@ -338,6 +339,19 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
                 positionNames: clubResult.positionNames,
               })
             : null,
+        // Role lists present but unreadable, across the whole read (#121). They
+        // feed no measurement, so they never fail the stage; this names what EA
+        // actually sent so the next live run can settle the shape.
+        unreadableRoles:
+          clubResult.ok === true && Array.isArray(clubResult.items)
+            ? [
+                ...new Map(
+                  clubResult.items
+                    .flatMap((item) => clubItemUnreadableRoleLists(item))
+                    .map((issue) => [JSON.stringify(issue), issue])
+                ).values(),
+              ]
+            : [],
         // The shape report runs on failure only: a read that answered
         // carries none (#44). A shape failure is a recorded reason, never a
         // lost solve (#50).
