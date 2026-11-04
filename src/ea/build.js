@@ -171,8 +171,15 @@ import {
  *      is reported with its field, location, element types and object keys on
  *      `clubRead` / `itemLayer`, so the club read proceeds and the next
  *      diagnostic names the shape.
+ *
+ * Incremented by fsl-build/23, one defect from the `fsl-build/22` live run: a
+ *   live requirement entry's kv pair value can be an integer array, and the
+ *   reader refused the whole challenge read because it assumed an integer. Each
+ *   element now becomes its own wire row, a non-integer element fails naming
+ *   its index and type, and repeated rows of one scalar key decode into a
+ *   `values` constraint instead of a duplicate failure.
  */
-export const BUILD_ID = 'fsl-build/22';
+export const BUILD_ID = 'fsl-build/23';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact

@@ -4360,7 +4360,12 @@ const absentCountRoleNote = (pairs, keys) => {
  * Every row's `type` is EA's own name for the numeric key, resolved through the
  * caller's live-built table; this function never holds a name table of its own.
  * `count` rides on the pair rows when the entry states a finite integer, `-1`
- * included, because that is the sentinel the decoder already documents. A key
+ * included, because that is the sentinel the decoder already documents. An
+ * array value is accepted as a list of integer alternatives: each element
+ * becomes one row with the pair's own key, slot and entry count, and a
+ * non-integer element fails naming its index and type. An empty array fails
+ * naming the key and that it lists no alternative, so no row is dropped
+ * silently. A key
  * the table cannot name, a non-integer key or value, and a `kvPairs` value in
  * none of the documented shapes each fail with the entry's own key names, the
  * kv pair names and value types, `scope` and `count`, so one pasted report
@@ -4420,7 +4425,7 @@ export function expandLiveRequirementEntry(entry, index, keys) {
         countNote
       );
     }
-    if (!Number.isInteger(pair.value)) {
+    if (!Array.isArray(pair.value) && !Number.isInteger(pair.value)) {
       throw liveEntryError(
         index,
         `refused row eligibilityKey ${eligibilityKey} because its value is` +
@@ -4431,14 +4436,40 @@ export function expandLiveRequirementEntry(entry, index, keys) {
         countNote
       );
     }
-    const row = {
-      type: keys[eligibilityKey].type,
-      eligibilitySlot: slot,
-      eligibilityKey,
-      eligibilityValue: pair.value,
-    };
-    if (count !== undefined) row.count = count;
-    rows.push(row);
+    const values = Array.isArray(pair.value) ? pair.value : [pair.value];
+    if (values.length === 0) {
+      throw liveEntryError(
+        index,
+        `refused row eligibilityKey ${eligibilityKey} because its value is` +
+          ` ${describeElementType(pair.value)}; an empty array lists no alternative`,
+        entry,
+        scope,
+        count,
+        countNote
+      );
+    }
+    for (const [elementIndex, value] of values.entries()) {
+      if (!Number.isInteger(value)) {
+        throw liveEntryError(
+          index,
+          `refused row eligibilityKey ${eligibilityKey} because its value is` +
+            ` ${describeElementType(pair.value)}; element ${elementIndex} is` +
+            ` ${describeElementType(value)}`,
+          entry,
+          scope,
+          count,
+          countNote
+        );
+      }
+      const row = {
+        type: keys[eligibilityKey].type,
+        eligibilitySlot: slot,
+        eligibilityKey,
+        eligibilityValue: value,
+      };
+      if (count !== undefined) row.count = count;
+      rows.push(row);
+    }
   }
   const [scopeNumber, scopeDescriptor] = scopeKey;
   rows.push({

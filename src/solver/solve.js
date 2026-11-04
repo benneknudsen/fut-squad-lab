@@ -412,6 +412,9 @@ const isStillSatisfiable = (constraint, players, remainingSlots, unused, clubInd
   if (!isMeasured(constraint)) return true;
 
   const { kind, value, scope } = constraint;
+  if (!Number.isFinite(value)) {
+    fail(`constraint ${JSON.stringify(kind)} cannot be gated without a single value`);
+  }
 
   if (kind === 'PLAYER_COUNT_MATCH') {
     const [field] = Object.keys(constraint.match);

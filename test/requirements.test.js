@@ -847,14 +847,26 @@ describe('fail-loud behaviour', () => {
     ).toThrow(/eligibilitySlot 1 combines CHEMISTRY_POINTS with PLAYER_QUALITY/);
   });
 
-  it('throws on a duplicated scalar requirement in one slot', () => {
+  it('collapses repeated rows of one scalar key into a sorted, de-duplicated values constraint', () => {
+    const { constraints } = normalise([
+      { type: 'PLAYER_QUALITY', eligibilitySlot: 1, eligibilityKey: 3, eligibilityValue: 3 },
+      { type: 'PLAYER_QUALITY', eligibilitySlot: 1, eligibilityKey: 3, eligibilityValue: 1 },
+      { type: 'PLAYER_QUALITY', eligibilitySlot: 1, eligibilityKey: 3, eligibilityValue: 3 },
+      scopeEntry(1, 2),
+    ]);
+
+    expect(constraints).toEqual([{ kind: 'PLAYER_QUALITY', values: [1, 3], scope: 'EXACT' }]);
+    expect(constraints[0]).not.toHaveProperty('value');
+  });
+
+  it('still throws on repeated TEAM_RATING rows instead of collapsing them into values', () => {
     expect(() =>
       normalise([
-        { type: 'CHEMISTRY_POINTS', eligibilitySlot: 1, eligibilityKey: 35, eligibilityValue: 30 },
-        { type: 'CHEMISTRY_POINTS', eligibilitySlot: 1, eligibilityKey: 35, eligibilityValue: 25 },
+        { type: 'TEAM_RATING_1_TO_100', eligibilitySlot: 1, eligibilityKey: 19, eligibilityValue: 70 },
+        { type: 'TEAM_RATING_1_TO_100', eligibilitySlot: 1, eligibilityKey: 19, eligibilityValue: 80 },
         scopeEntry(1, 0),
       ])
-    ).toThrow(/Duplicate CHEMISTRY_POINTS/);
+    ).toThrow(/Duplicate TEAM_RATING in eligibilitySlot 1/);
   });
 
   it('throws on a duplicated count requirement in one slot', () => {

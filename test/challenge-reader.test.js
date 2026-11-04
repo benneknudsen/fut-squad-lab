@@ -250,6 +250,94 @@ describe('live requirement entries written as { scope, count, kvPairs } (#121)',
     ]);
   });
 
+  it('expands a single-element array kv pair into the same row as an integer', () => {
+    const challenge = readLive([{ scope: 0, count: 2, kvPairs: { 3: [3] } }]);
+
+    expect(challenge.elgReq).toEqual([
+      {
+        type: 'PLAYER_QUALITY',
+        eligibilitySlot: 1,
+        eligibilityKey: 3,
+        eligibilityValue: 3,
+        count: 2,
+      },
+      { type: 'SCOPE', eligibilitySlot: 1, eligibilityKey: 13, eligibilityValue: 0 },
+    ]);
+  });
+
+  it('expands an integer array kv pair into one row per element', () => {
+    const challenge = readLive([{ scope: 0, count: -1, kvPairs: { 3: [1, 2] } }]);
+
+    expect(challenge.elgReq).toEqual([
+      {
+        type: 'PLAYER_QUALITY',
+        eligibilitySlot: 1,
+        eligibilityKey: 3,
+        eligibilityValue: 1,
+        count: -1,
+      },
+      {
+        type: 'PLAYER_QUALITY',
+        eligibilitySlot: 1,
+        eligibilityKey: 3,
+        eligibilityValue: 2,
+        count: -1,
+      },
+      { type: 'SCOPE', eligibilitySlot: 1, eligibilityKey: 13, eligibilityValue: 0 },
+    ]);
+  });
+
+  it('refuses an empty array kv pair, naming the key and the empty array', () => {
+    let message = '';
+    try {
+      readLive([{ scope: 0, count: -1, kvPairs: { 3: [] } }]);
+    } catch (error) {
+      message = error.message;
+    }
+
+    expect(message).toMatch(/refused row eligibilityKey 3/);
+    expect(message).toMatch(/array\[0\]/);
+  });
+
+  it('composes a live array kv pair into one values constraint through readChallenge', () => {
+    const challenge = readLive([{ scope: 0, count: -1, kvPairs: { 3: [1, 2] } }]);
+
+    const { constraints } = normaliseRequirements(challenge.elgReq, {
+      operation: challenge.elgOperation,
+      keys: liveKeys().keys,
+      scopes: SCOPE_VALUES,
+    });
+
+    expect(constraints).toEqual([{ kind: 'PLAYER_QUALITY', values: [1, 2], scope: 'GREATER' }]);
+    expect(constraints[0]).not.toHaveProperty('value');
+  });
+
+  it('names a non-integer array element by index and type, never its value', () => {
+    let message = '';
+    try {
+      readLive([{ scope: 0, count: -1, kvPairs: { 3: [1, 'secret'] } }]);
+    } catch (error) {
+      message = error.message;
+    }
+
+    expect(message).toMatch(/refused row eligibilityKey 3/);
+    expect(message).toMatch(/value is array\[2\]/);
+    expect(message).toMatch(/element 1 is string/);
+    expect(message).not.toContain('secret');
+  });
+
+  it('keeps the scalar message when a non-array value is not an integer', () => {
+    let message = '';
+    try {
+      readLive([{ scope: 0, count: -1, kvPairs: { 3: 'secret' } }]);
+    } catch (error) {
+      message = error.message;
+    }
+
+    expect(message).toMatch(/its value is string, not an integer/);
+    expect(message).not.toContain('secret');
+  });
+
   it('names a kvPairs key the live key table cannot name', () => {
     let message = '';
     try {

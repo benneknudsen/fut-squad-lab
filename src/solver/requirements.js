@@ -51,13 +51,22 @@
  * not replace the value, because the flattened `elgReq` entry's
  * `eligibilityValue` is the target the rest of this module emits.
  *
+ * Several rows of the same `PLAYER_QUALITY` scalar key in one slot describe one
+ * requirement with more than one stated value. The slot decodes to a single
+ * constraint carrying `values` — the sorted, de-duplicated integers — and no
+ * `value`, because what EA means by the alternatives is not verified. Only
+ * `PLAYER_QUALITY` takes this path: every other scalar kind keeps the loud
+ * `Duplicate …` failure, and a duplicated count or match key still fails as
+ * before.
+ *
  * A descriptor may carry a `classify` tag; `PLAYER_RARITY_GROUP` values are
  * resolved through the adapter's `decodeRarityGroup` because the same key can
  * mean a geographic region, TOTS or TOTW-or-TOTS. An undecodable value fails
  * loudly with the key named.
  *
  * `PLAYER_QUALITY` is passed through as opaque scoped data: the constraint
- * carries `kind`, `value` and `scope` faithfully, and this module assumes no
+ * carries `kind`, `value` and `scope` faithfully — or `kind`, `values` and
+ * `scope` when repeated rows list several tiers — and this module assumes no
  * tier domain, because the fixtures only ever observe values 1, 2 and 3 and that
  * enum is not verified complete. How EA aggregates tiers across a squad is also
  * UNVERIFIED — the GREATER/LOWER/EXACT tiers may combine into a floor, a
@@ -295,14 +304,19 @@ const buildPlayerCountConstraint = (slot, scope, counts, matches, scalars) => {
 
 const buildScalarConstraint = (slot, scope, scalars) => {
   if (scalars.length > 1) {
-    const mixed = scalars.some((entry) => entry.key !== scalars[0].key);
-    if (mixed) {
+    if (scalars.some((entry) => entry.key !== scalars[0].key)) {
       fail(
         `eligibilitySlot ${slot} combines ${scalars[0].kind} with ${scalars[1].kind};` +
           ' one slot describes one requirement'
       );
     }
-    fail(`Duplicate ${scalars[0].kind} in eligibilitySlot ${slot}`);
+    if (scalars[0].kind !== 'PLAYER_QUALITY') {
+      fail(`Duplicate ${scalars[0].kind} in eligibilitySlot ${slot}`);
+    }
+    const values = [...new Set(scalars.map((entry) => entry.value))].sort(
+      (left, right) => left - right
+    );
+    return [{ kind: scalars[0].kind, values, scope }];
   }
 
   return [{ kind: scalars[0].kind, value: scalars[0].value, scope }];

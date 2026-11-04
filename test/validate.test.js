@@ -470,6 +470,24 @@ describe('validateSquad over the captured club fixture', () => {
     ]);
   });
 
+  it('reports a values-only PLAYER_QUALITY constraint as unverified instead of failing its value', () => {
+    const result = validateSquad(baseSquad(), [
+      { kind: 'PLAYER_QUALITY', values: [1, 3], scope: 'EXACT' },
+    ]);
+
+    expect(result.valid).toBe(true);
+    expect(result.failures).toEqual([]);
+    expect(result.unverified).toEqual([
+      {
+        kind: 'PLAYER_QUALITY',
+        required: [1, 3],
+        scope: 'EXACT',
+        reason: QUALITY_REASON,
+        diagnostic: { id: 'quality-not-checked', params: {} },
+      },
+    ]);
+  });
+
   it('carries the match object through to the failure', () => {
     const result = validateSquad(baseSquad(), [
       { kind: 'PLAYER_COUNT_MATCH', value: 5, scope: 'GREATER', match: { nationIds: [21] } },
