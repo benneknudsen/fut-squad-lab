@@ -51,9 +51,9 @@ const createFakeWindow = () => {
     reply,
     logs,
     messages,
-    dispatch(type) {
+    dispatch(type, event = {}) {
       for (const listener of listeners) {
-        listener.type === type && listener.handler({ type });
+        listener.type === type && listener.handler({ type, ...event });
       }
     },
   };
@@ -128,5 +128,71 @@ describe('the bridge installs the observer', () => {
     dispatch('pagehide');
 
     expect(prototype.initWithSBCSet).toBe(eaPanelHook);
+  });
+});
+
+// Issue #100: `pagehide` removes the observer even when the document is going
+// into the back/forward cache. A cached document comes back on the same JS heap,
+// but nothing re-runs the content script or the hook poll, so `pageshow` is the
+// only place the wrappers can be reinstalled.
+describe('the observer after a back/forward-cache restore', () => {
+  const start = () => {
+    const fake = createFakeWindow();
+    startPageBridge(fake.pageWindow, { nonce: TEST_NONCE, hookPollMs: 1, hookTimeoutMs: 20 });
+    return fake;
+  };
+
+  it('reinstalls the observer when pageshow reports a cache restore', () => {
+    const { pageWindow, originalSearch, reply, dispatch } = start();
+    expect(pageWindow.services.Club.search).not.toBe(originalSearch);
+
+    dispatch('pagehide', { persisted: true });
+    expect(pageWindow.services.Club.search).toBe(originalSearch);
+
+    dispatch('pageshow', { persisted: true });
+
+    expect(pageWindow.services.Club.search).not.toBe(originalSearch);
+    expect(pageWindow.services.Club.search({ count: 1 })).toBe(reply);
+    expect(logLines(pageWindow).some((line) => line.includes('services.Club.search'))).toBe(true);
+  });
+
+  it('does nothing when pageshow reports a real navigation', () => {
+    const { pageWindow, originalSearch, dispatch } = start();
+    dispatch('pagehide', { persisted: true });
+    expect(pageWindow.services.Club.search).toBe(originalSearch);
+    const logsBefore = pageWindow.console.log.mock.calls.length;
+
+    dispatch('pageshow', { persisted: false });
+
+    expect(pageWindow.services.Club.search).toBe(originalSearch);
+    expect(pageWindow.console.log.mock.calls.length).toBe(logsBefore);
+  });
+
+  it('does not stack wrappers when pageshow fires twice', () => {
+    const { pageWindow, originalSearch, dispatch } = start();
+    dispatch('pagehide', { persisted: true });
+
+    dispatch('pageshow', { persisted: true });
+    const wrapped = pageWindow.services.Club.search;
+    expect(wrapped).not.toBe(originalSearch);
+
+    dispatch('pageshow', { persisted: true });
+    expect(pageWindow.services.Club.search).toBe(wrapped);
+
+    pageWindow.services.Club.search({ count: 1 });
+    expect(
+      logLines(pageWindow).filter((line) => line.includes('services.Club.search'))
+    ).toHaveLength(1);
+  });
+
+  it('writes one boot line naming the cache restore', () => {
+    const { pageWindow, dispatch } = start();
+    dispatch('pagehide', { persisted: true });
+
+    dispatch('pageshow', { persisted: true });
+
+    expect(logLines(pageWindow)).toContain(
+      '[FUT Squad Lab] observer reinstalled after back/forward-cache'
+    );
   });
 });

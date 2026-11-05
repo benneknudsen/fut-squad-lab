@@ -208,11 +208,13 @@ export function startPageBridge(pageWindow, options = {}) {
    * Installs the observer on whatever targets this page exposes right now.
    * Idempotent, and never throws: it is instrumentation, so a missing EA
    * symbol must not affect the bridge or the player's session.
+   *
+   * @param {string} [line] the boot-log line naming why the install ran
    */
-  const installObservation = () => {
+  const installObservation = (line = 'observer installed') => {
     try {
       observer.install(resolveObservationTargets(pageWindow).targets);
-      bootLog('observer installed');
+      bootLog(line);
     } catch (error) {
       // A read-only observer must never be able to lose the bridge, so the
       // failure is still swallowed — but it is logged as well, because an
@@ -521,6 +523,21 @@ export function startPageBridge(pageWindow, options = {}) {
     // across the round trip costs nothing; a real unload gets EA's function
     // back.
     if (event?.persisted !== true) restorePanelPatch();
+  });
+
+  // #100: `pagehide` removed the observer above, including when the document
+  // went into the back/forward cache. A cache restore returns the same heap and
+  // the same listeners, but a content script is not injected again and the hook
+  // poll has stopped, so nothing else would put the wrappers back. `pageshow` is
+  // that missing step, and it only applies to a restore: a normal navigation
+  // loads a fresh document that boots the bridge from scratch.
+  //
+  // Product decision: an in-flight Solve is not resumed. `pagehide` cancelled
+  // both the service and its transport, so that run has no pending work to
+  // return to; only the observer and the #90 panel patch survive the round trip.
+  pageWindow.addEventListener('pageshow', (event) => {
+    if (event?.persisted !== true) return;
+    installObservation('observer reinstalled after back/forward-cache');
   });
 
   const deadline = Date.now() + hookTimeoutMs;
