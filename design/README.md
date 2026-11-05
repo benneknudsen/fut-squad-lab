@@ -53,7 +53,7 @@ properties change between game versions. `--fsl-*` cannot collide; `--surface` c
 | Group | Tokens |
 |---|---|
 | Surfaces (3 levels + well) | `--fsl-surface-0` panel body · `--fsl-surface-1` rows/header · `--fsl-surface-2` hover/open/locked · `--fsl-surface-inset` cost bar, alternatives, buy list |
-| Lines | `--fsl-border` decorative hairline · `--fsl-border-strong` control outlines · `--fsl-border-inverse` locked row |
+| Lines | `--fsl-border` decorative hairline · `--fsl-border-strong` functional control outlines (≥3:1) · `--fsl-border-inverse` locked row |
 | Text | `--fsl-fg` · `--fsl-fg-muted` · `--fsl-fg-dim` |
 | Accent | `--fsl-accent` (cyan) · `--fsl-accent-fg` · `--fsl-accent-deep` · `--fsl-accent-soft` · `--fsl-accent-line` |
 | Semantic | `--fsl-success` · `--fsl-warning` · `--fsl-danger` (+ `-soft` variants) |
@@ -82,9 +82,20 @@ Produced by `tools/contrast-check.py` (OKLch → sRGB → WCAG). Every text pair
 | accent text on its own 16 % tint | 7.5:1 | warning text on its own 16 % tint | 7.5:1 |
 | success text on its own 16 % tint | 7.9:1 | danger text on its own 16 % tint | 5.1:1 |
 
-Hairline `--fsl-border` measures 1.3:1 against the surfaces. That is intentional: it is a
-decorative separation line, never a functional boundary. The only functional boundary is the
-focus ring, which uses `--fsl-accent` (10.6:1).
+Hairline `--fsl-border` measures 1.32:1 against `--fsl-surface-1`. That is intentional: it is a
+decorative separation line, never a functional boundary. The functional boundaries are the
+control outline, `--fsl-border-strong`, and the focus ring, which uses `--fsl-accent` (10.6:1).
+
+`--fsl-border-strong` is `oklch(0.55 0.018 250)`. Lightness 0.55 is the smallest two-decimal
+step that clears 3:1 on all three surfaces with the intended margin of about 0.25 above the
+threshold: **3.99:1** on `--fsl-surface-0`, **3.70:1** on `--fsl-surface-1`, and **3.25:1** on
+`--fsl-surface-2`. The next lower step, 0.54, also clears 3:1 at **3.11:1** on `--fsl-surface-2`,
+but leaves only about 0.11 of margin, so 0.55 is the value the palette uses. It therefore meets
+WCAG 1.4.11 wherever a control outline identifies a boundary or state.
+
+`tools/contrast-check.py` exits non-zero when any pair that declares a target falls below it.
+The value 2.92:1 for `lime-deep` on `success` is informational only: `lime-deep` has no token in
+`tokens.css` and no component uses it.
 
 ---
 
