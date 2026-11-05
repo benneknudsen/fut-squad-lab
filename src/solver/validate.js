@@ -11,7 +11,7 @@
  *     valid: boolean,    // true only when `failures` is empty
  *     failures: [{
  *       kind,        // stable solver kind, as emitted by requirements.js
- *       required,    // the constraint's value
+ *       required,    // the constraint's value, or its values array
  *       actual,      // the measured quantity
  *       shortfall,   // how far it must move; 0 when satisfied
  *       scope,       // GREATER | LOWER | EXACT (RANGE is refused)
@@ -21,7 +21,7 @@
  *     }],
  *     unverified: [{
  *       kind,        // the kind whose requirement could not be checked
- *       required,    // the constraint's value
+ *       required,    // the constraint's value, or its values array
  *       scope,       // GREATER | LOWER | EXACT (RANGE is refused)
  *       reason,      // machine-readable code explaining why, see below
  *       match,       // the constraint's match object when present
@@ -108,7 +108,9 @@
  *
  * `PLAYER_QUALITY` is an opaque integer; how EA aggregates card tiers across a
  * squad is UNVERIFIED, so it is never measured, never appears in `failures`,
- * and is always reported in `unverified`. Supplying
+ * and is always reported in `unverified`. A constraint that lists several tiers
+ * as `values` instead of one `value` follows the same path, so a missing single
+ * value is never a finite-number failure. Supplying
  * `options.measures.PLAYER_QUALITY` throws: a custom aggregation function would
  * silently turn an unverified assumption into a gate (decision recorded on
  * issue #2, tracked by issue #16).
@@ -475,6 +477,16 @@ const requireDense = (values, label) => {
   }
 };
 
+/** A dense array whose entries are all finite numbers. */
+const requireFiniteNumbers = (values, label) => {
+  requireDense(values, label);
+  for (const value of values) {
+    if (!Number.isFinite(value)) {
+      fail(`${label} must contain only finite numbers`);
+    }
+  }
+};
+
 const ITEM_NUMERIC_FIELDS = Object.freeze(['id', 'rating', 'nationId', 'leagueId', 'clubId']);
 
 const requirePlayer = (player, index) => {
@@ -590,12 +602,7 @@ const readMatch = (match, index) => {
   if (!Array.isArray(values) || values.length === 0) {
     fail(`constraint ${index} match.${field} must be a non-empty array of numbers`);
   }
-  requireDense(values, `constraint ${index} match.${field}`);
-  for (const value of values) {
-    if (!Number.isFinite(value)) {
-      fail(`constraint ${index} match.${field} must contain only finite numbers`);
-    }
-  }
+  requireFiniteNumbers(values, `constraint ${index} match.${field}`);
 
   return { field, values };
 };
@@ -616,7 +623,22 @@ const requireConstraint = (constraint, index) => {
   if (!SCOPE_OPERATORS.includes(constraint.scope)) {
     fail(`Unknown scope ${JSON.stringify(constraint.scope)} on constraint ${index}`);
   }
-  if (!Number.isFinite(constraint.value)) {
+  if (Object.hasOwn(constraint, 'value')) {
+    if (!Number.isFinite(constraint.value)) {
+      fail(`constraint ${index} required value must be a finite number`);
+    }
+  } else if (Object.hasOwn(constraint, 'values')) {
+    if (constraint.kind !== 'PLAYER_QUALITY') {
+      fail(
+        `constraint ${index} (${constraint.kind}) must not carry values; only PLAYER_QUALITY` +
+          ' lists several stated values'
+      );
+    }
+    if (!Array.isArray(constraint.values) || constraint.values.length === 0) {
+      fail(`constraint ${index} values must be a non-empty array of finite numbers`);
+    }
+    requireFiniteNumbers(constraint.values, `constraint ${index} values`);
+  } else {
     fail(`constraint ${index} required value must be a finite number`);
   }
   if (constraint.kind === 'PLAYER_COUNT_MATCH' && constraint.match === undefined) {
@@ -639,7 +661,7 @@ const isPlayerLevelMatch = (constraint) =>
 const unverifiedEntry = (constraint, reason) => {
   const entry = {
     kind: constraint.kind,
-    required: constraint.value,
+    required: Object.hasOwn(constraint, 'value') ? constraint.value : constraint.values,
     scope: constraint.scope,
     reason,
     diagnostic: { id: UNVERIFIED_DIAGNOSTIC_IDS[reason], params: {} },
@@ -656,6 +678,9 @@ const unverifiedEntry = (constraint, reason) => {
  */
 const checkConstraint = (constraint, actual, unverified) => {
   const { kind, value: required, scope } = constraint;
+  if (!Number.isFinite(required)) {
+    fail(`constraint ${JSON.stringify(kind)} reached measurement without a single value`);
+  }
 
   let shortfall;
   if (scope === 'GREATER') {
