@@ -26,7 +26,7 @@
 
   /* ── Lines ─────────────────────────────────────────────────────────────── */
   --fsl-border: oklch(0.30 0.016 250);         /* hairline separators (decorative) */
-  --fsl-border-strong: oklch(0.48 0.018 250);  /* input + control outlines         */
+  --fsl-border-strong: oklch(0.55 0.018 250);  /* input + control outlines — 3.99:1 / 3.70:1 / 3.25:1 on surface-0/1/2 */
   --fsl-border-inverse: oklch(0.965 0.006 250); /* locked row: the user's own choice */
 
   /* ── Text ──────────────────────────────────────────────────────────────── */
