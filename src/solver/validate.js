@@ -237,6 +237,23 @@ const UNVERIFIED_DIAGNOSTIC_IDS = Object.freeze({
 });
 
 /**
+ * The authoritative diagnostic vocabulary: every stable id mapped to the params
+ * its entry carries. It is built from the failure and unverified tables above,
+ * so a new measurable kind or reason appears here automatically and cannot
+ * drift from what `checkConstraint` and `unverifiedEntry` emit. The UI's copy
+ * test reads this export, which is why it is the one list a new id must join.
+ */
+export const DIAGNOSTIC_CATALOGUE = Object.freeze(
+  Object.fromEntries([
+    ...Object.entries(FAILURE_DIAGNOSTIC_IDS).map(([kind, id]) => [
+      id,
+      Object.freeze([QUANTITY_DIAGNOSTIC_PARAMS[kind] ?? 'count']),
+    ]),
+    ...Object.values(UNVERIFIED_DIAGNOSTIC_IDS).map((id) => [id, Object.freeze([])]),
+  ])
+);
+
+/**
  * Every reason code this validator knows. A chemistry object that reports
  * `verified: false` must carry one of these: a free-form string cannot be
  * translated to a diagnostic, and a plausible-looking wrong reason must not
