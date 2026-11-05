@@ -83,14 +83,28 @@ result in action against your account. You use this software at your own risk.
 The extension deliberately does not auto-submit challenges, so that a human
 remains in the loop.
 
-To put the Solve button inside EA's own SBC panel, the extension patches one EA
-class prototype: `UTSBCSquadDetailPanelViewController.initWithSBCSet` is wrapped
-with a function that calls EA's own method with the same `this` and the same
-arguments, returns its result unchanged, and mounts the button afterwards. It is
-the only mutation the extension makes to EA's objects, and it is undone when the
-page unloads — EA's own function is put back. The one case that keeps the patch
-is a back/forward-cache navigation, where the page is frozen and comes back on
-the same heap, so the wrapper is still there when it resumes.
+The extension makes two deliberate mutations to EA's objects, and each is
+unwound on its own terms.
+
+The first puts the Solve button inside EA's own SBC panel: one EA class prototype
+is patched, with `UTSBCSquadDetailPanelViewController.initWithSBCSet` wrapped by
+a function that calls EA's own method with the same `this` and the same
+arguments, returns its result unchanged, and mounts the button afterwards. That
+patch is restored when the page unloads, so EA's own function is put back. The
+one case that keeps it is a back/forward-cache navigation, where the page is
+frozen and comes back on the same heap, so the wrapper is still there when it
+resumes.
+
+The second is the diagnostic observer, which wraps the EA methods it watches —
+`services.Club.search`, `services.Club.clubDao.getClubItems`,
+`services.Item.searchStorageItems`, and the panel hook above — so it can record
+how EA itself calls them. Every wrapper is read-only: it records the call, calls
+the original with the same `this` and arguments, and returns EA's result by
+identity. The observer's wrappers are removed whenever the page fires
+`pagehide`, restoring each watched method it still wraps to the exact function
+it replaced. The panel patch is the only one of the two that is not guaranteed
+to be unwound within the page's lifetime, and only because of the back/forward
+cache case above; every other unload hands EA its own function back.
 
 ## License
 
