@@ -329,4 +329,66 @@ describe('createSolveService', () => {
     expect(club.detail.shapeError).toMatch(/shape exploded/);
     expect(steps.describeServiceShape).toHaveBeenCalledTimes(1);
   });
+
+  it('reports the live service shape beside the attempts when the squad read fails', async () => {
+    const attempts = [{ id: 'panel-argument', ok: false, reason: 'no squad.players array' }];
+    const steps = createSteps({
+      resolveChallengeSquad: vi.fn(() => ({
+        ok: false,
+        payload: null,
+        strategy: null,
+        attempts,
+      })),
+      describeServiceShape: vi.fn(() => ({ schema: 'fsl-service-shape/1' })),
+    });
+    const { service } = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+    const squad = outcome.stages.find((stage) => stage.id === 'squad');
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.stage).toBe('squad');
+    expect(squad.detail.attempts).toEqual(attempts);
+    expect(squad.detail.serviceShape).toEqual({
+      report: { schema: 'fsl-service-shape/1' },
+      reason: null,
+    });
+    expect(steps.describeServiceShape).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds no service shape section to a successful squad read', async () => {
+    const steps = createSteps({ describeServiceShape: vi.fn() });
+    const { service } = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+    const squad = outcome.stages.find((stage) => stage.id === 'squad');
+
+    expect(outcome.ok).toBe(true);
+    expect(squad.detail).not.toHaveProperty('serviceShape');
+    expect(steps.describeServiceShape).not.toHaveBeenCalled();
+  });
+
+  it('keeps the squad diagnostics when the service shape report throws', async () => {
+    const steps = createSteps({
+      resolveChallengeSquad: vi.fn(() => ({
+        ok: false,
+        payload: null,
+        strategy: null,
+        attempts: [{ id: 'panel-argument', ok: false, reason: 'no squad.players array' }],
+      })),
+      describeServiceShape: vi.fn(() => {
+        throw new Error('shape exploded');
+      }),
+    });
+    const { service } = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+    const squad = outcome.stages.find((stage) => stage.id === 'squad');
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.stage).toBe('squad');
+    expect(squad.detail.serviceShape.report).toBeNull();
+    expect(squad.detail.serviceShape.reason).toMatch(/shape report failed/);
+    expect(squad.detail.serviceShape.reason).toMatch(/shape exploded/);
+  });
 });

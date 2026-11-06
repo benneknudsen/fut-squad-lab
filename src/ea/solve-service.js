@@ -15,7 +15,10 @@
  * diagnostic report (#40) without any stage work of its own. A failed club read
  * additionally carries the live service and request surface shape report (#44)
  * in its detail, because the failed strategy list cannot say what the page
- * exposes instead. A failure at one stage leaves the later stages unrecorded;
+ * exposes instead. A failed challenge squad read carries that same report under
+ * `serviceShape` beside its attempts, so the next live run names the method that
+ * returns the squad instead of another guess (#129). A failure at one stage
+ * leaves the later stages unrecorded;
  * `completeStages` in `src/ea/summary.js` fills those with an explicit
  * not-reached outcome.
  *
@@ -423,6 +426,8 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
       } catch (error) {
         squadResult = thrownStageResult(error);
       }
+      const squadShapeResult =
+        squadResult.ok === true ? null : describeShapeSafely();
       record(
         'squad',
         squadResult.ok === true,
@@ -431,7 +436,23 @@ export function createSolveService({ pageWindow, requestSolve, steps = {}, pacer
           : squadResult.thrown !== undefined
             ? `the challenge squad read threw: ${squadResult.thrown.message}`
             : `the challenge squad payload is unreadable; tried ${describeAttempts(squadResult.attempts)}`,
-        { strategy: squadResult.strategy ?? null, attempts: squadResult.attempts }
+        {
+          strategy: squadResult.strategy ?? null,
+          attempts: squadResult.attempts,
+          // The live service and request surface (#129): the failed strategy
+          // list cannot say what the page exposes instead, so the next live
+          // report names every reachable method. Failure only; the attempts
+          // stay beside it. A shape failure is a recorded reason, never a lost
+          // solve (#50).
+          ...(squadShapeResult === null
+            ? {}
+            : {
+                serviceShape: {
+                  report: squadShapeResult.report,
+                  reason: squadShapeResult.reason,
+                },
+              }),
+        }
       );
       if (!squadResult.ok) {
         return finish({
