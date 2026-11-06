@@ -651,6 +651,64 @@ describe('solve-service staged diagnostics', () => {
     });
   }
 
+  it('carries the service shape report beside the squad attempts when the squad read fails', async () => {
+    const attempts = [{ id: 'panel-argument', ok: false, reason: 'no squad.players array' }];
+    const steps = createSteps({
+      resolveChallengeSquad: vi.fn(() => ({
+        ok: false,
+        payload: null,
+        strategy: null,
+        attempts,
+      })),
+    });
+    const service = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+    const report = buildDiagnosticsReport(outcome.stages);
+    const squad = stageById(report.stages, 'squad');
+
+    expect(report.ok).toBe(false);
+    expect(report.stoppedAt).toBe('squad');
+    expect(squad.ok).toBe(false);
+    expect(squad.detail.attempts).toEqual(attempts);
+    expect(squad.detail.serviceShape.report.schema).toBe('fsl-service-shape/1');
+    expect(squad.detail.serviceShape.reason).toBeNull();
+  });
+
+  it('carries no service shape section on a successful squad read', async () => {
+    const steps = createSteps();
+    const service = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+    const report = buildDiagnosticsReport(outcome.stages);
+    const squad = stageById(report.stages, 'squad');
+
+    expect(report.ok).toBe(true);
+    expect(squad.ok).toBe(true);
+    expect(squad.detail).not.toHaveProperty('serviceShape');
+  });
+
+  it('keeps the club failure shape section unchanged and adds no squad shape before the squad stage', async () => {
+    const steps = createSteps({
+      resolveClubItems: vi.fn(async () => ({
+        ok: false,
+        items: [],
+        strategy: null,
+        attempts: [{ id: 'fake-club-reader', ok: false, reason: 'no method' }],
+      })),
+    });
+    const service = createService(steps);
+
+    const outcome = await service.solve({ subject: 'panel' });
+    const report = buildDiagnosticsReport(outcome.stages);
+    const club = stageById(report.stages, 'club');
+
+    expect(report.stoppedAt).toBe('club');
+    expect(club.detail.shape.schema).toBe('fsl-service-shape/1');
+    expect(club.detail.shapeError).toBeNull();
+    expect(club.detail).not.toHaveProperty('serviceShape');
+  });
+
   it('records a stage that throws with its error message and leaves the later stages unrecorded', async () => {
     const steps = createSteps({
       readClubItems: vi.fn(() => {
@@ -1351,7 +1409,7 @@ describe('the page bridge writes the evidence file only for a failed Solve', () 
     expect(report.stoppedAt).toBe('club');
     expect(report.download).toEqual({
       ok: true,
-      file: expect.stringMatching(/^fsl-diagnostics-fsl-build-23-\d{4}-\d{2}-\d{2}\.json$/),
+      file: expect.stringMatching(/^fsl-diagnostics-fsl-build-24-\d{4}-\d{2}-\d{2}\.json$/),
     });
     expect(report.download.file).not.toContain('T');
 
@@ -1429,7 +1487,7 @@ describe('the page bridge writes the evidence file only for a failed Solve', () 
     const club = report.stages.find((stage) => stage.id === 'club');
     const challenge = report.stages.find((stage) => stage.id === 'challenge');
 
-    expect(report.build.id).toBe('fsl-build/23');
+    expect(report.build.id).toBe('fsl-build/24');
     expect(challenge.detail.challengeId).toBe(25);
     expect(club.detail).toMatchObject({
       field: 'items',

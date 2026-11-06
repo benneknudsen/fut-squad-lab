@@ -178,8 +178,16 @@ import {
  *   element now becomes its own wire row, a non-integer element fails naming
  *   its index and type, and repeated rows of one scalar key decode into a
  *   `values` constraint instead of a duplicate failure.
+ *
+ * Incremented by fsl-build/24, one defect from the `fsl-build/23` live run: the
+ *   challenge squad stage failed on every strategy and reported only its
+ *   attempt list, so the live report could not name the service method that
+ *   returns the challenge squad. A failed squad read now carries the same
+ *   paste-safe `fsl-service-shape/1` service and request surface report as a
+ *   failed club read, beside its per-attempt list; a successful squad read
+ *   carries none.
  */
-export const BUILD_ID = 'fsl-build/23';
+export const BUILD_ID = 'fsl-build/24';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact
