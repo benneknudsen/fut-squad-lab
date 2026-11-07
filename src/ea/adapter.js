@@ -6451,14 +6451,33 @@ export const ACTIVE_SQUAD_METHODS = Object.freeze([
  * `{ challengeId, squad: { players: [...] } }` wrapper the writer consumes. The
  * captured fixture `test/fixtures/sbs-challenge-25-squad.json` is that shape.
  *
- * The first entry is the squad carried by the loaded challenge payload (#51);
- * the last two entries are the search view model's active-squad definition-id
- * request, called with no arguments through the observable bridge. Every entry
- * keeps its `{id, ok, reason}` record and, when a callable method was reached,
- * its method shape.
+ * The first entry is the squad carried by the loaded challenge payload (#51).
+ * The two fetch entries after it are EA's own challenge readers (#131): the
+ * squad arrives on a separate call (`GET /sbs/challenge/{id}/squad`), so a
+ * payload that carries no squad is fetched through the DAO first and the SBC
+ * service second, both through the paced observable bridge. They are ordered
+ * before the property probes because a fetched shape is what the live page
+ * actually has. The last two entries are the search view model's active-squad
+ * definition-id request, called with no arguments through the observable
+ * bridge. Every entry keeps its `{id, ok, reason}` record and, when a callable
+ * method was reached, its method shape.
  */
 export const CHALLENGE_SQUAD_STRATEGIES = Object.freeze([
   Object.freeze({ id: 'challenge-load.squad', source: 'loaded' }),
+  Object.freeze({
+    id: 'services.SBC.sbcDAO.loadChallenge+subject',
+    container: 'services',
+    target: 'SBC.sbcDAO',
+    method: SBC_SET_API.loadChallenge,
+    fetch: 'dao',
+  }),
+  Object.freeze({
+    id: 'services.SBC.loadChallenge+subject',
+    container: 'services',
+    target: 'SBC',
+    method: SBC_SET_API.loadChallenge,
+    fetch: 'entity',
+  }),
   Object.freeze({ id: 'panel-argument', path: [] }),
   Object.freeze({ id: 'panel-argument.data', path: ['data'] }),
   Object.freeze({ id: 'panel-argument.challenge', path: ['challenge'] }),
@@ -6478,14 +6497,357 @@ export const CHALLENGE_SQUAD_STRATEGIES = Object.freeze([
   ),
 ]);
 
-const carriesChallengeSquad = (value) => {
-  if (!isRecordObject(value)) return false;
-  const squad = value[CHALLENGE_SQUAD_FIELDS.squad];
-  return (
-    squad !== null &&
-    typeof squad === 'object' &&
-    Array.isArray(squad[CHALLENGE_SQUAD_FIELDS.players])
-  );
+/**
+ * The names a slot entity exposes in the live `fsl-build/24` shape. A squad the
+ * writer receives is normally a plain `{ players: [{ index, itemData }] }`
+ * wrapper, but EA's own entity carries its slots behind `getPlayers()` and each
+ * slot behind `getItem()`/`isBrick()`/`isLocked()`. These are probed, never
+ * assumed, so an entity squad is normalised to the wire shape at the read edge
+ * instead of forcing a conversion layer inside the writer (#131).
+ */
+const SQUAD_SLOT_METHODS = Object.freeze({
+  getPlayers: 'getPlayers',
+  getItem: 'getItem',
+  item: 'item',
+  isBrick: 'isBrick',
+  getIsBrick: 'getIsBrick',
+  isLocked: 'isLocked',
+  getIsLocked: 'getIsLocked',
+});
+
+const SQUAD_SLOT_FIELDS = Object.freeze({
+  index: CHALLENGE_SQUAD_FIELDS.index,
+});
+
+/** Names an object's own keys and their types, never their values. */
+const describeSquadKeyTypes = (value) => {
+  if (!isRecordObject(value)) return describeValue(value);
+  const entries = describeOwnPropertyTypes(value);
+  return entries.length === 0
+    ? 'no own keys'
+    : entries.map((entry) => `${entry.name}: ${entry.type}`).join(', ');
+};
+
+const describeSquadObservation = (value) => {
+  if (!isRecordObject(value)) return describeValue(value);
+  const own = describeSquadKeyTypes(value);
+  const data = readDataProperty(value, SBC_SET_API.data);
+  if (data.ok && isRecordObject(data.value)) {
+    return `${describeValue(value)} carrying [${own}]; data carries [${describeSquadKeyTypes(
+      data.value
+    )}]`;
+  }
+  return `${describeValue(value)} carrying [${own}]`;
+};
+
+const isSquadLike = (value) =>
+  isRecordObject(value) &&
+  (Array.isArray(value[CHALLENGE_SQUAD_FIELDS.players]) ||
+    findMethod(value, SQUAD_SLOT_METHODS.getPlayers).ok);
+
+/**
+ * Finds the bounded location a squad may live at, most specific first:
+ * `payload.data.squad`, `payload.squad`, then `payload.data` and the payload
+ * itself when either already is the squad. The returned `payload` is the object
+ * the writer should receive — the wrapper carrying `squad`, or the squad itself
+ * when the payload was already one.
+ */
+const readSquadCandidate = (value) => {
+  if (!isRecordObject(value)) return null;
+  const data = readDataProperty(value, SBC_SET_API.data);
+  if (data.ok && isRecordObject(data.value)) {
+    const nested = readDataProperty(data.value, CHALLENGE_SQUAD_FIELDS.squad);
+    if (nested.ok && isRecordObject(nested.value)) {
+      return { squad: nested.value, payload: data.value, direct: false, from: 'data.squad' };
+    }
+  }
+  const squad = readDataProperty(value, CHALLENGE_SQUAD_FIELDS.squad);
+  if (squad.ok && isRecordObject(squad.value)) {
+    return { squad: squad.value, payload: value, direct: false, from: 'squad' };
+  }
+  if (data.ok && isSquadLike(data.value)) {
+    return { squad: data.value, payload: data.value, direct: true, from: 'data' };
+  }
+  if (isSquadLike(value)) {
+    return { squad: value, payload: value, direct: true, from: 'payload' };
+  }
+  return null;
+};
+
+const callSlotFlag = (slot, names) => {
+  for (const name of names) {
+    const found = findMethod(slot, name);
+    if (!found.ok) continue;
+    try {
+      return { ok: true, value: found.value.call(slot), from: name };
+    } catch {
+      return { ok: false, from: name };
+    }
+  }
+  return null;
+};
+
+/** Normalises one entity slot to `{ index, itemData, brick?, locked? }`. */
+const normaliseSquadSlot = (slot, position) => {
+  if (!isRecordObject(slot)) {
+    return {
+      entry: { index: position, itemData: null },
+      report: { indexFrom: 'position', itemFrom: null },
+    };
+  }
+
+  const indexRead = readDataProperty(slot, SQUAD_SLOT_FIELDS.index);
+  const hasIndex = indexRead.ok && Number.isFinite(indexRead.value);
+  const entry = { index: hasIndex ? indexRead.value : position, itemData: null };
+  const report = { indexFrom: hasIndex ? SQUAD_SLOT_FIELDS.index : 'position', itemFrom: null };
+
+  const getItem = findMethod(slot, SQUAD_SLOT_METHODS.getItem);
+  if (getItem.ok) {
+    try {
+      entry.itemData = getItem.value.call(slot);
+      report.itemFrom = SQUAD_SLOT_METHODS.getItem;
+    } catch {
+      report.itemFrom = `${SQUAD_SLOT_METHODS.getItem}(threw)`;
+    }
+  } else {
+    const item = readDataProperty(slot, SQUAD_SLOT_METHODS.item);
+    if (item.ok) {
+      entry.itemData = item.value;
+      report.itemFrom = SQUAD_SLOT_METHODS.item;
+    }
+  }
+
+  const brick = callSlotFlag(slot, [SQUAD_SLOT_METHODS.isBrick, SQUAD_SLOT_METHODS.getIsBrick]);
+  if (brick !== null) {
+    report.brickFrom = brick.from;
+    if (brick.ok) entry.brick = brick.value;
+  }
+  const locked = callSlotFlag(slot, [SQUAD_SLOT_METHODS.isLocked, SQUAD_SLOT_METHODS.getIsLocked]);
+  if (locked !== null) {
+    report.lockedFrom = locked.from;
+    if (locked.ok) entry.locked = locked.value;
+  }
+  return { entry, report };
+};
+
+const mergeSlotReports = (reports) => {
+  const pick = (key) => {
+    const values = [...new Set(reports.map((report) => report[key]).filter(Boolean))];
+    if (values.length === 0) return null;
+    return values.length === 1 ? values[0] : 'mixed';
+  };
+  return {
+    indexFrom: pick('indexFrom'),
+    itemFrom: pick('itemFrom'),
+    brickFrom: pick('brickFrom'),
+    lockedFrom: pick('lockedFrom'),
+  };
+};
+
+/**
+ * Reads the slot array off a squad. A `players` array is the wire shape and is
+ * accepted as-is. An entity squad has no such array; it exposes `getPlayers()`,
+ * which is feature-detected and called once. The report names which method
+ * answered so a diagnostics run can tell an entity squad from a wire squad.
+ */
+const readSquadPlayers = (squad) => {
+  if (Array.isArray(squad[CHALLENGE_SQUAD_FIELDS.players])) {
+    return {
+      ok: true,
+      squad,
+      report: {
+        source: CHALLENGE_SQUAD_FIELDS.players,
+        slotCount: squad[CHALLENGE_SQUAD_FIELDS.players].length,
+        entity: false,
+      },
+    };
+  }
+
+  const getPlayers = findMethod(squad, SQUAD_SLOT_METHODS.getPlayers);
+  if (!getPlayers.ok) {
+    return {
+      ok: false,
+      reason:
+        `the squad carries no ${CHALLENGE_SQUAD_FIELDS.players} array and no` +
+        ` ${SQUAD_SLOT_METHODS.getPlayers} method`,
+      report: { source: null, entity: false },
+    };
+  }
+
+  const baseReport = {
+    source: SQUAD_SLOT_METHODS.getPlayers,
+    entity: true,
+    getPlayers: describeMethodShape(getPlayers.value),
+  };
+  let returned;
+  try {
+    returned = getPlayers.value.call(squad);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `${SQUAD_SLOT_METHODS.getPlayers}() threw: ${describeCause(error)}`,
+      report: baseReport,
+    };
+  }
+  if (!Array.isArray(returned)) {
+    return {
+      ok: false,
+      reason:
+        `${SQUAD_SLOT_METHODS.getPlayers}() returned ${describeValue(returned)}, not an array` +
+        ' of slots',
+      report: baseReport,
+    };
+  }
+
+  const normalised = returned.map((slot, position) => normaliseSquadSlot(slot, position));
+  return {
+    ok: true,
+    squad: { ...squad, [CHALLENGE_SQUAD_FIELDS.players]: normalised.map((slot) => slot.entry) },
+    report: {
+      ...baseReport,
+      slotCount: normalised.length,
+      ...mergeSlotReports(normalised.map((slot) => slot.report)),
+    },
+  };
+};
+
+/**
+ * Reads a finite challenge id off a value, in probe order. This is deliberately
+ * the same identity list the challenge reader uses (`challengeId`, then `id`),
+ * because the wire entry and the live entity spell the same value differently
+ * (#113).
+ */
+const challengeIdOf = (value) => {
+  if (!isRecordObject(value)) return null;
+  for (const field of CHALLENGE_IDENTITY_PROPERTIES) {
+    const read = readDataProperty(value, field);
+    if (read.ok && Number.isFinite(read.value)) return read.value;
+  }
+  return null;
+};
+
+/**
+ * Resolves the challenge id a squad read must use, never the set id.
+ *
+ * The panel's first argument is `UTSBCSetEntity` (the set), and the challenge
+ * id is the panel's second argument / `loadedPayload.challengeId` — proven in
+ * `fsl-build/13` and `fsl-build/24`, where the first argument named set 16 and
+ * the second named that set's challenge 37. The loaded payload is therefore read
+ * first. The subject may stand in only when it is itself a challenge: it must
+ * carry a finite `challengeId`/`id` *and* a top-level requirements array,
+ * exactly the test `resolveChallengeSubject` uses to tell a challenge from a
+ * set. A subject that carries an id but no requirements is the set, and using
+ * its id would call EA for the wrong challenge.
+ *
+ * @returns {{ ok: true, challengeId: number, entity: object, source: string } |
+ *   { ok: false, challengeId: null, entity: null, source: null, reason: string }}
+ */
+const resolveChallengeSquadIdentity = (subject, loadedPayload) => {
+  const loadedId = challengeIdOf(loadedPayload);
+  if (loadedId !== null) {
+    return {
+      ok: true,
+      challengeId: loadedId,
+      entity: loadedPayload,
+      source: 'loadedPayload',
+    };
+  }
+
+  const subjectId = challengeIdOf(subject);
+  if (subjectId !== null && carriesTopLevelRequirements(subject)) {
+    return { ok: true, challengeId: subjectId, entity: subject, source: 'subject' };
+  }
+
+  if (subjectId !== null) {
+    return {
+      ok: false,
+      challengeId: null,
+      entity: null,
+      source: null,
+      reason:
+        `the subject is the SBC set carrying id ${subjectId}; it carries no challenge` +
+        ' identity (the challenge id is the panel\'s second argument or' +
+        ` ${CHALLENGE_SQUAD_FIELDS.challengeId} on the loaded payload)`,
+    };
+  }
+
+  return {
+    ok: false,
+    challengeId: null,
+    entity: null,
+    source: null,
+    reason:
+      `the subject is ${describeSubject(subject)}; it carries no challenge identity` +
+      " (the challenge id is the panel's second argument or" +
+      ` ${CHALLENGE_SQUAD_FIELDS.challengeId} on the loaded payload)`,
+  };
+};
+
+/**
+ * Resolves a squad payload at the bounded locations and normalises it to the
+ * exact shape `planSquadWrite` requires:
+ *
+ *   { challengeId: <number>, squad: { ..., players: [...] } }
+ *
+ * A wrapper that already carries a finite challenge id keeps it; otherwise the
+ * id from the load identity is stamped on the wrapper. A payload that is itself
+ * the squad is wrapped, because the writer reads only the wrapper. An entity
+ * squad normalised through `getPlayers()` keeps its own fields (`id`,
+ * `formation`, `rating`, `chemistry`, `manager`) and gains `players`. A payload
+ * with no finite id anywhere is not ok — the writer refuses it, so the read
+ * edge must say why instead of handing over a shape that will throw later.
+ */
+const resolveChallengeSquadPayload = (value, challengeId = null) => {
+  const candidate = readSquadCandidate(value);
+  if (candidate === null) {
+    return {
+      ok: false,
+      reason:
+        `returned ${describeSquadObservation(value)}; it carries no` +
+        ` ${CHALLENGE_SQUAD_FIELDS.squad}.${CHALLENGE_SQUAD_FIELDS.players} array`,
+    };
+  }
+
+  const players = readSquadPlayers(candidate.squad);
+  const report = { ...players.report, from: candidate.from };
+  if (!players.ok) {
+    return {
+      ok: false,
+      reason: `${players.reason} (the squad carries [${describeSquadKeyTypes(candidate.squad)}])`,
+      report,
+    };
+  }
+
+  const wrapperId = candidate.direct ? null : challengeIdOf(candidate.payload);
+  if (wrapperId !== null && players.report.entity !== true) {
+    // The wrapper already carries the writer's exact shape; returning it as-is
+    // keeps an existing reader's identity and costs no allocation.
+    return { ok: true, payload: candidate.payload, squad: players.squad, report };
+  }
+  const resolvedId = wrapperId ?? (Number.isFinite(challengeId) ? challengeId : null);
+  if (resolvedId === null) {
+    return {
+      ok: false,
+      reason:
+        `the squad payload carries no finite ${CHALLENGE_SQUAD_FIELDS.challengeId}` +
+        ' and the load identity named none',
+      report,
+    };
+  }
+
+  const squad = { ...players.squad };
+  const payload = {
+    ...(candidate.direct ? {} : candidate.payload),
+    [CHALLENGE_SQUAD_FIELDS.challengeId]: resolvedId,
+    [CHALLENGE_SQUAD_FIELDS.squad]: squad,
+  };
+  return { ok: true, payload, squad, report };
+};
+
+/** Records a payload resolution on the attempt and reports whether it succeeded. */
+const settleSquadAttempt = (attempt, resolved) => {
+  if (resolved.report !== undefined) attempt.squad = resolved.report;
+  return resolved.ok;
 };
 
 /**
@@ -6520,18 +6882,63 @@ export async function resolveChallengeSquad(
   const timeoutMs = resolveTimeoutMs(options.observableTimeoutMs);
   const pacer = resolvePacer(options);
   const attempts = [];
+  const identity = resolveChallengeSquadIdentity(subject, loadedPayload);
 
   for (const strategy of CHALLENGE_SQUAD_STRATEGIES) {
     const attempt = { id: strategy.id, ok: false, reason: null };
     attempts.push(attempt);
 
     if (strategy.source === 'loaded') {
-      if (carriesChallengeSquad(loadedPayload)) {
-        attempt.ok = true;
-        return { ok: true, payload: loadedPayload, strategy: strategy.id, attempts };
+      const resolved = resolveChallengeSquadPayload(loadedPayload, identity.challengeId);
+      if (!settleSquadAttempt(attempt, resolved)) {
+        attempt.reason = `the loaded challenge payload ${resolved.reason}`;
+        continue;
       }
-      attempt.reason = 'the loaded challenge payload carries no squad.players array';
-      continue;
+      attempt.ok = true;
+      return { ok: true, payload: resolved.payload, strategy: strategy.id, attempts };
+    }
+
+    if (strategy.fetch !== undefined) {
+      const base = resolveStrategyBase(pageWindow, strategy);
+      if (!base.ok) {
+        attempt.reason = base.reason;
+        continue;
+      }
+      const found = findMethod(base.value, strategy.method);
+      if (!found.ok) {
+        attempt.reason = describeMissingMethod(base.name, strategy.method, found.reason);
+        continue;
+      }
+      attempt.method = describeMethodShape(found.value);
+
+      if (!identity.ok) {
+        attempt.reason = identity.reason;
+        continue;
+      }
+      const callArguments =
+        strategy.fetch === 'dao'
+          ? [identity.challengeId, entityFlag(identity.entity, SBC_SET_API.isInProgress)]
+          : [identity.entity];
+
+      const call = await callReadMethod(
+        found,
+        base.value,
+        callArguments,
+        strategy.id,
+        timeoutMs,
+        { pacer, kind: CALL_KINDS.SQUAD_READ }
+      );
+      if (!call.ok) {
+        attempt.reason = call.reason;
+        continue;
+      }
+      const resolved = resolveChallengeSquadPayload(call.event.payload, identity.challengeId);
+      if (!settleSquadAttempt(attempt, resolved)) {
+        attempt.reason = resolved.reason;
+        continue;
+      }
+      attempt.ok = true;
+      return { ok: true, payload: resolved.payload, strategy: strategy.id, attempts };
     }
 
     if (strategy.method !== undefined) {
@@ -6554,15 +6961,13 @@ export async function resolveChallengeSquad(
         attempt.reason = call.reason;
         continue;
       }
-      const event = call.event;
-      if (!carriesChallengeSquad(event.payload)) {
-        attempt.reason = `returned no ${CHALLENGE_SQUAD_FIELDS.squad}.${CHALLENGE_SQUAD_FIELDS.players} array (got ${describeValue(
-          event.payload
-        )})`;
+      const resolved = resolveChallengeSquadPayload(call.event.payload, identity.challengeId);
+      if (!settleSquadAttempt(attempt, resolved)) {
+        attempt.reason = resolved.reason;
         continue;
       }
       attempt.ok = true;
-      return { ok: true, payload: event.payload, strategy: strategy.id, attempts };
+      return { ok: true, payload: resolved.payload, strategy: strategy.id, attempts };
     }
 
     const resolved = readStrategyValue(subject, pageWindow, strategy);
@@ -6570,14 +6975,13 @@ export async function resolveChallengeSquad(
       attempt.reason = resolved.reason;
       continue;
     }
-    if (!carriesChallengeSquad(resolved.value)) {
-      attempt.reason = `${strategy.id.replace('panel-argument', 'panel argument')} has no ${
-        CHALLENGE_SQUAD_FIELDS.squad
-      }.${CHALLENGE_SQUAD_FIELDS.players} array`;
+    const squad = resolveChallengeSquadPayload(resolved.value, identity.challengeId);
+    if (!settleSquadAttempt(attempt, squad)) {
+      attempt.reason = `${strategy.id.replace('panel-argument', 'panel argument')} ${squad.reason}`;
       continue;
     }
     attempt.ok = true;
-    return { ok: true, payload: resolved.value, strategy: strategy.id, attempts };
+    return { ok: true, payload: squad.payload, strategy: strategy.id, attempts };
   }
 
   return { ok: false, payload: null, strategy: null, attempts };
