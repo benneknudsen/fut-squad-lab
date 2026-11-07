@@ -14,6 +14,7 @@ these, not against hand-written guesses.
 | `sbs-set-16-challenges.json` | `GET /sbs/setId/16/challenges` | A second challenge set, for variety |
 | `sbs-entity-challenge-18.json` | `GET /sbs/setId/6/challenges`, live entity layer | The `UTSBCChallengeEntity` names for identity, requirements and operation (`id`, `eligibilityRequirements`, `eligibilityOperation`) |
 | `sbs-challenge-25-squad.json` | `POST /sbs/challenge/25` | The empty squad template a solution is written into |
+| `sbs-challenge-18-squad.json` | `GET /sbs/challenge/18/squad` | The fetched challenge-squad shape: 23 `{index, itemData}` slots, one populated and one empty template (issue #131) |
 | `club-items.json` | `POST /club` | The club item format, **wire layer** (`items` envelope, issue #72) |
 | `club-items-observable.json` | `POST /club`, via EA's observable | The club item format, **observable layer** (issue #115) |
 | `club-search-request.json` | `POST /club` (request body) | EA's own whole-club search criteria: field names, values and page size (issue #76) |

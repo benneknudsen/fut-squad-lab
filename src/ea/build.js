@@ -186,8 +186,15 @@ import {
  *   paste-safe `fsl-service-shape/1` service and request surface report as a
  *   failed club read, beside its per-attempt list; a successful squad read
  *   carries none.
+ *
+ * Incremented by fsl-build/25, one defect from the `fsl-build/24` live run: the
+ *   challenge squad read now takes its payload through
+ *   `services.SBC.sbcDAO.loadChallenge` / `services.SBC.loadChallenge` as one
+ *   paved observable call, normalises an entity squad through `getPlayers()`,
+ *   `getItem()`, `isBrick()` and `isLocked()`, and always returns
+ *   `{ challengeId, squad.players }`.
  */
-export const BUILD_ID = 'fsl-build/24';
+export const BUILD_ID = 'fsl-build/25';
 
 /**
  * Builds the marker carried by every diagnostic: the build id plus the exact
